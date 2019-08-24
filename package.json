@@ -1,0 +1,30 @@
+{
+  "name": "pictophone",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "tsc": "tsc",
+    "dev": "ts-node-dev --respawn --transpileOnly ./src/index.ts",
+    "prod": "tsc && node ./dist/index.js",
+    "gen": "typescript-json-validator src/types/Action.ts Action"
+  },
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/express": "^4.17.1",
+    "@types/express-session": "^1.15.14",
+    "@types/node": "^12.7.2",
+    "@types/request": "^2.48.2",
+    "ts-node-dev": "^1.0.0-pre.42",
+    "tslint": "^5.19.0",
+    "typescript": "^3.5.3",
+    "typescript-json-schema": "^0.40.0"
+  },
+  "dependencies": {
+    "express": "^4.17.1",
+    "firebase-admin": "^8.4.0",
+    "typescript-json-validator": "^2.3.1"
+  }
+}
