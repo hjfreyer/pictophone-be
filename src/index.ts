@@ -5,6 +5,7 @@ import admin from 'firebase-admin';
 
 import Action from './types/Action';
 import ValidateAction from './types/Action.validator';
+import * as history from './reducers/history';
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -25,6 +26,7 @@ const historyLogVersionsRef : FirebaseFirestore.CollectionReference =
 
 // Create a new express application instance
 const app: express.Application = express();
+app.set('json spaces', 2)
 
 type CollectionType = 'actions' | 'history';
 
@@ -54,18 +56,6 @@ function logInit(): Log {
     return {versions: 0};
 }
 
-type Response = {};
-
-type History = {};
-
-function historyInit(): History {
-    return {};
-}
-
-function historyReduce(acc: History, action: Action): [History, Response] {
-    return [{}, {}];
-}
-
 
 // let docRef = db.collection('users').doc('alovelace');
 
@@ -75,23 +65,24 @@ function historyReduce(acc: History, action: Action): [History, Response] {
 //   born: 1815
 // });
 
-async function processAction(action : Action): Promise<Response> {
-    return await db.runTransaction(async (tx: FirebaseFirestore.Transaction) : Promise<Response> => {
+async function processAction(action : Action): Promise<void> {
+    return await db.runTransaction(async (tx: FirebaseFirestore.Transaction) : Promise<void> => {
         const actionLog : Log = (await tx.get(logMetaRef('actions'))).data() as Log || logInit();
         const historyLog : Log = (await tx.get(logMetaRef('history'))).data() as Log || logInit();
 
-        const historyAcc : History = historyLog.versions == 0 ? historyInit() : (
-            await tx.get(logRef('history', historyLog.versions - 1))).data()!;
-
-        const [historyNext, resp] = historyReduce(historyAcc, action);
+        const historyAcc : history.History = historyLog.versions == 0 ? history.init() : (
+            await tx.get(logRef('history', historyLog.versions - 1))).data()! as history.History;
 
         tx.set(logMetaRef('actions'), {...actionLog, versions: actionLog.versions + 1});
         tx.set(logRef('actions', actionLog.versions), { action: action });
 
-        tx.set(logMetaRef('history'), {...historyLog, versions: historyLog.versions + 1});
-        tx.set(logRef('history', historyLog.versions), historyNext);
+        if (historyLog.versions == actionLog.versions) {
+            const historyNext = history.reduce(historyAcc, action);
+            tx.set(logMetaRef('history'), {...historyLog, versions: historyLog.versions + 1});
+            tx.set(logRef('history', historyLog.versions), historyNext);
+        }
 
-        return resp;
+        return;
     });
 }
 
@@ -120,6 +111,55 @@ app.get('/history', async function (req : Request<Dictionary<string>>, res) {
     const versions = (await logMetaRef('history').collection('versions').get()).docs.map(q=> q.data());
     
     res.json({meta, versions});
+});
+
+app.post('/backfill_history', async function (req : Request<Dictionary<string>>, res) {
+    while (true) {
+        const status = await db.runTransaction(async (tx: FirebaseFirestore.Transaction) : Promise<'DONE' | 'MORE'> => {
+            const actionLog : Log = (await tx.get(logMetaRef('actions'))).data() as Log || logInit();
+            const historyLog : Log = (await tx.get(logMetaRef('history'))).data() as Log || logInit();
+
+            if (historyLog.versions >= actionLog.versions) {
+                return 'DONE';
+            }
+
+            const action : Action = ValidateAction((await tx.get(logRef('actions', historyLog.versions))).data()!.action);
+
+            const historyAcc : history.History = historyLog.versions == 0 ? history.init() : (
+                await tx.get(logRef('history', historyLog.versions - 1))).data()! as history.History;
+
+            tx.set(logMetaRef('history'), {...historyLog, versions: historyLog.versions + 1});
+
+            console.log(historyAcc, action)
+            const historyNext = history.reduce(historyAcc, action);
+            console.log(historyNext)
+
+            tx.set(logMetaRef('history'), {...historyLog, versions: historyLog.versions + 1});
+            tx.set(logRef('history', historyLog.versions), historyNext);
+
+            return 'MORE';
+        });
+
+        if (status == 'DONE') {
+            res.status(200);
+            res.send('ok')
+            return;
+        }
+    }
+});
+
+
+app.post('/clear_history', async function (req : Request<Dictionary<string>>, res) {
+    const metaDel = logMetaRef('history').delete();
+    const versionsDel = logMetaRef('history').collection('versions').listDocuments().then(val => {
+        val.map((val) => {
+            val.delete()
+        })
+    })
+    await metaDel;
+    await versionsDel;
+    res.status(200);
+    res.send('ok')
 });
 
 const port = process.env.PORT || 3000;

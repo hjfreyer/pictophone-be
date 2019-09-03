@@ -6,10 +6,11 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "tsc": "tsc",
-    "dev": "ts-node-dev --respawn --transpileOnly ./src/index.ts",
+    "dev": "gcloud config set project pictophone-app && FIRESTORE_EMULATOR_HOST=localhost:8181 ts-node-dev --respawn --transpileOnly ./src/index.ts",
     "prod": "tsc && node ./dist/index.js",
     "gen": "typescript-json-validator src/types/Action.ts Action",
-    "start": "node ./dist/index.js"
+    "start": "node ./dist/index.js",
+    "firestore": "gcloud config set project pictophone-app && gcloud beta emulators firestore start --host-port localhost:8181"
   },
   "author": "",
   "license": "ISC",
@@ -26,6 +27,7 @@
   "dependencies": {
     "express": "^4.17.1",
     "firebase-admin": "^8.4.0",
+    "immer": "^3.2.0",
     "typescript-json-validator": "^2.3.1"
   }
 }

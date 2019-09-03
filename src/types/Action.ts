@@ -1,15 +1,22 @@
-type Action = JoinGameAction | StartGameAction;
+type Action = JoinGame | StartGame | MakeMove;
 
-type JoinGameAction = {
-    kind: 'join_game',
-    playerId: string,
-    gameId: string,
+export type JoinGame = {
+    kind: 'join_game'
+    playerId: string
+    gameId: string
 };
 
-type StartGameAction = {
-    kind: 'start_game',
-    playerId: string,
-    gameId: string,
+export type StartGame = {
+    kind: 'start_game'
+    playerId: string
+    gameId: string
 }
+
+export type MakeMove = {
+  kind: 'make_move';
+  playerId: string;
+  gameId: string;
+  word: string;
+};
 
 export default Action;
