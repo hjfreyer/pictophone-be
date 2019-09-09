@@ -58,6 +58,34 @@ export const ActionSchema = {
         "playerId"
       ],
       "type": "object"
+    },
+    {
+      "defaultProperties": [
+      ],
+      "properties": {
+        "gameId": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "make_move"
+          ],
+          "type": "string"
+        },
+        "playerId": {
+          "type": "string"
+        },
+        "word": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "gameId",
+        "kind",
+        "playerId",
+        "word"
+      ],
+      "type": "object"
     }
   ]
 };
