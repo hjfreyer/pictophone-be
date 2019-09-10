@@ -15,103 +15,77 @@ admin.initializeApp({
     credential: admin.credential.applicationDefault()
 });
 
-
 const db = admin.firestore();
-
-const collectionsRef: FirebaseFirestore.CollectionReference = db.collection('collections');
-const actionLogRef: FirebaseFirestore.DocumentReference =
-    collectionsRef.doc('actions').collection('logs').doc('omni');
-const actionLogVersionsRef: FirebaseFirestore.CollectionReference =
-    actionLogRef.collection('versions');
-const historyLogRef: FirebaseFirestore.DocumentReference =
-    collectionsRef.doc('history').collection('logs').doc('omni');
-const historyLogVersionsRef: FirebaseFirestore.CollectionReference =
-    historyLogRef.collection('versions');
 
 // Create a new express application instance
 const app: express.Application = express();
 app.set('json spaces', 2)
-
-type CollectionType = 'actions' | 'history';
-
-function logMetaRef(c: CollectionType): FirebaseFirestore.DocumentReference {
-    return db.collection('collections').doc(c)
-        .collection('logs').doc('omni');
-}
-
-function logRef(c: CollectionType, version: number): FirebaseFirestore.DocumentReference {
-    return logMetaRef(c).collection('versions').doc('' + version);
-}
-
 app.use(express.json());
 
-// function messageIdToRef()
+type ViewType = 'root' | 'history';
 
-function logInit(): log.Log {
-    return { versions: 0, derived: {} };
+const logRef = db.doc('colections/root/logs/omni');
+
+function viewRef(version: number, view: ViewType): FirebaseFirestore.DocumentReference {
+    return logRef.collection('versions').doc('' + version).collection('views').doc(view);
 }
 
-// let docRef = db.collection('users').doc('alovelace');
+function logInit(): log.Log {
+    return { views: {} };
+}
 
-// let setAda = docRef.set({
-//   first: 'Ada',
-//   last: 'Lovelace',
-//   born: 1815
-// });
-
-async function getLog(tx: FirebaseFirestore.Transaction, c: CollectionType): Promise<log.Log> {
-    const logDoc = await tx.get(logMetaRef(c));
+async function getLog(tx: FirebaseFirestore.Transaction): Promise<log.Log> {
+    const logDoc = await tx.get(logRef);
     if (!logDoc.exists) {
         return logInit();
     }
     return log.validate('Log')(logDoc.data());
 }
 
-function setLog(tx: FirebaseFirestore.Transaction, c: CollectionType, log: log.Log) {
-    tx.set(logMetaRef(c), log);
+function setLog(tx: FirebaseFirestore.Transaction, log: log.Log) {
+    tx.set(logRef, log);
 }
 
-async function getEntry(tx: FirebaseFirestore.Transaction, c: CollectionType,
-    version: number): Promise<log.Entry> {
-    const doc = await tx.get(logRef(c, version));
+async function getView(tx: FirebaseFirestore.Transaction, version: number, v: ViewType): Promise<log.Entry> {
+    const doc = await tx.get(viewRef(version, v));
     if (!doc.exists) {
         throw Error('doc not found');
     }
-    console.log(c, version);
-    console.log(doc.data())
     return log.validate('Entry')(doc.data());
 }
 
-function setEntry(tx: FirebaseFirestore.Transaction, c: CollectionType, version: number, e: log.Entry) {
-    tx.set(logRef(c, version), e);
+function setView(tx: FirebaseFirestore.Transaction, version: number, v: ViewType, e: log.Entry) {
+    tx.set(viewRef(version, v), e);
 }
 
 async function getAction(tx: FirebaseFirestore.Transaction, version: number): Promise<Action> {
-    const entry = await getEntry(tx, 'actions', version);
+    const entry = await getView(tx, version, 'root');
     return ValidateAction(JSON.parse(entry.body));
 }
 
 function setAction(tx: FirebaseFirestore.Transaction, version: number, action: Action) {
-    setEntry(tx, 'actions', version, { body: JSON.stringify(action) });
+    setView(tx, version, 'root', { body: JSON.stringify(action) });
 }
 
 async function getHistory(tx: FirebaseFirestore.Transaction, version: number): Promise<history.History> {
     if (version == -1) {
         return history.init();
     }
-    const entry = await getEntry(tx, 'history', version);
+    const entry = await getView(tx, version, 'history');
     return history.validate('History')(JSON.parse(entry.body));
 }
 
 function setHistory(tx: FirebaseFirestore.Transaction, version: number, history: history.History) {
-    setEntry(tx, 'history', version, { body: JSON.stringify(history) });
+    setView(tx, version, 'history', { body: JSON.stringify(history) });
 }
 
+function getViewVersion(l: log.Log, v: ViewType): number {
+    return l.views[v] || 0;
+}
 
-// function setEntry(tx: FirebaseFirestore.Transaction, c: CollectionType, log: log.Log) {
-//     tx.set(logMetaRef(c), log);
-// }
-
+function incrementViewVersion(l: log.Log, v: ViewType) {
+    l.views[v] = 1 + (l.views[v] || 0);
+}
 
 async function applyActionToHistory(tx: FirebaseFirestore.Transaction, action: Action, actionVersion: number): Promise<history.History> {
     const acc = await getHistory(tx, actionVersion - 1);
@@ -121,35 +95,31 @@ async function applyActionToHistory(tx: FirebaseFirestore.Transaction, action: A
 async function processAction(action: Action): Promise<void> {
     return await db.runTransaction(async (tx: FirebaseFirestore.Transaction): Promise<void> => {
         // Things that may be generated.
-        let historyNext: { log: log.Log, next: history.History } | null = null;
+        let historyNext: history.History | null = null;
 
-        // Compute the action (no-op, we have it).
-        const actionLog = await getLog(tx, 'actions');
+        const l = await getLog(tx);
+        const nextVersion = getViewVersion(l, 'root');
 
         // Compute the history, if ready.
-        if (actionLog.versions == (actionLog.derived['history'] || 0)) {
-            historyNext = {
-                log: await getLog(tx, 'history'),
-                next: await applyActionToHistory(tx, action, actionLog.versions),
-            }
+        if (nextVersion === getViewVersion(l, 'history')) {
+            historyNext = await applyActionToHistory(tx, action, nextVersion);
         }
 
         // Commit the action.
-        setLog(tx, 'actions', produce(actionLog, (draft) => {
-            draft.versions++;
-            if (historyNext !== null) {
-                draft.derived['history'] = draft.versions;
-            }
-        }));
-        setAction(tx, actionLog.versions, action);
+        setAction(tx, getViewVersion(l, 'root'), action);
 
         // Commit the history.
         if (historyNext !== null) {
-            setLog(tx, 'history', produce(historyNext.log, (draft) => {
-                draft.versions++;
-            }));
-            setHistory(tx, historyNext.log.versions, historyNext.next);
+            setHistory(tx, nextVersion, historyNext);
         }
+
+        // Commit the log.
+        setLog(tx, produce(l, (draft) => {
+            incrementViewVersion(draft, 'root');
+            if (historyNext !== null) {
+                incrementViewVersion(draft, 'history');
+            }
+        }));
     });
 }
 
@@ -166,66 +136,54 @@ app.post('/', function(req: Request<Dictionary<string>>, res) {
     processAction(action).then(() => res.json({}));
 });
 
-app.get('/actions', async function(req: Request<Dictionary<string>>, res) {
-    const meta = (await actionLogRef.get()).data();
-    const versions = (await actionLogVersionsRef.get()).docs.map(q => JSON.parse(q.data().body));
-
-    res.json({ meta, versions });
-});
-
-app.get('/history', async function(req: Request<Dictionary<string>>, res) {
-    const meta = (await logMetaRef('history').get()).data();
-    const versions = (await logMetaRef('history').collection('versions').get()).docs.map(
-        q => JSON.parse(q.data().body));
-
-    res.json({ meta, versions });
-});
-
-app.get('/project', async function(req: Request<Dictionary<string>>, res) {
-    const lastVersion = await db.runTransaction(async (tx: FirebaseFirestore.Transaction) => {
-        const log = await getLog(tx, 'history');
-        return await getHistory(tx, log.versions - 1);
-    });
-
-    res.json(projectors.projectHistory(lastVersion.current));
-});
-
-async function project(tx: FirebaseFirestore.Transaction, history: history.History):void {
-    
+type DebugInfo = {
+    l: log.Log
+    v: VersionDebug[]
 }
 
-async function backfillAction(tx: FirebaseFirestore.Transaction): Promise<'DONE' | 'MORE'> {
-    // Things that may be generated.
-    let historyNext: { log: log.Log, next: history.History } | null = null;
+type VersionDebug = {
+    root: Action
+    history: history.History | null
+}
 
-    // Get action to process.
-    const actionLog = await getLog(tx, 'actions');
+app.get('/debug', async function(req: Request<Dictionary<string>>, res) {
+    const dbi = await db.runTransaction(async (tx: FirebaseFirestore.Transaction): Promise<DebugInfo> => {
+        const l = await getLog(tx);
+        const vp = Array.from({ length: l.views['root'] }, async (_: unknown, idx: number): Promise<VersionDebug> => {
+            const action = getAction(tx, idx);
+            const history = idx < l.views['history'] ? getHistory(tx, idx) : Promise.resolve(null);
+
+            return {
+                root: await action,
+                history: await history,
+            }
+        });
+        return { l, v: await Promise.all(vp) };
+    });
+
+    res.json(dbi);
+});
+
+async function backfillAction(tx: FirebaseFirestore.Transaction): Promise<'DONE' | 'MORE'> {
+    const l = await getLog(tx);
+    const nextVersion = getViewVersion(l, 'root');
+    const historyVersion = getViewVersion(l, 'history');
 
     // Compute the history, if ready.
-    if (actionLog.versions == (actionLog.derived['history'] || 0)) {
+    if (nextVersion === historyVersion) {
         return 'DONE';
     }
 
-    const action = await getAction(tx, actionLog.derived['history'] || 0);
-
-    historyNext = {
-        log: await getLog(tx, 'history'),
-        next: await applyActionToHistory(tx, action, actionLog.derived['history'] || 0),
-    }
-
-    // Commit the action.
-    setLog(tx, 'actions', produce(actionLog, (draft) => {
-        if (historyNext !== null) {
-            const nextNumber = 1 + (draft.derived['history'] || 0)
-            draft.derived['history'] = nextNumber;
-        }
-    }));
+    const action = await getAction(tx, historyVersion);
+    const historyNext = await applyActionToHistory(tx, action, historyVersion);
 
     // Commit the history.
-    setLog(tx, 'history', produce(historyNext.log, (draft) => {
-        draft.versions = 1 + (actionLog.derived['history'] || 0);
+    setHistory(tx, nextVersion, historyNext);
+
+    // Commit the log.
+    setLog(tx, produce(l, (draft) => {
+            incrementViewVersion(draft, 'history');
     }));
-    setHistory(tx, actionLog.derived['history'] || 0, historyNext.next);
     return 'MORE';
 }
 
@@ -240,14 +198,12 @@ app.post('/backfill_history', async function(req: Request<Dictionary<string>>, r
     }
 });
 
-
 app.post('/clear_history', async function(req: Request<Dictionary<string>>, res) {
     await db.runTransaction(async (tx: FirebaseFirestore.Transaction): Promise<void> => {
-        const actionLog = await getLog(tx, 'actions');
-        tx.set(logMetaRef('actions'), produce(actionLog, (draft) => {
-            delete draft.derived['history'];
+        const l = await getLog(tx);
+        setLog(tx, produce(l, (draft) => {
+            delete draft.views['history'];
         }));
-        tx.delete(logMetaRef('history'));
     });
     res.status(200);
     res.send('ok')

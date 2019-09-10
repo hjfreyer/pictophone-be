@@ -1,7 +1,6 @@
 
 export type Log = {
-    versions: number
-    derived: {[collectionId: string]: number}
+    views: {[collectionId: string]: number}
 }
 
 export type Entry = {

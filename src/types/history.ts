@@ -1,11 +1,5 @@
 
-
 export type History = {
-    current: State
-    previous: State
-};
-
-export type State = {
     games: {[id: string]: Game}
 };
 

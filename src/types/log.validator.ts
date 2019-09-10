@@ -34,21 +34,17 @@ export const Schema = {
       "defaultProperties": [
       ],
       "properties": {
-        "derived": {
+        "views": {
           "additionalProperties": {
             "type": "number"
           },
           "defaultProperties": [
           ],
           "type": "object"
-        },
-        "versions": {
-          "type": "number"
         }
       },
       "required": [
-        "derived",
-        "versions"
+        "views"
       ],
       "type": "object"
     }

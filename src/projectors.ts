@@ -14,7 +14,7 @@ type PlayerGame = {
     state: history.Game['state']
 }
 
-export function projectHistory(acc : history.State): HistoryProjection {
+export function projectHistory(acc : history.History): HistoryProjection {
     const res : HistoryProjection = {
         playerGames: {},
     };
