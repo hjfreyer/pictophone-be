@@ -1,9 +1,9 @@
 
 import fetch from 'node-fetch';
 import {Response} from 'node-fetch';
-import Action from './types/Action';
+import * as actions from './actions';
 
-async function postit(body: Action): Promise<void> {
+async function postit(body: actions.Action): Promise<void> {
     const res = await fetch('http://localhost:3000/', {
         method: 'post',
         body:    JSON.stringify(body),

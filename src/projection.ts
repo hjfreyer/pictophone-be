@@ -1,18 +1,9 @@
 
-import * as history from './reducers/history';
+import * as history from './history';
 
+import {HistoryProjection, PlayerGame} from './types';
+export {HistoryProjection, PlayerGame};
 
-export type HistoryProjection = {
-//    games: {[id: string]: Game}
-    playerGames: {[id: string]: PlayerGame}
-}
-
-//type Game = {};
-
-type PlayerGame = {
-    players: string[]
-    state: history.Game['state']
-}
 
 export function projectHistory(acc : history.History): HistoryProjection {
     const res : HistoryProjection = {

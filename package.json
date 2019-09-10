@@ -8,7 +8,7 @@
     "tsc": "tsc",
     "dev": "gcloud config set project pictophone-app && FIRESTORE_EMULATOR_HOST=localhost:8181 ts-node-dev --respawn --transpileOnly ./src/index.ts",
     "prod": "tsc && node ./dist/index.js",
-    "gen": "typescript-json-validator src/types/Action.ts Action && typescript-json-validator --collection src/types/history.ts && typescript-json-validator --collection src/types/log.ts",
+    "gen": "typescript-json-validator --collection src/types.ts",
     "start": "node ./dist/index.js",
     "firestore": "gcloud config set project pictophone-app && gcloud beta emulators firestore start --host-port localhost:8181",
     "sample-data": "ts-node src/sample_data.ts"

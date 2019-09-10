@@ -1,10 +1,9 @@
 
 import produce from "immer"
 
-import Action from '../types/Action';
-import * as actions from '../types/Action';
+import * as actions from './actions';
 
-import {History, Game, validate} from '../types/history.validator';
+import {History, Game, validate} from './types.validator';
 
 export {History, Game, validate};
 
@@ -14,7 +13,7 @@ export function init(): History {
     };
 }
 
-export function reduce(acc: History, action: Action): History {
+export function reduce(acc: History, action: actions.Action): History {
     switch (action.kind) {
     case "join_game": return produce(joinGame)(acc, action);
     case "start_game": return produce(startGame)(acc, action);

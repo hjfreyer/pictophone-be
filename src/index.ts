@@ -4,12 +4,12 @@ import { Request, Dictionary } from 'express-serve-static-core';
 import admin from 'firebase-admin';
 import produce from 'immer';
 
-import Action from './types/Action';
-import ValidateAction from './types/Action.validator';
-import * as history from './reducers/history';
-import * as projectors from './projectors';
+import * as actions from './actions';
+import * as history from './history';
+import * as log from './log';
+import * as projection from './projection';
 
-import * as log from './types/log.validator';
+import { validate } from './types.validator';
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -22,7 +22,7 @@ const app: express.Application = express();
 app.set('json spaces', 2)
 app.use(express.json());
 
-type ViewType = 'root' | 'history';
+type ViewType = 'root' | 'history' | 'projection';
 
 const logRef = db.doc('colections/root/logs/omni');
 
@@ -39,7 +39,7 @@ async function getLog(tx: FirebaseFirestore.Transaction): Promise<log.Log> {
     if (!logDoc.exists) {
         return logInit();
     }
-    return log.validate('Log')(logDoc.data());
+    return validate('Log')(logDoc.data());
 }
 
 function setLog(tx: FirebaseFirestore.Transaction, log: log.Log) {
@@ -51,19 +51,19 @@ async function getView(tx: FirebaseFirestore.Transaction, version: number, v: Vi
     if (!doc.exists) {
         throw Error('doc not found');
     }
-    return log.validate('Entry')(doc.data());
+    return validate('Entry')(doc.data());
 }
 
 function setView(tx: FirebaseFirestore.Transaction, version: number, v: ViewType, e: log.Entry) {
     tx.set(viewRef(version, v), e);
 }
 
-async function getAction(tx: FirebaseFirestore.Transaction, version: number): Promise<Action> {
+async function getAction(tx: FirebaseFirestore.Transaction, version: number): Promise<actions.Action> {
     const entry = await getView(tx, version, 'root');
-    return ValidateAction(JSON.parse(entry.body));
+    return validate('Action')(JSON.parse(entry.body));
 }
 
-function setAction(tx: FirebaseFirestore.Transaction, version: number, action: Action) {
+function setAction(tx: FirebaseFirestore.Transaction, version: number, action: actions.Action) {
     setView(tx, version, 'root', { body: JSON.stringify(action) });
 }
 
@@ -79,6 +79,15 @@ function setHistory(tx: FirebaseFirestore.Transaction, version: number, history:
     setView(tx, version, 'history', { body: JSON.stringify(history) });
 }
 
+async function getProjection(tx: FirebaseFirestore.Transaction, version: number): Promise<projection.HistoryProjection> {
+    const entry = await getView(tx, version, 'projection');
+    return validate('HistoryProjection')(JSON.parse(entry.body));
+}
+
+function setProjection(tx: FirebaseFirestore.Transaction, version: number, proj: projection.HistoryProjection) {
+    setView(tx, version, 'projection', { body: JSON.stringify(proj) });
+}
+
 function getViewVersion(l: log.Log, v: ViewType): number {
     return l.views[v] || 0;
 }
@@ -87,15 +96,17 @@ function incrementViewVersion(l: log.Log, v: ViewType) {
     l.views[v] = 1 + (l.views[v] || 0);
 }
 
-async function applyActionToHistory(tx: FirebaseFirestore.Transaction, action: Action, actionVersion: number): Promise<history.History> {
+async function applyActionToHistory(tx: FirebaseFirestore.Transaction,
+    action: actions.Action, actionVersion: number): Promise<history.History> {
     const acc = await getHistory(tx, actionVersion - 1);
     return history.reduce(acc, action);
 }
 
-async function processAction(action: Action): Promise<void> {
+async function processAction(action: actions.Action): Promise<void> {
     return await db.runTransaction(async (tx: FirebaseFirestore.Transaction): Promise<void> => {
         // Things that may be generated.
         let historyNext: history.History | null = null;
+        let projectionNext: projection.HistoryProjection | null = null;
 
         const l = await getLog(tx);
         const nextVersion = getViewVersion(l, 'root');
@@ -103,6 +114,11 @@ async function processAction(action: Action): Promise<void> {
         // Compute the history, if ready.
         if (nextVersion === getViewVersion(l, 'history')) {
             historyNext = await applyActionToHistory(tx, action, nextVersion);
+        }
+
+        // Compute the projection, if ready.
+        if (historyNext !== null && nextVersion === getViewVersion(l, 'projection')) {
+            projectionNext = projection.projectHistory(historyNext);
         }
 
         // Commit the action.
@@ -113,20 +129,27 @@ async function processAction(action: Action): Promise<void> {
             setHistory(tx, nextVersion, historyNext);
         }
 
+        if (projectionNext !== null) {
+            setProjection(tx, nextVersion, projectionNext);
+        }
+
         // Commit the log.
         setLog(tx, produce(l, (draft) => {
             incrementViewVersion(draft, 'root');
             if (historyNext !== null) {
                 incrementViewVersion(draft, 'history');
             }
+            if (projectionNext !== null) {
+                incrementViewVersion(draft, 'projection');
+            }
         }));
     });
 }
 
 app.post('/', function(req: Request<Dictionary<string>>, res) {
-    let action: Action;
+    let action: actions.Action;
     try {
-        action = ValidateAction(req.body);
+        action = validate('Action')(req.body);
     } catch (e) {
         res.status(400);
         res.send(e.message);
@@ -142,8 +165,9 @@ type DebugInfo = {
 }
 
 type VersionDebug = {
-    root: Action
+    root: actions.Action
     history: history.History | null
+    proj: projection.HistoryProjection | null
 }
 
 app.get('/debug', async function(req: Request<Dictionary<string>>, res) {
@@ -152,10 +176,12 @@ app.get('/debug', async function(req: Request<Dictionary<string>>, res) {
         const vp = Array.from({ length: l.views['root'] }, async (_: unknown, idx: number): Promise<VersionDebug> => {
             const action = getAction(tx, idx);
             const history = idx < l.views['history'] ? getHistory(tx, idx) : Promise.resolve(null);
+            const proj = idx < l.views['projection'] ? getProjection(tx, idx) : Promise.resolve(null);
 
             return {
                 root: await action,
                 history: await history,
+                proj: await proj,
             }
         });
         return { l, v: await Promise.all(vp) };
@@ -168,26 +194,33 @@ async function backfillAction(tx: FirebaseFirestore.Transaction): Promise<'DONE'
     const l = await getLog(tx);
     const nextVersion = getViewVersion(l, 'root');
     const historyVersion = getViewVersion(l, 'history');
+    const projectionVersion = getViewVersion(l, 'projection');
 
-    // Compute the history, if ready.
-    if (nextVersion === historyVersion) {
-        return 'DONE';
+    if (projectionVersion < historyVersion) {
+        setProjection(tx, projectionVersion, projection.projectHistory(
+            await getHistory(tx, projectionVersion)));
+        setLog(tx, produce(l, (draft) => {
+            incrementViewVersion(draft, 'projection');
+        }));
+        return 'MORE';
     }
 
-    const action = await getAction(tx, historyVersion);
-    const historyNext = await applyActionToHistory(tx, action, historyVersion);
+    if (historyVersion < nextVersion) {
+        const action = await getAction(tx, historyVersion);
+        const historyNext = await applyActionToHistory(tx, action, historyVersion);
+        setHistory(tx, nextVersion, historyNext);
 
-    // Commit the history.
-    setHistory(tx, nextVersion, historyNext);
-
-    // Commit the log.
-    setLog(tx, produce(l, (draft) => {
+        // Commit the log.
+        setLog(tx, produce(l, (draft) => {
             incrementViewVersion(draft, 'history');
-    }));
-    return 'MORE';
+        }));
+        return 'MORE';
+    }
+
+    return 'DONE';
 }
 
-app.post('/backfill_history', async function(req: Request<Dictionary<string>>, res) {
+app.post('/backfill', async function(req: Request<Dictionary<string>>, res) {
     while (true) {
         const status = await db.runTransaction(backfillAction);
         if (status == 'DONE') {
