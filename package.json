@@ -11,7 +11,8 @@
     "gen": "typescript-json-validator --collection src/types.ts",
     "start": "node ./dist/index.js",
     "firestore": "gcloud config set project pictophone-app && gcloud beta emulators firestore start --host-port localhost:8181",
-    "sample-data": "ts-node src/sample_data.ts"
+    "sample-data": "ts-node src/sample_data.ts",
+    "inspect": "FIRESTORE_EMULATOR_HOST=localhost:8181 ts-node src/inspect.ts"
   },
   "author": "",
   "license": "ISC",
@@ -28,6 +29,8 @@
     "typescript-json-schema": "^0.40.0"
   },
   "dependencies": {
+    "@types/deep-equal": "^1.0.1",
+    "deep-equal": "^1.1.0",
     "express": "^4.17.1",
     "firebase-admin": "^8.4.0",
     "immer": "^3.2.0",

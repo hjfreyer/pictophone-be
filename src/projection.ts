@@ -4,6 +4,11 @@ import * as history from './history';
 import {HistoryProjection, PlayerGame} from './types';
 export {HistoryProjection, PlayerGame};
 
+export function init(): HistoryProjection {
+    return {
+        playerGames: {},
+    };
+}
 
 export function projectHistory(acc : history.History): HistoryProjection {
     const res : HistoryProjection = {

@@ -2,6 +2,7 @@ import express from 'express';
 import { Request, Dictionary } from 'express-serve-static-core';
 
 import admin from 'firebase-admin';
+import deepEqual from 'deep-equal';
 import produce from 'immer';
 
 import * as actions from './actions';
@@ -22,7 +23,7 @@ const app: express.Application = express();
 app.set('json spaces', 2)
 app.use(express.json());
 
-type ViewType = 'root' | 'history' | 'projection';
+type ViewType = 'root' | 'history' | 'projection' | 'materialize';
 
 const logRef = db.doc('colections/root/logs/omni');
 
@@ -96,10 +97,43 @@ function incrementViewVersion(l: log.Log, v: ViewType) {
     l.views[v] = 1 + (l.views[v] || 0);
 }
 
+function setViewVersion(l: log.Log, v: ViewType, version: number) {
+    l.views[v] = version;
+}
+
 async function applyActionToHistory(tx: FirebaseFirestore.Transaction,
     action: actions.Action, actionVersion: number): Promise<history.History> {
     const acc = await getHistory(tx, actionVersion - 1);
     return history.reduce(acc, action);
+}
+
+type Diff = {
+    eraseKeys: string[]
+    setKeys: { [key: string]: any }
+}
+
+// TODO: this is wrong.
+function diffProjections(before: projection.HistoryProjection, after: projection.HistoryProjection): Diff {
+    const res: Diff = {
+        eraseKeys: [],
+        setKeys: {},
+    }
+    for (const collectionName in after) {
+        const collection = (after as any)[collectionName];
+        for (const key in collection) {
+            if (!deepEqual((before as any)[collectionName][key], collection[key])) {
+                res.setKeys[key] = collection[key];
+            }
+        }
+    }
+    return res;
+}
+
+function applyDiff(tx: FirebaseFirestore.Transaction, prefix: string, diff: Diff) {
+    for (const key in diff.setKeys) {
+        console.log(prefix+key)
+        tx.set(db.doc(prefix + key), diff.setKeys[key]);
+    }
 }
 
 async function processAction(action: actions.Action): Promise<void> {
@@ -107,6 +141,7 @@ async function processAction(action: actions.Action): Promise<void> {
         // Things that may be generated.
         let historyNext: history.History | null = null;
         let projectionNext: projection.HistoryProjection | null = null;
+        let materialized = false;
 
         const l = await getLog(tx);
         const nextVersion = getViewVersion(l, 'root');
@@ -119,6 +154,15 @@ async function processAction(action: actions.Action): Promise<void> {
         // Compute the projection, if ready.
         if (historyNext !== null && nextVersion === getViewVersion(l, 'projection')) {
             projectionNext = projection.projectHistory(historyNext);
+        }
+
+        // Materialize the projection, if ready. Must come last.
+        const lastMaterialized = getViewVersion(l, 'materialize');
+        if (projectionNext !== null && nextVersion === lastMaterialized) {
+            const prevProj = (lastMaterialized - 1) < 0 ? projection.init()
+                : await getProjection(tx, lastMaterialized - 1);
+            applyDiff(tx, 'projections/v0/', diffProjections(prevProj, projectionNext));
+            materialized = true;
         }
 
         // Commit the action.
@@ -135,12 +179,16 @@ async function processAction(action: actions.Action): Promise<void> {
 
         // Commit the log.
         setLog(tx, produce(l, (draft) => {
-            incrementViewVersion(draft, 'root');
+            const newLen = 1 + nextVersion;
+            setViewVersion(draft, 'root', newLen);
             if (historyNext !== null) {
-                incrementViewVersion(draft, 'history');
+                setViewVersion(draft, 'history', newLen);
             }
             if (projectionNext !== null) {
-                incrementViewVersion(draft, 'projection');
+                setViewVersion(draft, 'projection', newLen);
+            }
+            if (materialized) {
+                setViewVersion(draft, 'materialize', newLen);
             }
         }));
     });
