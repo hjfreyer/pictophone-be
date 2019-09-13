@@ -20,7 +20,12 @@ sub_build() {
 }
 
 sub_deploy() {
-    gcloud beta run deploy --image gcr.io/pictophone-app/pictophone-be --platform managed
+    gcloud beta run deploy \
+        pictophone-be \
+        --region us-east1 \
+        --image gcr.io/pictophone-app/pictophone-be \
+        --platform managed \
+        --allow-unauthenticated
 }
 
 subcommand=$1
