@@ -25,7 +25,7 @@ app.use(express.json());
 
 type ViewType = 'root' | 'history' | 'projection' | 'materialize';
 
-const logRef = db.doc('colections/root/logs/omni');
+const logRef = db.doc('collections/root/logs/omni');
 
 function viewRef(version: number, view: ViewType): FirebaseFirestore.DocumentReference {
     return logRef.collection('versions').doc('' + version).collection('views').doc(view);
