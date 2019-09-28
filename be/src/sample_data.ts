@@ -4,10 +4,11 @@ import {Response} from 'node-fetch';
 import * as actions from './actions';
 
 async function postit(body: actions.Action): Promise<void> {
-    const res = await fetch('https://pictophone-be-3u2pedngkq-ue.a.run.app', {
+    const res = await fetch('http://localhost:3000/action', {
         method: 'post',
         body:    JSON.stringify(body),
         headers: { 'Content-Type': 'application/json' },
+
     });
 
     console.log(await res.text());

@@ -8,23 +8,23 @@ export type Config = {
 
 export type BraidConfig = {
     keyFunction: (action: string) => string[]
-    views: { [viewId: string]: ViewFn }
-    viewOrder: string[]
+    mounts: { [mountId: string]: MountFn }
+    mountOrder: string[]
 }
 
 export type StrandMap = { [strandId: string]: string }
 
-export type ViewFn = MapFn | ReduceFn
+export type MountFn = MapFn | ReduceFn
 
 export type MapFn = {
     op: 'map'
-    inputView: string
+    input: string
     fn: (state: string) => string
 }
 
 export type ReduceFn = {
     op: 'reduce'
-    inputView: string
+    input: string
     fn: (acc: StrandMap, action: string) => string
 }
 
@@ -34,8 +34,8 @@ export function applyAction(c: Config, db: FirebaseFirestore.Firestore, action: 
     });
 }
 
-type EntryOutput = {
-    [viewId: string]: string
+type RowOutput = {
+    [mountId: string]: string
 }
 
 class Helper {
@@ -46,7 +46,8 @@ class Helper {
         private tx: FirebaseFirestore.Transaction) { }
 
     async applyActionTransaction(action: string): Promise<void> {
-        const braid = this.c.braids['root']
+        const braidId = 'root'
+        const braid = this.c.braids[braidId]
         // const braidDoc = this.db.doc('braids/root')
 
         const strandIds = braid.keyFunction(action)
@@ -54,130 +55,155 @@ class Helper {
         //        const addrs: log.Addr[] = []
         for (const strandId of strandIds) {
             // TODO: parallelize
-            strandMetas[strandId] = await this.getStrand({ braidId: 'root', strandId })
+            strandMetas[strandId] = await this.getStrand({ braidId, strandId })
             // addrs.push({
-            //     braidId: 'root',
+            //     braidId,
             //     strandId: strandKey,
-            //     entryIdx: strandMetas[strandKey].sourceCount
+            //     rowIdx: strandMetas[strandKey].sourceCount
             // })
         }
+        console.log(strandMetas)
 
-        const output: EntryOutput = {
+        const output: RowOutput = {
             'source': action
         }
-        for (const viewId of braid.viewOrder) {
-            const view = braid.views[viewId]
+        for (const mountId of braid.mountOrder) {
+            const mount = braid.mounts[mountId]
 
-            switch (view.op) {
+            switch (mount.op) {
                 case 'map':
-                    this.applyMap(viewId, view, output);
+                    this.applyMap(mountId, mount, output);
                     break;
 
                 case 'reduce':
-                    await this.applyReduce(strandMetas, viewId, view, output)
+                    await this.applyReduce(braidId, strandMetas, mountId, mount, output)
                     break
             }
         }
+
+        const rowAddrs: { [strandId: string]: log.RowAddr } = {}
+        for (const strandId in strandMetas) {
+            rowAddrs[strandId] = {
+                braidId, 
+                strandId,
+                rowIdx: strandMetas[strandId].sourceCount
+            }
+        }
+
         for (const strandId in strandMetas) {
             const strand = strandMetas[strandId]
             strand.sourceCount++
-            for (const viewId in output) {
-                if (viewId !== 'source') {
-                    strand.viewCounts[viewId]++
+            this.setStrand({ braidId, strandId }, strand)
+
+            const rowAddr: log.RowAddr = { braidId, strandId, rowIdx: strand.sourceCount - 1 }
+            this.setRow(rowAddr, {
+                aliases: Object.values(rowAddrs),
+                source: output['source']
+            })
+            for (const mountId in output) {
+                if (mountId !== 'source') {
+                    strand.mountCounts[mountId] = strand.sourceCount - 1
+                    this.setMount({ ...rowAddr, mountId }, {
+                        content: output[mountId]
+                    })
                 }
             }
-            this.setStrand({braidId: 'root'})
         }
-
     }
 
     async getStrand(addr: log.StrandAddr): Promise<log.Strand> {
-        const doc = await this.tx.get(this.db
-            .collection('braids').doc(addr.braidId)
-            .collection('strands').doc(addr.strandId))
+        const doc = await this.tx.get(this.strandRef(addr))
         return doc.exists ? validate('Strand')(doc.data()) : log.strandInit()
     }
 
     setStrand(addr: log.StrandAddr, strand: log.Strand): void {
-        this.tx.set(this.db
-            .collection('braids').doc(addr.braidId)
-            .collection('strands').doc(addr.strandId), strand)
+        this.tx.set(this.strandRef(addr), strand)
     }
 
-    async getEntry(addr: log.EntryAddr): Promise<log.Entry> {
-        const entryData: FirebaseFirestore.DocumentData =
-            await this.tx.get(this.db
-                .collection('braids').doc(addr.braidId)
-                .collection('strands').doc(addr.strandId)
-                .collection('entries').doc('' + addr.entryIdx))
-        if (!entryData.exists) {
+    async getRow(addr: log.RowAddr): Promise<log.Row> {
+        const rowData: FirebaseFirestore.DocumentData =
+            await this.tx.get(this.rowRef(addr))
+        if (!rowData.exists) {
             throw new Error('not found')
         }
-        return validate('Entry')(entryData.data());
+        return validate('Row')(rowData.data());
     }
 
-    async getSourceEntry(addr: log.EntryAddr): Promise<[log.EntryAddr, log.SourceEntry]> {
-        let a = addr;
-        while (true) {
-            const e = await this.getEntry(a);
-            if (e.kind == "source") {
-                return [a, e];
-            }
-            a = e.source
-        }
+    // async getSourceRow(addr: log.RowAddr): Promise<[log.RowAddr, log.SourceRow]> {
+    //     let a = addr;
+    //     while (true) {
+    //         const e = await this.getRow(a);
+    //         if (e.kind == "source") {
+    //             return [a, e];
+    //         }
+    //         a = e.source
+    //     }
+    // }
+
+    setRow(addr: log.RowAddr, row: log.Row): void {
+        this.tx.set(this.rowRef(addr), row)
     }
 
-    setEntry(addr: log.EntryAddr, entry: log.Entry): void {
-        this.tx.set(this.db
-            .collection('braids').doc(addr.braidId)
-            .collection('strands').doc(addr.strandId)
-            .collection('entries').doc('' + addr.entryIdx), entry)
-    }
-
-    async getView(addr: log.ViewAddr): Promise<log.View> {
-        const [sa,] = await this.getSourceEntry(addr)
-        const viewData: FirebaseFirestore.DocumentData =
-            await this.tx.get(this.db
-                .collection('braids').doc(sa.braidId)
-                .collection('strands').doc(sa.strandId)
-                .collection('entries').doc('' + sa.entryIdx)
-                .collection('views').doc(addr.viewId))
-        if (!viewData.exists) {
+    async getMount(addr: log.MountAddr): Promise<log.Mount> {
+        const mountData: FirebaseFirestore.DocumentData =
+            await this.tx.get(this.mountRef(addr))
+        if (!mountData.exists) {
             throw new Error('not found')
         }
-        return validate('View')(viewData.data());
+        return validate('Mount')(mountData.data());
     }
 
-    applyMap(viewId: string, map: MapFn, output: EntryOutput): void {
-        if (map.inputView in output) {
-            output[viewId] = map.fn(output[map.inputView])
+    async setMount(addr: log.MountAddr, mount: log.Mount) {
+        this.tx.set(this.mountRef(addr), mount)
+    }
+
+    braidRef(addr: log.BraidAddr): FirebaseFirestore.DocumentReference {
+        return this.db.collection('braids').doc(addr.braidId)
+    }
+
+    strandRef(addr: log.StrandAddr): FirebaseFirestore.DocumentReference {
+        return this.braidRef(addr).collection('strands').doc(addr.strandId)
+    }
+
+    rowRef(addr: log.RowAddr): FirebaseFirestore.DocumentReference {
+        return this.strandRef(addr).collection('rows').doc('' + addr.rowIdx)
+    }
+
+    mountRef(addr: log.MountAddr): FirebaseFirestore.DocumentReference {
+        return this.rowRef(addr).collection('mounts').doc(addr.mountId)
+    }
+
+    applyMap(mountId: string, map: MapFn, output: RowOutput): void {
+        if (map.input in output) {
+            output[mountId] = map.fn(output[map.input])
         }
     }
 
-    async applyReduce(strandMetas: { [id: string]: log.Strand },
-        viewId: string, reduce: ReduceFn, output: EntryOutput): Promise<void> {
-        if (!(reduce.inputView in output)) {
+    async applyReduce(braidId: string, strandMetas: { [id: string]: log.Strand },
+        mountId: string, reduce: ReduceFn, output: RowOutput): Promise<void> {
+        if (!(reduce.input in output)) {
             return
         }
-        const action = output[reduce.inputView]
+        const action = output[reduce.input]
 
-        const accViews: StrandMap = {}
+        const accMounts: StrandMap = {}
         for (const strandId in strandMetas) {
-            if (strandMetas[strandId].sourceCount !== strandMetas[strandId].viewCounts[strandId]) {
-                // If the view isn't up to date on one of our strands, bail.
+            if (strandMetas[strandId].sourceCount !== strandMetas[strandId].mountCounts[strandId]) {
+                // If the mount isn't up to date on one of our strands, bail.
                 return
             }
             if (strandMetas[strandId].sourceCount === 0) {
-                // If any strands are brand new, there's no previous entry to get.
+                // If any strands are brand new, there's no previous row to get.
                 continue
             }
-            accViews[strandId] = (await this.getView({
-                braidId: 'root',
+            accMounts[strandId] = (await this.getMount({
+                braidId,
                 strandId,
-                entryIdx: strandMetas[strandId].sourceCount - 1,
-            }, viewId)).body
+                rowIdx: strandMetas[strandId].sourceCount - 1,
+                mountId
+            })).content
         }
 
-        output[viewId] = reduce.fn(accViews, action)
+        output[mountId] = reduce.fn(accMounts, action)
     }
 }

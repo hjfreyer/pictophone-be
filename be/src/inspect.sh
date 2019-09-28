@@ -1,0 +1,1 @@
+FIRESTORE_EMULATOR_HOST=localhost:8181 npx ts-node -r ./src/setupdb

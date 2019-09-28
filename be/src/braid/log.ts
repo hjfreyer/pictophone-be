@@ -1,25 +1,26 @@
 
 export type Strand = {
     sourceCount: number
-    viewCounts: { [viewId: string]: number }
+    mountCounts: { [mountId: string]: number }
 }
 
 export function strandInit(): Strand {
-    return { sourceCount: 0, viewCounts: {} };
+    return { sourceCount: 0, mountCounts: {} };
 }
 
-export type Entry = SourceEntry | RefEntry
+// export type Entry = SourceEntry | RefEntry
 
-export type SourceEntry = {
-    kind: 'source'
-    aliases: EntryAddr[]
-    timestamp: Timestamp
+export type Row = {
+    // kind: 'source'
+    aliases: RowAddr[]
+    source: string
+//    timestamp: Timestamp
 }
 
-export type RefEntry = {
-    kind: 'ref'
-    source: EntryAddr
-}
+// export type RefEntry = {
+//     kind: 'ref'
+//     source: EntryAddr
+// }
 
 export type BraidAddr = {
     braidId: string
@@ -29,16 +30,16 @@ export type StrandAddr = BraidAddr & {
     strandId: string
 }
 
-export type EntryAddr = StrandAddr & {
-    entryIdx: number
+export type RowAddr = StrandAddr & {
+    rowIdx: number
 }
 
-export type ViewAddr = EntryAddr & {
-    viewId: string
+export type MountAddr = RowAddr & {
+    mountId: string
 }
 
-export type View = {
-    body: string
+export type Mount = {
+    content: string
 }
 
 export type Timestamp = {
