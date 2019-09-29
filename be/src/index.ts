@@ -6,7 +6,7 @@ import admin from 'firebase-admin';
 // import produce from 'immer';
 
 // import * as actions from './actions';
-// import * as history from './history';
+import * as history from './history';
 // import * as log from './log';
 // import * as projection from './projection';
 
@@ -45,9 +45,12 @@ const CONFIG: braid.Config = {
     }
 }
 
-function historyMountFn(strands: braid.StrandMap, action: string): string {
-    console.log('IN REDUCE', strands, action)
-    return ''
+function historyMountFn(strandStrs: braid.StrandMap, actionStr: string): string {
+    const action = validateProto('Action')(JSON.parse(actionStr))
+    const acc = 'omni' in strandStrs
+        ? types.validate('History')(JSON.parse(strandStrs['omni']))
+        : history.init()
+    return JSON.stringify(history.reduce(acc, action))
 }
 
 // type ViewType = 'root' | 'history' | 'projection' | 'materialize';
