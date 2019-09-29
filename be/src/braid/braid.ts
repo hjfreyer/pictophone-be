@@ -48,22 +48,23 @@ class Helper {
     async applyActionTransaction(action: string): Promise<void> {
         const braidId = 'root'
         const braid = this.c.braids[braidId]
-        // const braidDoc = this.db.doc('braids/root')
 
+        // Determine the strands the action affects.
         const strandIds = braid.keyFunction(action)
-        const strandMetas: { [id: string]: log.Strand } = {}
-        //        const addrs: log.Addr[] = []
-        for (const strandId of strandIds) {
-            // TODO: parallelize
-            strandMetas[strandId] = await this.getStrand({ braidId, strandId })
-            // addrs.push({
-            //     braidId,
-            //     strandId: strandKey,
-            //     rowIdx: strandMetas[strandKey].sourceCount
-            // })
-        }
-        console.log(strandMetas)
 
+        // Look up the current row count for each strand.
+        const strandMetas: { [strandId: string]: log.Strand } = {}
+        const rowAddrs: { [strandId: string]: log.RowAddr } = {}
+        for (const strandId of strandIds) {
+            strandMetas[strandId] = await this.getStrand({ braidId, strandId })
+            rowAddrs[strandId] = {
+                braidId, 
+                strandId,
+                rowIdx: strandMetas[strandId].sourceCount
+            }
+        }
+
+        // Compute all the mounts that we can.
         const output: RowOutput = {
             'source': action
         }
@@ -81,34 +82,37 @@ class Helper {
             }
         }
 
-        const rowAddrs: { [strandId: string]: log.RowAddr } = {}
-        for (const strandId in strandMetas) {
-            rowAddrs[strandId] = {
-                braidId, 
-                strandId,
-                rowIdx: strandMetas[strandId].sourceCount
-            }
-        }
-
+        // Commit all the changes.
         for (const strandId in strandMetas) {
             const strand = strandMetas[strandId]
             strand.sourceCount++
-            this.setStrand({ braidId, strandId }, strand)
 
-            const rowAddr: log.RowAddr = { braidId, strandId, rowIdx: strand.sourceCount - 1 }
-            this.setRow(rowAddr, {
-                aliases: Object.values(rowAddrs),
-                source: output['source']
-            })
             for (const mountId in output) {
                 if (mountId !== 'source') {
-                    strand.mountCounts[mountId] = strand.sourceCount - 1
-                    this.setMount({ ...rowAddr, mountId }, {
+                    strand.mountCounts[mountId] = strand.sourceCount
+                    this.setMount({ ...rowAddrs[strandId], mountId }, {
                         content: output[mountId]
                     })
                 }
             }
+            this.setRow(rowAddrs[strandId], {
+                aliases: Object.values(rowAddrs),
+                source: output['source']
+            })
+            this.setStrand({ braidId, strandId }, strand)
         }
+    }
+
+    // DPL
+
+    // - Braid
+    braidRef(addr: log.BraidAddr): FirebaseFirestore.DocumentReference {
+        return this.db.collection('braids').doc(addr.braidId)
+    }
+
+    // - Strand
+    strandRef(addr: log.StrandAddr): FirebaseFirestore.DocumentReference {
+        return this.braidRef(addr).collection('strands').doc(addr.strandId)
     }
 
     async getStrand(addr: log.StrandAddr): Promise<log.Strand> {
@@ -120,6 +124,11 @@ class Helper {
         this.tx.set(this.strandRef(addr), strand)
     }
 
+    // - Row
+    rowRef(addr: log.RowAddr): FirebaseFirestore.DocumentReference {
+        return this.strandRef(addr).collection('rows').doc('' + addr.rowIdx)
+    }
+
     async getRow(addr: log.RowAddr): Promise<log.Row> {
         const rowData: FirebaseFirestore.DocumentData =
             await this.tx.get(this.rowRef(addr))
@@ -129,19 +138,13 @@ class Helper {
         return validate('Row')(rowData.data());
     }
 
-    // async getSourceRow(addr: log.RowAddr): Promise<[log.RowAddr, log.SourceRow]> {
-    //     let a = addr;
-    //     while (true) {
-    //         const e = await this.getRow(a);
-    //         if (e.kind == "source") {
-    //             return [a, e];
-    //         }
-    //         a = e.source
-    //     }
-    // }
-
     setRow(addr: log.RowAddr, row: log.Row): void {
         this.tx.set(this.rowRef(addr), row)
+    }
+
+    // - Mount
+    mountRef(addr: log.MountAddr): FirebaseFirestore.DocumentReference {
+        return this.rowRef(addr).collection('mounts').doc(addr.mountId)
     }
 
     async getMount(addr: log.MountAddr): Promise<log.Mount> {
@@ -157,21 +160,6 @@ class Helper {
         this.tx.set(this.mountRef(addr), mount)
     }
 
-    braidRef(addr: log.BraidAddr): FirebaseFirestore.DocumentReference {
-        return this.db.collection('braids').doc(addr.braidId)
-    }
-
-    strandRef(addr: log.StrandAddr): FirebaseFirestore.DocumentReference {
-        return this.braidRef(addr).collection('strands').doc(addr.strandId)
-    }
-
-    rowRef(addr: log.RowAddr): FirebaseFirestore.DocumentReference {
-        return this.strandRef(addr).collection('rows').doc('' + addr.rowIdx)
-    }
-
-    mountRef(addr: log.MountAddr): FirebaseFirestore.DocumentReference {
-        return this.rowRef(addr).collection('mounts').doc(addr.mountId)
-    }
 
     applyMap(mountId: string, map: MapFn, output: RowOutput): void {
         if (map.input in output) {
@@ -188,7 +176,7 @@ class Helper {
 
         const accMounts: StrandMap = {}
         for (const strandId in strandMetas) {
-            if (strandMetas[strandId].sourceCount !== strandMetas[strandId].mountCounts[strandId]) {
+            if (strandMetas[strandId].sourceCount !== (strandMetas[strandId].mountCounts[mountId] || 0)) {
                 // If the mount isn't up to date on one of our strands, bail.
                 return
             }

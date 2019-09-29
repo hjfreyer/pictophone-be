@@ -15,6 +15,7 @@ import admin from 'firebase-admin';
 import * as braid from './braid/braid'
 
 import * as proto from './proto/1.0.0'
+import * as types from './types.validator'
 import { validate as validateProto } from './proto/1.0.0.validator'
 
 admin.initializeApp({
@@ -32,10 +33,21 @@ const CONFIG: braid.Config = {
     braids: {
         root: {
             keyFunction: () => ['omni'],
-            mountOrder: [],
-            mounts: {},
+            mountOrder: ['history'],
+            mounts: {
+                history: {
+                    op: 'reduce',
+                    input: 'source',
+                    fn: historyMountFn,
+                }
+            },
         }
     }
+}
+
+function historyMountFn(strands: braid.StrandMap, action: string): string {
+    console.log('IN REDUCE', strands, action)
+    return ''
 }
 
 // type ViewType = 'root' | 'history' | 'projection' | 'materialize';
@@ -263,7 +275,7 @@ const CONFIG: braid.Config = {
 // });
 
 app.post('/action', async function(req: Request<Dictionary<string>>, res) {
-    braid.applyAction(CONFIG, db, JSON.stringify(req.body))
+    await braid.applyAction(CONFIG, db, JSON.stringify(req.body))
     res.status(200)
     res.json({})
 })
