@@ -45,12 +45,15 @@ const CONFIG: braid.Config = {
     }
 }
 
-function historyMountFn(strandStrs: braid.StrandMap, actionStr: string): string {
-    const action = validateProto('Action')(JSON.parse(actionStr))
+function historyMountFn(strandStrs: braid.StrandMap, actionStrs: braid.StrandMap): braid.StrandMap {
+    console.log(actionStrs)
+    const action = validateProto('Action')(JSON.parse(actionStrs['omni']))
     const acc = 'omni' in strandStrs
         ? types.validate('History')(JSON.parse(strandStrs['omni']))
         : history.init()
-    return JSON.stringify(history.reduce(acc, action))
+    return {
+        omni: JSON.stringify(history.reduce(acc, action)),
+    }
 }
 
 // type ViewType = 'root' | 'history' | 'projection' | 'materialize';

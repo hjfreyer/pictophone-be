@@ -19,19 +19,23 @@ export type MountFn = MapFn | ReduceFn
 export type MapFn = {
     op: 'map'
     input: string
-    fn: (state: string) => string
+    fn: (state: StrandMap) => StrandMap
 }
 
 export type ReduceFn = {
     op: 'reduce'
     input: string
-    fn: (acc: StrandMap, action: string) => string
+    fn: (acc: StrandMap, action: StrandMap) => StrandMap
 }
 
 export function applyAction(c: Config, db: FirebaseFirestore.Firestore, action: string): Promise<void> {
     return db.runTransaction(async (tx: FirebaseFirestore.Transaction): Promise<void> => {
         return await new Helper(c, db, tx).applyActionTransaction(action)
     });
+}
+
+type Output = {
+    [strandId: string]: RowOutput
 }
 
 type RowOutput = {
@@ -58,16 +62,22 @@ class Helper {
         for (const strandId of strandIds) {
             strandMetas[strandId] = await this.getStrand({ braidId, strandId })
             rowAddrs[strandId] = {
-                braidId, 
+                braidId,
                 strandId,
                 rowIdx: strandMetas[strandId].sourceCount
             }
         }
 
-        // Compute all the mounts that we can.
-        const output: RowOutput = {
-            'source': action
+        const output: Output = {}
+
+        // Seed output with the input.
+        for (const strandId in strandMetas) {
+            output[strandId] = {
+                source: action
+            }
         }
+
+        // Compute all the mounts that we can.
         for (const mountId of braid.mountOrder) {
             const mount = braid.mounts[mountId]
 
@@ -83,23 +93,24 @@ class Helper {
         }
 
         // Commit all the changes.
-        for (const strandId in strandMetas) {
-            const strand = strandMetas[strandId]
-            strand.sourceCount++
+        for (const strandId in output) {
+            const strandMeta = strandMetas[strandId]
+            const strandMounts = output[strandId]
+            strandMeta.sourceCount++
 
-            for (const mountId in output) {
+            for (const mountId in strandMounts) {
                 if (mountId !== 'source') {
-                    strand.mountCounts[mountId] = strand.sourceCount
+                    strandMeta.mountCounts[mountId] = strandMeta.sourceCount
                     this.setMount({ ...rowAddrs[strandId], mountId }, {
-                        content: output[mountId]
+                        content: strandMounts[mountId]
                     })
                 }
             }
             this.setRow(rowAddrs[strandId], {
                 aliases: Object.values(rowAddrs),
-                source: output['source']
+                source: strandMounts['source']
             })
-            this.setStrand({ braidId, strandId }, strand)
+            this.setStrand({ braidId, strandId }, strandMeta)
         }
     }
 
@@ -161,21 +172,34 @@ class Helper {
     }
 
 
-    applyMap(mountId: string, map: MapFn, output: RowOutput): void {
-        if (map.input in output) {
-            output[mountId] = map.fn(output[map.input])
+    applyMap(mountId: string, map: MapFn, output: Output): void {
+        // Gather input to map, requiring it to be specified on all strands.
+        const input: StrandMap = {}
+        for (const strandId in output) {
+            if (map.input in output[strandId]) {
+                input[strandId] = output[strandId][map.input]
+            } else {
+                return
+            }
+        }
+        const opOut = map.fn(input)
+        for (const strandId in output) {
+            output[strandId][mountId] = opOut[strandId]
         }
     }
 
     async applyReduce(braidId: string, strandMetas: { [id: string]: log.Strand },
-        mountId: string, reduce: ReduceFn, output: RowOutput): Promise<void> {
-        if (!(reduce.input in output)) {
-            return
-        }
-        const action = output[reduce.input]
-
+        mountId: string, reduce: ReduceFn, output: Output): Promise<void> {
         const accMounts: StrandMap = {}
+        const actionMounts: StrandMap = {}
         for (const strandId in strandMetas) {
+            // Gather action for reduce, requiring it to be specified on all strands.
+            if (reduce.input in output[strandId]) {
+                actionMounts[strandId] = output[strandId][reduce.input]
+            } else {
+                return
+            }
+
             if (strandMetas[strandId].sourceCount !== (strandMetas[strandId].mountCounts[mountId] || 0)) {
                 // If the mount isn't up to date on one of our strands, bail.
                 return
@@ -191,7 +215,10 @@ class Helper {
                 mountId
             })).content
         }
+        const opOutput = reduce.fn(accMounts, actionMounts)
 
-        output[mountId] = reduce.fn(accMounts, action)
+        for (const strandId in opOutput) {
+            output[strandId][mountId] = opOutput[strandId]
+        }
     }
 }
