@@ -14,6 +14,8 @@ export type BraidConfig = {
 
 export type StrandMap = { [strandId: string]: string }
 
+export type Export = log.Export
+
 export type MountFn = MapFn | ReduceFn
 
 export type MapFn = {

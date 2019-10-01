@@ -12,16 +12,16 @@ export function init(): types.History {
 
 export function reduce(acc: types.History, action: proto.Action): types.History {
     switch (action.kind) {
-    case "join_game": return produce(joinGame)(acc, action);
-    // case "start_game": return produce(startGame)(acc, action);
-    // case "make_move": return produce(makeMove)(acc, action);
+        case "join_game": return produce(joinGame)(acc, action);
+        // case "start_game": return produce(startGame)(acc, action);
+        // case "make_move": return produce(makeMove)(acc, action);
     }
 }
 
 function joinGame(acc: types.History, action: proto.JoinGame): void {
     if (!(action.gameId in acc.games)) {
         acc.games[action.gameId] = {
-//            state: 'UNSTARTED',
+            //            state: 'UNSTARTED',
             playerIds: [action.playerId],
         };
         return;
@@ -59,3 +59,21 @@ function joinGame(acc: types.History, action: proto.JoinGame): void {
 
 // function makeMove(acc: History, action: actions.MakeMove): void {
 // }
+
+export function view(history: types.History): types.HistoryView {
+    const res: types.HistoryView = {
+        playerGames: {}
+    }
+    for (const gameId in history.games) {
+        const game = history.games[gameId];
+
+        for (const playerId of game.playerIds) {
+            res.playerGames[playerId][gameId] = {
+                playerIds: game.playerIds,
+                //state: game.state,
+            };
+        }
+    }
+
+    return res;
+}

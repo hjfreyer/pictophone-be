@@ -46,3 +46,7 @@ export type Timestamp = {
     nanoseconds: number
     seconds: number
 }
+
+export type Export = {
+    [path: string]: any
+}

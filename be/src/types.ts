@@ -1,13 +1,17 @@
 
+import * as proto from './proto/1.0.0'
 
 export type History = {
     games: { [gameId: string]: Game }
 };
 
 export type Game = {
-    playerIds: string[];
+    playerIds: string[]
 }
 
+export type HistoryView = {
+    playerGames: { [playerId: string]: { [gameId: string]: proto.PlayerGame } }
+}
 
 // export type History = {
 //     games: {[id: string]: Game}

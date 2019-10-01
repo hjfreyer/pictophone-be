@@ -33,12 +33,17 @@ const CONFIG: braid.Config = {
     braids: {
         root: {
             keyFunction: () => ['omni'],
-            mountOrder: ['history'],
+            mountOrder: ['history', 'historyView'],
             mounts: {
                 history: {
                     op: 'reduce',
                     input: 'source',
                     fn: historyMountFn,
+                },
+                historyView: {
+                    op: 'map',
+                    input: 'history',
+                    fn: historyViewMountFn,
                 }
             },
         }
@@ -55,6 +60,23 @@ function historyMountFn(strandStrs: braid.StrandMap, actionStrs: braid.StrandMap
         omni: JSON.stringify(history.reduce(acc, action)),
     }
 }
+
+function historyViewMountFn(input: braid.StrandMap): braid.StrandMap {
+    const h = types.validate('History')(JSON.parse(input['omni']))
+    const view = history.view(h)
+    const expt : braid.Export = {}
+
+    for (const playerId in view.playerGames) {
+        for (const gameId in view.playerGames[playerId]) {
+            expt[`players/${playerId}/games/${gameId}`] = view.playerGames[playerId][gameId]
+        }
+    }
+    return {
+        omni: JSON.stringify(expt)
+    }
+}
+
+// ] 
 
 // type ViewType = 'root' | 'history' | 'projection' | 'materialize';
 
