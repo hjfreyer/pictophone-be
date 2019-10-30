@@ -68,6 +68,7 @@ export function view(history: types.History): types.HistoryView {
         const game = history.games[gameId];
 
         for (const playerId of game.playerIds) {
+            res.playerGames[playerId] = res.playerGames[playerId] || {}
             res.playerGames[playerId][gameId] = {
                 playerIds: game.playerIds,
                 //state: game.state,

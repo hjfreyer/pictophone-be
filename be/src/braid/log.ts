@@ -1,21 +1,30 @@
 
 export type Strand = {
-    sourceCount: number
-    mountCounts: { [mountId: string]: number }
+    version: number
+    mounts: { [mountId: string]: MountInfo }
 }
 
-export function strandInit(): Strand {
-    return { sourceCount: 0, mountCounts: {} };
+export type MountInfo = {
+    current: boolean
+    count: number,
+    timestamp: Timestamp
 }
 
 // export type Entry = SourceEntry | RefEntry
+
+export type CreateRowRequest = {
+    // kind: 'source'
+    aliases: RowAddr[]
+    source: string
+}
 
 export type Row = {
     // kind: 'source'
     aliases: RowAddr[]
     source: string
-//    timestamp: Timestamp
+    timestamp: Timestamp
 }
+
 
 // export type RefEntry = {
 //     kind: 'ref'

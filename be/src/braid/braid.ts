@@ -2,6 +2,8 @@
 import * as log from './log'
 import { validate } from './log.validator'
 
+import fb from 'firebase-admin'
+
 export type Config = {
     braids: { [id: string]: BraidConfig }
 }
@@ -53,6 +55,7 @@ class Helper {
 
     async applyActionTransaction(action: string): Promise<void> {
         const braidId = 'root'
+        const sourceMount = 'source'
         const braid = this.c.braids[braidId]
 
         // Determine the strands the action affects.
@@ -66,7 +69,7 @@ class Helper {
             rowAddrs[strandId] = {
                 braidId,
                 strandId,
-                rowIdx: strandMetas[strandId].sourceCount
+                rowIdx: strandMetas[strandId].mounts[sourceMount].count
             }
         }
 
@@ -75,7 +78,7 @@ class Helper {
         // Seed output with the input.
         for (const strandId in strandMetas) {
             output[strandId] = {
-                source: action
+                [sourceMount]: action
             }
         }
 
@@ -130,11 +133,26 @@ class Helper {
 
     async getStrand(addr: log.StrandAddr): Promise<log.Strand> {
         const doc = await this.tx.get(this.strandRef(addr))
-        return doc.exists ? validate('Strand')(doc.data()) : log.strandInit()
+        return doc.exists ? validate('Strand')(doc.data()) : this.strandInit()
     }
 
     setStrand(addr: log.StrandAddr, strand: log.Strand): void {
         this.tx.set(this.strandRef(addr), strand)
+    }
+
+    strandInit(): log.Strand {
+        const res : log.Strand = {
+            version: this.c.braids['omni'].mountOrder.length,
+            mounts: {},
+        }
+        for (const mountId of this.c.braids['omni'].mountOrder) {
+            res.mounts[mountId] = {
+                count: 0,
+                current: true,
+                timestamp: {seconds: 0, nanoseconds: 0},
+            }
+        }
+        return res
     }
 
     // - Row
@@ -148,11 +166,25 @@ class Helper {
         if (!rowData.exists) {
             throw new Error('not found')
         }
+
+        const row = rowData.data()
+        if (!('timestamp' in row)) {
+            throw new Error('missing ts yo')
+        }
+        const ts : FirebaseFirestore.Timestamp = row['timestamp']
+        row['timestamp'] = {
+            seconds: ts.seconds,
+            nanoseconds: ts.nanoseconds,
+        }
+
         return validate('Row')(rowData.data());
     }
 
-    setRow(addr: log.RowAddr, row: log.Row): void {
-        this.tx.set(this.rowRef(addr), row)
+    setRow(addr: log.RowAddr, row: log.CreateRowRequest): void {
+        this.tx.set(this.rowRef(addr), {
+            ...row,
+            timestamp: fb.firestore.FieldValue.serverTimestamp()
+        })
     }
 
     // - Mount
