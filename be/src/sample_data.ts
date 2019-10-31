@@ -1,9 +1,9 @@
 
 import fetch from 'node-fetch';
 import {Response} from 'node-fetch';
-import * as proto from './proto/1.0.0';
+import * as types from './types';
 
-async function postit(body: proto.Action): Promise<void> {
+async function postit(body: types.Action): Promise<void> {
     const res = await fetch('http://localhost:3000/action', {
         method: 'post',
         body:    JSON.stringify(body),

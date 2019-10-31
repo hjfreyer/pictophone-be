@@ -73,7 +73,7 @@ function User({ match: { params: { playerId } } }: RouteComponentProps<UserParam
         <div>
             <h1>User page for {playerId}</h1>
             <FirestoreCollection
-                path={`projections/v0/players/${playerId}/games`}
+                path={`versions/0/players/${playerId}/games`}
                 render={({ isLoading, data }: { isLoading: boolean, data: any[] }) => (
                     <div>
                         {
