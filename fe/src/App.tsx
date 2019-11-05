@@ -10,6 +10,7 @@ import { FirestoreProvider, FirestoreCollection, FirestoreDocument } from 'react
 import { BrowserRouter as Router, Route, Link, match, RouteComponentProps } from "react-router-dom";
 import * as types from './types';
 import { validate } from './types.validator'
+import { Drawer } from './Drawer';
 
 const config = {
     projectId: 'pictophone-app',
@@ -101,7 +102,7 @@ function Game({ match: { params: { playerId, gameId } } }: RouteComponentProps<G
     return (
         <div>
             <FirestoreDocument
-                path={`projections/v0/players/${playerId}/games/${gameId}`}
+                path={`versions/0/players/${playerId}/games/${gameId}`}
                 render={({ isLoading, data }: { isLoading: boolean, data: any }) => {
                     if (isLoading) {
                         return <span>Loading...</span>;
@@ -113,16 +114,16 @@ function Game({ match: { params: { playerId, gameId } } }: RouteComponentProps<G
         </div>
     )
 }
-
-const GameView: React.FC<types.PlayerGame> = ({ players, state }) => {
+ // <div>
+            //     State: {state}
+            // </div>
+const GameView: React.FC<types.PlayerGame> = ({ playerIds }) => {
     return (
         <div>
             <div>
-                Players: {players.map((p, idx) => <span key={idx}>{p}</span>)}
+                Players: {playerIds.map((p, idx) => <span key={idx}>{p}</span>)}
             </div>
-            <div>
-                State: {state}
-            </div>
+           
         </div>
     )
 }
@@ -141,6 +142,7 @@ function App() {
                     </nav>
 
                     <Route path="/" exact component={Home} />
+                    <Route path="/draw" exact component={Drawer} />
                     <Route path="/u/:playerId" exact component={User} />
                     <Route path="/u/:playerId/g/:gameId" component={Game} />
                 </div>
