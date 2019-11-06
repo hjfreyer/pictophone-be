@@ -7,7 +7,12 @@ import firebase from '@firebase/app';
 import '@firebase/firestore';
 import { FirestoreProvider, FirestoreCollection, FirestoreDocument } from 'react-firestore';
 
-import { BrowserRouter as Router, Route, Link, match, RouteComponentProps } from "react-router-dom";
+import {
+    BrowserRouter as Router,
+    Switch,
+    useParams, useHistory,
+    Route, Link, match, RouteComponentProps
+} from "react-router-dom";
 import * as types from './types';
 import { validate } from './types.validator'
 import { Drawer } from './Drawer';
@@ -56,42 +61,81 @@ function About() {
 
 const Home: React.FC = () => {
     const [id, setId] = useState<string>("")
+    const history = useHistory();
 
     return <div>
         <h1>Home</h1>
-        Username <input
-            type="text" value={id} onChange={e => setId(e.target.value)} />
-        <Link to={'/u/' + id}><button>Submit</button></Link>
+        Username
+        <form onSubmit={() => history.push('/p/' + id)}>
+            <input
+                type="text" value={id} onChange={e => setId(e.target.value)} />
+            <button>Submit</button>
+        </form>
     </div>
 }
 
-type UserParams = {
+type PlayerPageParams = {
     playerId: string
 }
 
-function User({ match: { params: { playerId } } }: RouteComponentProps<UserParams>): JSX.Element {
-    return (
-        <div>
-            <h1>User page for {playerId}</h1>
-            <FirestoreCollection
-                path={`versions/0/players/${playerId}/games`}
-                render={({ isLoading, data }: { isLoading: boolean, data: any[] }) => (
-                    <div>
-                        {
-                            isLoading
-                                ? <span>Loading...</span>
-                                : <div>
-                                    {data.map((r) => (
-                                        <div key={r.id}>
-                                            <Link to={`/u/${playerId}/g/${r.id}`}>{r.id}</Link></div>))}
-                                </div>
-                        }
-                    </div>
-                )} />
-        </div>
-    )
+type PlayerPageProps = {
+    dispatch: (a: types.Action) => void
 }
 
+const PlayerPage: React.FC<PlayerPageProps> = ({ dispatch }) => {
+    const { playerId } = useParams()
+
+    return <Player playerId={playerId!} dispatch={dispatch} />
+}
+
+type PlayerProps = {
+    playerId: string
+    dispatch: (a: types.Action) => void
+}
+
+const Player: React.FC<PlayerProps> = ({ playerId, dispatch }) => {
+    const joinGame = (gameId: string) => dispatch({
+        kind: "join_game",
+        playerId,
+        gameId,
+    })
+
+    return <div>
+        <h1>User page for {playerId}</h1>
+        <JoinGame join={joinGame} />
+        <h2>Existing Games</h2>
+        <FirestoreCollection
+            path={`versions/0/players/${playerId}/games`}
+            render={({ isLoading, data }: { isLoading: boolean, data: any[] }) => (
+                <div>
+                    {
+                        isLoading
+                            ? <span>Loading...</span>
+                            : <div>
+                                {data.map((r) => (
+                                    <div key={r.id}>
+                                        <Link to={`/u/${playerId}/g/${r.id}`}>{r.id}</Link></div>))}
+                            </div>
+                    }
+                </div>
+            )} />
+    </div>
+}
+
+const JoinGame = ({ join }: {
+    join: (gid: string) => void
+}) => {
+    const [gid, setGid] = useState("")
+    return <div>
+        <h2>Join A Game</h2>
+        <form onSubmit={(e) => { e.preventDefault(); join(gid) }}>
+            <input
+                type="text"
+                value={gid} onChange={e => setGid(e.target.value)} />
+            <button>Submit</button>
+        </form>
+    </div>
+}
 
 type GameParams = {
     playerId: string
@@ -114,21 +158,41 @@ function Game({ match: { params: { playerId, gameId } } }: RouteComponentProps<G
         </div>
     )
 }
- // <div>
-            //     State: {state}
-            // </div>
+
 const GameView: React.FC<types.PlayerGame> = ({ playerIds }) => {
     return (
         <div>
             <div>
                 Players: {playerIds.map((p, idx) => <span key={idx}>{p}</span>)}
             </div>
-           
+
         </div>
     )
+    let { id } = useParams();
+
 }
 
+async function postit(body: types.Action): Promise<void> {
+    console.log(JSON.stringify(body))
+    const res = await fetch('https://pictophone-be-3u2pedngkq-ue.a.run.app/action', {
+        method: 'post',
+        body: JSON.stringify(body),
+        mode: 'cors',
+        headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',       // receive json
+        },
+        // credentials: 'include',
+
+    });
+
+    console.log(await res.text());
+}
 function App() {
+    const dispatch = async (a: types.Action): Promise<void> => {
+        await postit(a)
+    }
+
     return (
         <FirestoreProvider firebase={firebase}>
             <Router>
@@ -140,14 +204,24 @@ function App() {
                             </li>
                         </ul>
                     </nav>
+                    <Switch>
+                        <Route path="/" exact>
+                            <Home />
+                        </Route>
+                        <Route path="/draw" exact>
+                            <Drawer />
+                        </Route>
 
-                    <Route path="/" exact component={Home} />
-                    <Route path="/draw" exact component={Drawer} />
-                    <Route path="/u/:playerId" exact component={User} />
-                    <Route path="/u/:playerId/g/:gameId" component={Game} />
+                        <Route path="/p/:playerId" exact>
+                            <PlayerPage dispatch={dispatch} />
+                        </Route>
+                    </Switch>
                 </div>
             </Router>
         </FirestoreProvider>
+        // <Route path="/p/:playerId/g/:gameId" />
+        //     <Game/>
+        // </Route>
     );
 }
 
