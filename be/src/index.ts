@@ -21,42 +21,149 @@ type PlayerGames = {
     [playerAndGameId: string]: types.PlayerGame
 }
 
+type GameStatus = 'UNSTARTED' | 'ACTIVE' | 'GAME_OVER'
+
 type GameState = {
+    state: 'UNSTARTED'
     playerIds: string[]
+} | {
+    state: 'STARTED'
+    playerIds: string[]
+    submissions: types.Submission[][]
 }
 
 function initGame(): GameState {
     return {
+        state: 'UNSTARTED',
         playerIds: []
     }
 }
 
 function integrateGame(acc: GameState, action: types.Action): GameState {
-    return produce(acc, (draft) => {
-        if (draft.playerIds.indexOf(action.playerId) != -1) {
-            return;
-        }
+    switch (action.kind) {
+        case "join_game":
+            return produce(joinGame)(acc, action)
+        case "start_game":
+            return produce(startGame)(acc, action)
+        case "make_move":
+            return produce(makeMove)(acc, action)
+    }
+}
 
-        draft.playerIds.push(action.playerId);
-    })
+function joinGame(game: GameState, action: types.JoinGame) {
+    if (game.state !== 'UNSTARTED') {
+        return
+    }
+    if (game.playerIds.indexOf(action.playerId) != -1) {
+        return;
+    }
+
+    game.playerIds.push(action.playerId);
+}
+
+function startGame(game: GameState, action: types.StartGame): GameState {
+    if (game.state !== 'UNSTARTED') {
+        return game
+    }
+    if (game.playerIds.length == 0) {
+        return game
+    }
+
+    return {
+        ...game,
+        state: 'STARTED',
+        submissions: game.playerIds.map(() => [])
+    }
+}
+
+function makeMove(game: GameState, action: types.MakeMove) {
+    if (game.state !== 'STARTED') {
+        return
+    }
+    const playerIdx = game.playerIds.indexOf(action.playerId)
+    if (playerIdx === -1) {
+        return
+    }
+
+    const roundNum = Math.min(...game.submissions.map(a => a.length));
+    if (game.submissions[playerIdx].length !== roundNum) {
+        return
+    }
+
+    // Game is over.
+    if (roundNum === game.playerIds.length) {
+        return
+    }
+
+    if (roundNum % 2 === 0 && action.submission.kind === 'drawing') {
+        return
+    }
+    if (roundNum % 2 === 1 && action.submission.kind === 'word') {
+        return
+    }
+
+    game.submissions[playerIdx].push(action.submission)
 }
 
 function projectGame(gameId: string, state: GameState): PlayerGames {
-    const res : PlayerGames = {}
+    const res: PlayerGames = {}
 
     for (const playerId of state.playerIds) {
-        res[`${playerId},${gameId}`] = {
-            playerIds: state.playerIds,
-            //state: game.state,
-        }
+        res[`${playerId},${gameId}`] = projectGameForPlayer(state, playerId)
     }
 
     return res
 }
 
+function projectGameForPlayer(state: GameState, playerId: string): types.PlayerGame {
+    if (state.state === 'UNSTARTED') {
+        return {
+            state: "UNSTARTED",
+            playerIds: state.playerIds,
+        }
+    }
+
+    const playerIdx = state.playerIds.indexOf(playerId)
+    if (playerIdx === -1) {
+        throw new Error("baad")
+    }
+
+    const roundNum = Math.min(...state.submissions.map(a => a.length))
+    // Game is over.
+    if (roundNum === state.playerIds.length) {
+        return {
+            state: "GAME_OVER",
+            playerIds: state.playerIds,
+        }
+    }
+
+    // const maxSubmissions = Math.max(...state.submissions.map(a => a.length))
+
+    if (state.submissions[playerIdx].length === 0) {
+        return {
+            state: "FIRST_PROMPT",
+            playerIds: state.playerIds,
+        }
+    }
+
+    if (state.submissions[playerIdx].length === roundNum) {
+        return {
+            state: "RESPOND_TO_PROMPT",
+            playerIds: state.playerIds,
+            prompt: state.submissions[(playerIdx + 1) % state.playerIds.length][roundNum - 1]
+        }
+    } 
+
+    return {
+        state: "WAITING_FOR_PROMPT",
+        playerIds: state.playerIds,
+    }
+}
+
+
 async function applyAction(db: FirebaseFirestore.Firestore, action: types.Action): Promise<void> {
     const gameId = action.gameId;
-    db.runTransaction(async (tx: Transaction): Promise<void> => {
+    await db.runTransaction(async (tx: Transaction): Promise<void> => {
         let log = await gameLog.get(tx, gameId);
         if (log === null) {
             log = {

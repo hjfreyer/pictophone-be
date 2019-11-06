@@ -15,15 +15,39 @@ async function postit(body: types.Action): Promise<void> {
 }
 
 async function main(): Promise<void> {
+    const gameId = '4'
     await postit({
-        gameId: '1',
+        gameId,
         playerId: 'ehopper',
         kind: 'join_game'
     })
     await postit({
-        gameId: '1',
+        gameId,
         playerId: 'hjfreyer',
         kind: 'join_game'
+    })
+    await postit({
+        gameId,
+        playerId: 'hjfreyer',
+        kind: 'start_game'
+    })
+    await postit({
+        gameId,
+        playerId: 'hjfreyer',
+        kind: 'make_move',
+        submission: {
+            kind: 'word',
+            word: 'foo'
+        }
+    })
+    await postit({
+        gameId,
+        playerId: 'ehopper',
+        kind: 'make_move',
+        submission: {
+            kind: 'word',
+            word: 'bar'
+        }
     })
 }
 main()
