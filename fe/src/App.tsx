@@ -14,7 +14,6 @@ import {
 } from "react-router-dom";
 import * as types from './types';
 import { validate } from './types.validator'
-import { Drawer } from './Drawer';
 
 import GameView from './GameView'
 

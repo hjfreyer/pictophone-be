@@ -1,7 +1,8 @@
 
 import React, { useState } from 'react';
 import * as types from './types'
-import Drawer, { DraftDrawing } from './Drawer'
+import Canvas, { DraftDrawing } from './Canvas'
+import Drawing from './Drawing'
 
 type GameViewProps = {
     playerGame: types.PlayerGame
@@ -59,13 +60,23 @@ const GameView: React.FC<GameViewProps> = ({ playerGame, startGame, submit }) =>
                     {playerList}
                     <div>Your prompt is: {playerGame.prompt.word}</div>
                     <div>Drawz!</div>
-                    <Drawer draft={draftDrawing} onChange={setDraftDrawing} />
+                    <Canvas draft={draftDrawing} onChange={setDraftDrawing} />
                     <button onClick={doDrawingSub}>Submit</button>
-                    {JSON.stringify(playerGame.prompt)}</div>
-
+                </div>
+            } else {
+                return <div>
+                    {playerList}
+                    <div>Your prompt is:</div>
+                    <Drawing drawing={playerGame.prompt.drawing}
+                        width={500} height={500} />
+                    <div>Describe!</div>
+                    <form onSubmit={doTextSub}>
+                        <input value={textSub} onChange={e => setTextSub(e.target.value)} />
+                        <button>Submit</button>
+                    </form>
+                </div>
             }
 
-            return <div>{JSON.stringify(playerGame.prompt)}</div>
         default:
             return <div>TODO: {playerGame.state}</div>
     }

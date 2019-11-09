@@ -1,21 +1,20 @@
 import React, { useState, useRef, useEffect } from 'react'
 import * as types from './types'
 import produce from 'immer'
+import Drawing from './Drawing'
 
 export type DraftDrawing = {
     drawing: types.Drawing
     inProgress: { [touchId: string]: number }
 }
 
-type DrawerProps = {
+type CanvasProps = {
     draft: DraftDrawing
     onChange: (d: DraftDrawing) => void
 }
 
-export const Drawer: React.FC<DrawerProps> = ({ draft, onChange }) => {
-    const svgRef = useRef<SVGSVGElement>(null)
-
-    function touchStart(e: React.TouchEvent<SVGSVGElement>) {
+export const Canvas: React.FC<CanvasProps> = ({ draft, onChange }) => {
+    function touchStart(e: React.TouchEvent<HTMLDivElement>) {
         e.preventDefault()
         console.log('touchstart')
         onChange(produce(draft, (draft) => {
@@ -23,7 +22,7 @@ export const Drawer: React.FC<DrawerProps> = ({ draft, onChange }) => {
                 const touch = e.changedTouches.item(idx)
                 draft.inProgress[touch.identifier] = draft.drawing.paths.length
 
-                const rect = (e.target as SVGSVGElement).getBoundingClientRect()
+                const rect = (e.target as HTMLDivElement).getBoundingClientRect()
                 const pt = {
                     x: touch.clientX - rect.left,
                     y: touch.clientY - rect.top,
@@ -33,7 +32,7 @@ export const Drawer: React.FC<DrawerProps> = ({ draft, onChange }) => {
         }))
     }
 
-    function touchMove(e: React.TouchEvent<SVGSVGElement>) {
+    function touchMove(e: React.TouchEvent<HTMLDivElement>) {
         e.preventDefault()
         console.log('touchmove')
         onChange(produce(draft, (draft) => {
@@ -50,27 +49,12 @@ export const Drawer: React.FC<DrawerProps> = ({ draft, onChange }) => {
         }))
     }
 
-    useEffect(() => {
-        resize(svgRef)
-        window.addEventListener('resize', () => resize(svgRef))
-    })
-
     return (
-        <div>
-            <svg
-                ref={svgRef}
-                style={{ touchAction: 'none' }}
-                onTouchStart={touchStart}
-                onTouchMove={touchMove}>
-                {
-                    draft.drawing.paths.map((p, idx) =>
-                        <path key={idx}
-                            d={renderPath(p)}
-                            stroke="black"
-                            fill="transparent" />
-                    )
-                }
-            </svg>
+        <div
+            onTouchStart={touchStart}
+            onTouchMove={touchMove}
+            style={{ touchAction: 'none' }}>
+            <Drawing drawing={draft.drawing} width={500} height={500} />
         </div>)
 }
 
@@ -99,4 +83,4 @@ function renderPath(p: types.Path): string {
     return res
 }
 
-export default Drawer
+export default Canvas
