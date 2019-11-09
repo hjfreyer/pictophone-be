@@ -76,9 +76,45 @@ const GameView: React.FC<GameViewProps> = ({ playerGame, startGame, submit }) =>
                     </form>
                 </div>
             }
+        case "GAME_OVER":
+            return (
+                <div>
+                    {playerList}
+                    {playerGame.series.map((s, idx) =>
+                        <Series key={idx} series={s} seriesIdx={idx} />
+                    )}
 
-        default:
-            return <div>TODO: {playerGame.state}</div>
+                </div>
+            )
+    }
+}
+
+type SeriesProps = {
+    series: types.Series
+    seriesIdx: number
+}
+
+const Series: React.FC<SeriesProps> = ({ series, seriesIdx }) => {
+    return <div>
+        <h2>Series {seriesIdx}</h2>
+        {
+            series.entries.map((e, eIdx) => <Entry key={eIdx} entry={e} />)
+        }
+    </div>
+}
+
+const Entry: React.FC<{ entry: types.SeriesEntry }> = ({ entry }) => {
+    if (entry.submission.kind === 'word') {
+        return <div>
+            <h3>{entry.playerId} said</h3>
+            <div>{entry.submission.word}</div>
+        </div>
+    } else {
+        return <div>
+            <h3>{entry.playerId} drew</h3>
+            <Drawing drawing={entry.submission.drawing} 
+                width={500} height={500}/>
+        </div>
     }
 }
 
