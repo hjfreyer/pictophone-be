@@ -29,8 +29,6 @@ type PlayerGames = {
     [playerAndGameId: string]: types.PlayerGame
 }
 
-type GameStatus = 'UNSTARTED' | 'ACTIVE' | 'GAME_OVER'
-
 type GameState = {
     state: 'UNSTARTED'
     playerIds: string[]
@@ -124,6 +122,7 @@ function projectGame(gameId: string, state: GameState): PlayerGames {
 }
 
 function projectGameForPlayer(state: GameState, playerId: string): types.PlayerGame {
+    const numPlayers = state.playerIds.length
     if (state.state === 'UNSTARTED') {
         return {
             state: "UNSTARTED",
@@ -138,10 +137,21 @@ function projectGameForPlayer(state: GameState, playerId: string): types.PlayerG
 
     const roundNum = Math.min(...state.submissions.map(a => a.length))
     // Game is over.
-    if (roundNum === state.playerIds.length) {
+    if (roundNum === numPlayers) {
+        const series: types.Series[] = state.playerIds.map(() => ({ entries: []}))
+        for (let rIdx = 0; rIdx < numPlayers; rIdx++) {
+            for (let pIdx = 0; pIdx < numPlayers; pIdx++) {
+                series[(pIdx + rIdx) % numPlayers].entries.push({
+                    playerId: state.playerIds[pIdx],
+                    submission: state.submissions[pIdx][rIdx]
+                })
+            }
+        }
+
         return {
             state: "GAME_OVER",
             playerIds: state.playerIds,
+            series,
         }
     }
 

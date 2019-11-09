@@ -67,4 +67,14 @@ export type PromptGame = {
 export type FinishedGame = {
     state: 'GAME_OVER'
     playerIds: string[]
+    series: Series[]
+}
+
+export type Series = {
+    entries: SeriesEntry[]
+}
+
+export type SeriesEntry = {
+    playerId: string
+    submission: Submission
 }
