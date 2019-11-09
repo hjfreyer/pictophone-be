@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import logo from './logo.svg';
 import './App.css';
 
-
 import firebase from '@firebase/app';
 import '@firebase/firestore';
 import { FirestoreProvider, FirestoreCollection, FirestoreDocument } from 'react-firestore';
@@ -16,6 +15,8 @@ import {
 import * as types from './types';
 import { validate } from './types.validator'
 import { Drawer } from './Drawer';
+
+import GameView from './GameView'
 
 const config = {
     projectId: 'pictophone-app',
@@ -114,7 +115,7 @@ const Player: React.FC<PlayerProps> = ({ playerId, dispatch }) => {
                             : <div>
                                 {data.map((r) => (
                                     <div key={r.id}>
-                                        <Link to={`/u/${playerId}/g/${r.id}`}>{r.id}</Link></div>))}
+                                        <Link to={`/p/${playerId}/g/${r.id}`}>{r.id}</Link></div>))}
                             </div>
                     }
                 </div>
@@ -137,14 +138,29 @@ const JoinGame = ({ join }: {
     </div>
 }
 
-type GameParams = {
-    playerId: string
-    gameId: string
+type GamePageParams = {
+    dispatch: (a:types.Action) => void
 }
 
-function Game({ match: { params: { playerId, gameId } } }: RouteComponentProps<GameParams>): JSX.Element {
+const GamePage : React.FC<GamePageParams> = ({dispatch}) =>{
+    const {playerId, gameId} = useParams()
+
+    const startGame = () => dispatch({
+        kind: "start_game",
+        playerId: playerId!,
+        gameId: gameId!
+    })
+
+    const submit = (submission: types.Submission) => dispatch({
+        kind: "make_move",
+        playerId: playerId!,
+        gameId: gameId!,
+        submission,
+    })
+
     return (
         <div>
+            <h1>Game {gameId}</h1>
             <FirestoreDocument
                 path={`versions/0/players/${playerId}/games/${gameId}`}
                 render={({ isLoading, data }: { isLoading: boolean, data: any }) => {
@@ -152,29 +168,22 @@ function Game({ match: { params: { playerId, gameId } } }: RouteComponentProps<G
                         return <span>Loading...</span>;
                     }
                     const pg: types.PlayerGame = validate('PlayerGame')(data);
-                    return <GameView {...pg} />
+                    return <GameView 
+                        playerGame={pg}
+                        startGame={startGame}
+                        submit={submit}
+                     />
                 }}
             />
         </div>
     )
 }
 
-const GameView: React.FC<types.PlayerGame> = ({ playerIds }) => {
-    return (
-        <div>
-            <div>
-                Players: {playerIds.map((p, idx) => <span key={idx}>{p}</span>)}
-            </div>
 
-        </div>
-    )
-    let { id } = useParams();
 
-}
 
 async function postit(body: types.Action): Promise<void> {
-    console.log(JSON.stringify(body))
-    const res = await fetch('https://pictophone-be-3u2pedngkq-ue.a.run.app/action', {
+    const res = await fetch('http://localhost:3000/action', {
         method: 'post',
         body: JSON.stringify(body),
         mode: 'cors',
@@ -182,12 +191,9 @@ async function postit(body: types.Action): Promise<void> {
             'Content-Type': 'application/json',
             'Accept': 'application/json',       // receive json
         },
-        // credentials: 'include',
-
     });
-
-    console.log(await res.text());
 }
+
 function App() {
     const dispatch = async (a: types.Action): Promise<void> => {
         await postit(a)
@@ -208,13 +214,15 @@ function App() {
                         <Route path="/" exact>
                             <Home />
                         </Route>
-                        <Route path="/draw" exact>
-                            <Drawer />
-                        </Route>
 
                         <Route path="/p/:playerId" exact>
                             <PlayerPage dispatch={dispatch} />
                         </Route>
+
+        <Route path="/p/:playerId/g/:gameId" exact>
+
+            <GamePage dispatch={dispatch}/>
+        </Route>
                     </Switch>
                 </div>
             </Router>

@@ -2,6 +2,7 @@ import express from 'express';
 import { Request, Dictionary } from 'express-serve-static-core';
 import produce from 'immer'
 import admin from 'firebase-admin';
+import cors from 'cors'
 
 import * as types from './types.validator'
 import { Firestore, DocumentReference, Transaction } from '@google-cloud/firestore';
@@ -16,6 +17,13 @@ const db = admin.firestore();
 const app: express.Application = express();
 app.set('json spaces', 2)
 app.use(express.json());
+
+
+const port = process.env.PORT || 3000;
+app.listen(port, function() {
+    console.log(`Example app listening on port ${port}!`);
+});
+
 
 type PlayerGames = {
     [playerAndGameId: string]: types.PlayerGame
@@ -162,6 +170,7 @@ function projectGameForPlayer(state: GameState, playerId: string): types.PlayerG
 
 
 async function applyAction(db: FirebaseFirestore.Firestore, action: types.Action): Promise<void> {
+    console.log('action: ', action)
     const gameId = action.gameId;
     await db.runTransaction(async (tx: Transaction): Promise<void> => {
         let log = await gameLog.get(tx, gameId);
@@ -262,15 +271,11 @@ function playerGameRef(db: Firestore, [playerId, gameId]: [string, string]): Fir
 
 const playerGame = mkDpl(db, playerGameRef, types.validate('PlayerGame'))
 
-
-app.post('/action', async function(req: Request<Dictionary<string>>, res) {
+app.options('/action', cors())
+app.post('/action', cors(), async function(req: Request<Dictionary<string>>, res) {
+    console.log(req.body)
     await applyAction(db, req.body)
     res.status(200)
     res.json({})
 })
 
-
-const port = process.env.PORT || 3000;
-app.listen(port, function() {
-    console.log(`Example app listening on port ${port}!`);
-});

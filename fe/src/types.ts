@@ -30,12 +30,25 @@ export type MakeMove = {
   submission: Submission
 }
 
+export type Point = {
+    x: number,
+    y: number,
+}
+
+export type Path = {
+    points: Point[]
+}
+
+export type Drawing = {
+    paths: Path[]
+}
+
 export type Submission = {
     kind: 'word'
     word: string
 } | {
     kind: 'drawing'
-    paths: [number, number][][]
+    drawing: Drawing
 }
 
 export type PlayerGame = SimpleGame | PromptGame | FinishedGame
