@@ -24,10 +24,10 @@ export type StartGame = {
 }
 
 export type MakeMove = {
-  kind: 'make_move'
-  playerId: string
-  gameId: string
-  submission: Submission
+    kind: 'make_move'
+    playerId: string
+    gameId: string
+    submission: Submission
 }
 
 export type Point = {
@@ -51,14 +51,30 @@ export type Submission = {
     drawing: Drawing
 }
 
-export type PlayerGame = SimpleGame | PromptGame | FinishedGame
+export type PlayerGame = (
+    UnstartedGame
+    | FirstPromptGame
+    | WaitingForPromptGame
+    | RespondToPromptGame
+    | FinishedGame
+)
 
-export type SimpleGame = {
-    state: 'UNSTARTED' | 'FIRST_PROMPT' | 'WAITING_FOR_PROMPT'
+export type UnstartedGame = {
+    state: 'UNSTARTED'
     playerIds: string[]
 }
 
-export type PromptGame = {
+export type FirstPromptGame = {
+    state: 'FIRST_PROMPT'
+    playerIds: string[]
+}
+
+export type WaitingForPromptGame = {
+    state: 'WAITING_FOR_PROMPT'
+    playerIds: string[]
+}
+
+export type RespondToPromptGame = {
     state: 'RESPOND_TO_PROMPT'
     playerIds: string[]
     prompt: Submission

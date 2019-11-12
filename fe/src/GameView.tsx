@@ -11,6 +11,43 @@ type GameViewProps = {
 }
 
 const GameView: React.FC<GameViewProps> = ({ playerGame, startGame, submit }) => {
+
+    const playerList = <div>
+        Players: {playerGame.playerIds.map((p, idx) => <div key={idx}>{p}</div>)}
+    </div>
+
+
+    switch (playerGame.state) {
+        case "UNSTARTED":
+            return <div>
+                {playerList}
+                Waiting to start game.
+            <button onClick={startGame}>Start Game</button>
+            </div>
+        case "FIRST_PROMPT":
+        case "WAITING_FOR_PROMPT":
+        case "RESPOND_TO_PROMPT":
+            return <ActiveGame playerGame={playerGame} submit={submit} />
+
+        case "GAME_OVER":
+            return (
+                <div>
+                    {playerList}
+                    {playerGame.series.map((s, idx) =>
+                        <Series key={idx} series={s} seriesIdx={idx} />
+                    )}
+
+                </div>
+            )
+    }
+}
+
+type ActiveGameProps = {
+    playerGame: types.FirstPromptGame | types.WaitingForPromptGame | types.RespondToPromptGame
+    submit: (s: types.Submission) => void
+}
+
+const ActiveGame: React.FC<ActiveGameProps> = ({ playerGame, submit }) => {
     const [textSub, setTextSub] = useState("")
     const [draftDrawing, setDraftDrawing] = useState<DraftDrawing>({
         drawing: {
@@ -19,9 +56,6 @@ const GameView: React.FC<GameViewProps> = ({ playerGame, startGame, submit }) =>
         inProgress: {},
     })
 
-    const playerList = <div>
-        Players: {playerGame.playerIds.map((p, idx) => <div key={idx}>{p}</div>)}
-    </div>
 
     const doTextSub = (e: React.ChangeEvent<HTMLFormElement>) => {
         e.preventDefault()
@@ -33,22 +67,23 @@ const GameView: React.FC<GameViewProps> = ({ playerGame, startGame, submit }) =>
         submit({ kind: "drawing", drawing: draftDrawing.drawing })
     }
 
+    const playerList = <div>
+        Players: {playerGame.playerIds.map((p, idx) => <div key={idx}>{p}</div>)}
+    </div>
+
+    const firstPrompt = () => <main id="game">
+        <header>Pictophone!</header>
+        <div className="instructions">Come up with a thing!</div>
+        <form onSubmit={doTextSub}>
+            <input value={textSub} onChange={e => setTextSub(e.target.value)} />
+            <button>Submit</button>
+        </form>
+    </main>
+
+
     switch (playerGame.state) {
-        case "UNSTARTED":
-            return <div>
-                {playerList}
-                Waiting to start game.
-            <button onClick={startGame}>Start Game</button>
-            </div>
         case "FIRST_PROMPT":
-            return <div>
-                {playerList}
-                <div>Come up with a thing!</div>
-                <form onSubmit={doTextSub}>
-                    <input value={textSub} onChange={e => setTextSub(e.target.value)} />
-                    <button>Submit</button>
-                </form>
-            </div>
+            return firstPrompt()
         case "WAITING_FOR_PROMPT":
             return <div>
                 {playerList}
@@ -76,16 +111,6 @@ const GameView: React.FC<GameViewProps> = ({ playerGame, startGame, submit }) =>
                     </form>
                 </div>
             }
-        case "GAME_OVER":
-            return (
-                <div>
-                    {playerList}
-                    {playerGame.series.map((s, idx) =>
-                        <Series key={idx} series={s} seriesIdx={idx} />
-                    )}
-
-                </div>
-            )
     }
 }
 
@@ -112,8 +137,8 @@ const Entry: React.FC<{ entry: types.SeriesEntry }> = ({ entry }) => {
     } else {
         return <div>
             <h3>{entry.playerId} drew</h3>
-            <Drawing drawing={entry.submission.drawing} 
-                width={500} height={500}/>
+            <Drawing drawing={entry.submission.drawing}
+                width={500} height={500} />
         </div>
     }
 }
