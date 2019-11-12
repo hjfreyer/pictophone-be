@@ -16,6 +16,7 @@ import * as types from './types';
 import { validate } from './types.validator'
 
 import GameView from './GameView'
+import Config from './config'
 
 const config = {
     projectId: 'pictophone-app',
@@ -23,41 +24,6 @@ const config = {
 
 const app = firebase.initializeApp(config);
 const db = app.firestore!();
-//db.settings({ host: "50051-dot-3073974-dot-devshell.appspot.com" });
-(window as any)['db'] = db;
-
-// const App: React.FC = () => {
-//   return (
-//     <div className="App">
-//       <header className="App-header">
-//         <img src={logo} className="App-logo" alt="logo" />
-//         <p>
-//           Edit <code>src/App.tsx</code> and save to reload OR NOT.
-//         </p>
-
-//   <FirestoreProvider firebase={firebase}>
-// <FirestoreDocument
-//   path="projections/v0/players/ehopper/games/1"
-//   render={({ isLoading, data }:{ isLoading:boolean, data:any }) => (
-//       <div>{JSON.stringify(data)}</div>
-//   )}/>
-// </FirestoreProvider>
-//         <a
-//           className="App-link"
-//           href="https://reactjs.org"
-//           target="_blank"
-//           rel="noopener noreferrer"
-//         >
-//           Learn React
-//         </a>
-//       </header>
-//     </div>
-//   );
-// }
-
-function About() {
-    return <h2>About</h2>;
-}
 
 const Home: React.FC = () => {
     const [id, setId] = useState<string>("")
@@ -182,7 +148,7 @@ const GamePage : React.FC<GamePageParams> = ({dispatch}) =>{
 
 
 async function postit(body: types.Action): Promise<void> {
-    const res = await fetch('http://localhost:3000/action', {
+    const res = await fetch(Config().backendAddr + '/action', {
         method: 'post',
         body: JSON.stringify(body),
         mode: 'cors',
