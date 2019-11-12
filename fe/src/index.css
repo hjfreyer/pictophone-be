@@ -20,7 +20,7 @@ code {
 
 #game header {
     background: lightblue;
-    font-size: 10vh;
+    font-size: 8vh;
     line-height: 15vh;
     text-align: center;
 }
@@ -36,7 +36,19 @@ code {
     align-items: stretch;
 }
 
-#game form input, #game form button {
+#game input, #game button {
     margin: 2vh;
-    font-size: 5vh;
+    font-size: 4vh;
+}
+
+#game .word-prompt {
+    font-size: 3vh;
+    line-height: 20vh;
+    text-align: center;
+    text-decoration: underline;
+}
+
+#game .canvas {
+    border: 1px solid black;
+    align-self: center;
 }

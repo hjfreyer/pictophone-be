@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import * as types from './types'
 import Canvas, { DraftDrawing } from './Canvas'
 import Drawing from './Drawing'
@@ -56,6 +56,17 @@ const ActiveGame: React.FC<ActiveGameProps> = ({ playerGame, submit }) => {
         inProgress: {},
     })
 
+    const [dims, setDims] = useState({
+        width: window.innerWidth,
+        height: window.innerHeight
+    });
+
+    useEffect(() => {
+        return window.addEventListener('resize', () => setDims({
+            width: window.innerWidth,
+            height: window.innerHeight
+        }));
+    }, [])
 
     const doTextSub = (e: React.ChangeEvent<HTMLFormElement>) => {
         e.preventDefault()
@@ -71,7 +82,7 @@ const ActiveGame: React.FC<ActiveGameProps> = ({ playerGame, submit }) => {
         Players: {playerGame.playerIds.map((p, idx) => <div key={idx}>{p}</div>)}
     </div>
 
-    const firstPrompt = () => <main id="game">
+    const firstPrompt = <main id="game">
         <header>Pictophone!</header>
         <div className="instructions">Come up with a thing!</div>
         <form onSubmit={doTextSub}>
@@ -80,37 +91,60 @@ const ActiveGame: React.FC<ActiveGameProps> = ({ playerGame, submit }) => {
         </form>
     </main>
 
+    const waitForPrompt = <main id="game">
+        <header>Pictophone!</header>
+        <div className="instructions">
+            Chill out for a sec while everyone else finishes.
+        </div>
+    </main>
+
+    const canvasHeight1 = dims.height * 0.7
+    const canvasWidth1 = canvasHeight1 * 3 / 4
+    const canvasWidth = Math.min(canvasWidth1, dims.width * 0.95)
+    const canvasHeight = canvasWidth * 4 / 3
+
+    const respond = (playerGame: types.RespondToPromptGame) =>
+        playerGame.prompt.kind === 'word'
+            ? <main id="game">
+                <div className="word-prompt" >
+                    {playerGame.prompt.word}
+                </div>
+                <Canvas draft={draftDrawing} onChange={setDraftDrawing}
+                    width={canvasWidth} height={canvasHeight} />
+                <button onClick={doDrawingSub}>Submit</button>
+            </main>
+            : <main id="game">
+
+            </main>
 
     switch (playerGame.state) {
         case "FIRST_PROMPT":
-            return firstPrompt()
+            return firstPrompt
         case "WAITING_FOR_PROMPT":
-            return <div>
-                {playerList}
-                Chill out for a sec while everyone else finishes.
-            </div>
+            return waitForPrompt
         case "RESPOND_TO_PROMPT":
-            if (playerGame.prompt.kind === 'word') {
-                return <div>
-                    {playerList}
-                    <div>Your prompt is: {playerGame.prompt.word}</div>
-                    <div>Drawz!</div>
-                    <Canvas draft={draftDrawing} onChange={setDraftDrawing} />
-                    <button onClick={doDrawingSub}>Submit</button>
-                </div>
-            } else {
-                return <div>
-                    {playerList}
-                    <div>Your prompt is:</div>
-                    <Drawing drawing={playerGame.prompt.drawing}
-                        width={500} height={500} />
-                    <div>Describe!</div>
-                    <form onSubmit={doTextSub}>
-                        <input value={textSub} onChange={e => setTextSub(e.target.value)} />
-                        <button>Submit</button>
-                    </form>
-                </div>
-            }
+            return respond(playerGame)
+        // if (playerGame.prompt.kind === 'word') {
+        //     return <div>
+        //         {playerList}
+        //         <div>Your prompt is: {playerGame.prompt.word}</div>
+        //         <div>Drawz!</div>
+        //         <Canvas draft={draftDrawing} onChange={setDraftDrawing} />
+        //         <button onClick={doDrawingSub}>Submit</button>
+        //     </div>
+        // } else {
+        //     return <div>
+        //         {playerList}
+        //         <div>Your prompt is:</div>
+        //         <Drawing drawing={playerGame.prompt.drawing}
+        //             width={500} height={500} />
+        //         <div>Describe!</div>
+        //         <form onSubmit={doTextSub}>
+        //             <input value={textSub} onChange={e => setTextSub(e.target.value)} />
+        //             <button>Submit</button>
+        //         </form>
+        //     </div>
+        // }
     }
 }
 

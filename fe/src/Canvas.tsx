@@ -11,18 +11,22 @@ export type DraftDrawing = {
 type CanvasProps = {
     draft: DraftDrawing
     onChange: (d: DraftDrawing) => void
+    width: number
+    height: number
 }
 
-export const Canvas: React.FC<CanvasProps> = ({ draft, onChange }) => {
+export const Canvas: React.FC<CanvasProps> = ({ draft, onChange, width, height }) => {
+    const divRef = useRef<HTMLDivElement>(null)
+    
     function touchStart(e: React.TouchEvent<HTMLDivElement>) {
         e.preventDefault()
-        console.log('touchstart')
+        console.log('touchstart', e.target)
         onChange(produce(draft, (draft) => {
             for (let idx = 0; idx < e.changedTouches.length; idx++) {
                 const touch = e.changedTouches.item(idx)
                 draft.inProgress[touch.identifier] = draft.drawing.paths.length
 
-                const rect = (e.target as HTMLDivElement).getBoundingClientRect()
+                const rect = divRef.current!.getBoundingClientRect()
                 const pt = {
                     x: touch.clientX - rect.left,
                     y: touch.clientY - rect.top,
@@ -38,7 +42,7 @@ export const Canvas: React.FC<CanvasProps> = ({ draft, onChange }) => {
         onChange(produce(draft, (draft) => {
             for (let idx = 0; idx < e.changedTouches.length; idx++) {
                 const touch = e.changedTouches.item(idx);
-                const rect = (e.target as SVGSVGElement).getBoundingClientRect()
+                const rect = divRef.current!.getBoundingClientRect()
                 const pt = {
                     x: touch.clientX - rect.left,
                     y: touch.clientY - rect.top,
@@ -51,10 +55,13 @@ export const Canvas: React.FC<CanvasProps> = ({ draft, onChange }) => {
 
     return (
         <div
+            ref={divRef}
+            className="canvas"
             onTouchStart={touchStart}
             onTouchMove={touchMove}
             style={{ touchAction: 'none' }}>
-            <Drawing drawing={draft.drawing} width={500} height={500} />
+            <Drawing drawing={draft.drawing} 
+            width={width} height={height} />
         </div>)
 }
 
