@@ -15,42 +15,74 @@ type CanvasProps = {
     height: number
 }
 
+type PointerMap = { [touchId: string]: types.Point }
+
 export const Canvas: React.FC<CanvasProps> = ({ draft, onChange, width, height }) => {
     const divRef = useRef<HTMLDivElement>(null)
-    
-    function touchStart(e: React.TouchEvent<HTMLDivElement>) {
-        e.preventDefault()
-        console.log('touchstart', e.target)
-        onChange(produce(draft, (draft) => {
-            for (let idx = 0; idx < e.changedTouches.length; idx++) {
-                const touch = e.changedTouches.item(idx)
-                draft.inProgress[touch.identifier] = draft.drawing.paths.length
 
+    function pointerStart(pointers: PointerMap) {
+        onChange(produce(draft, (draft) => {
+            for (const ptId in pointers) {
+                draft.inProgress[ptId] = draft.drawing.paths.length
                 const rect = divRef.current!.getBoundingClientRect()
                 const pt = {
-                    x: touch.clientX - rect.left,
-                    y: touch.clientY - rect.top,
+                    x: pointers[ptId].x - rect.left,
+                    y: pointers[ptId].y - rect.top,
                 }
                 draft.drawing.paths.push({ points: [pt] })
             }
         }))
     }
 
-    function touchMove(e: React.TouchEvent<HTMLDivElement>) {
-        e.preventDefault()
-        console.log('touchmove')
+    function pointerMove(pointers: PointerMap) {
         onChange(produce(draft, (draft) => {
-            for (let idx = 0; idx < e.changedTouches.length; idx++) {
-                const touch = e.changedTouches.item(idx);
+            for (const ptId in pointers) {
                 const rect = divRef.current!.getBoundingClientRect()
                 const pt = {
-                    x: touch.clientX - rect.left,
-                    y: touch.clientY - rect.top,
+                    x: pointers[ptId].x - rect.left,
+                    y: pointers[ptId].y - rect.top,
                 }
-                draft.drawing.paths[draft.inProgress[touch.identifier]]
-                    .points.push(pt)
+                draft.drawing.paths[draft.inProgress[ptId]].points.push(pt)
             }
         }))
+    }
+
+    function touchesToPointers(touches: React.TouchList): PointerMap {
+        const res: PointerMap = {}
+        for (let idx = 0; idx < touches.length; idx++) {
+            const touch = touches.item(idx)
+            res[touch.identifier] = {
+                x: touch.clientX,
+                y: touch.clientY,
+            }
+        }
+        return res
+    }
+
+    function touchStart(e: React.TouchEvent<HTMLDivElement>) {
+        e.preventDefault()
+        pointerStart(touchesToPointers(e.changedTouches))
+    }
+
+    function touchMove(e: React.TouchEvent<HTMLDivElement>) {
+        e.preventDefault()
+        pointerMove(touchesToPointers(e.changedTouches))
+    }
+
+
+    function mouseToPointers(e: React.MouseEvent<HTMLDivElement>): PointerMap {
+        return {
+            mouse: { x: e.clientX, y: e.clientY }
+        }
+    }
+
+
+    function mouseStart(e: React.MouseEvent<HTMLDivElement>) {
+        if (e.buttons === 1) { pointerStart(mouseToPointers(e)) }
+    }
+
+    function mouseMove(e: React.MouseEvent<HTMLDivElement>) {
+        if (e.buttons === 1) { pointerMove(mouseToPointers(e)) }
     }
 
     return (
@@ -59,9 +91,11 @@ export const Canvas: React.FC<CanvasProps> = ({ draft, onChange, width, height }
             className="canvas"
             onTouchStart={touchStart}
             onTouchMove={touchMove}
+            onMouseDown={mouseStart}
+            onMouseMove={mouseMove}
             style={{ touchAction: 'none' }}>
-            <Drawing drawing={draft.drawing} 
-            width={width} height={height} />
+            <Drawing drawing={draft.drawing}
+                width={width} height={height} />
         </div>)
 }
 

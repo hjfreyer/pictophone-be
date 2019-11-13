@@ -18,9 +18,7 @@ export const Drawing: React.FC<DrawingProps> = ({ drawing, width, height }) => {
     })
 
     return (
-        <svg
-            ref={svgRef}
-            style={{ touchAction: 'none' }}>
+        <svg ref={svgRef}>
             {
                 drawing.paths.map((p, idx) =>
                     <path key={idx}

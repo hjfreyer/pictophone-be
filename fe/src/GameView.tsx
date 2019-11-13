@@ -114,7 +114,12 @@ const ActiveGame: React.FC<ActiveGameProps> = ({ playerGame, submit }) => {
                 <button onClick={doDrawingSub}>Submit</button>
             </main>
             : <main id="game">
-
+                <Drawing drawing={playerGame.prompt.drawing}
+                    width={canvasWidth} height={canvasHeight} />
+                <form onSubmit={doTextSub}>
+                    <input value={textSub} onChange={e => setTextSub(e.target.value)} />
+                    <button>Submit</button>
+                </form>
             </main>
 
     switch (playerGame.state) {
