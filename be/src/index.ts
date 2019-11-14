@@ -6,11 +6,15 @@ import cors from 'cors'
 
 import * as types from './types.validator'
 import { Firestore, DocumentReference, Transaction } from '@google-cloud/firestore';
+import { Storage } from '@google-cloud/storage'
+import uuid from 'uuid/v1'
+import GetConfig from './config'
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
 });
 
+const storage = new Storage();
 const db = admin.firestore();
 
 // // Create a new express application instance
@@ -19,7 +23,7 @@ app.set('json spaces', 2)
 app.use(express.json());
 
 
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 8081;
 app.listen(port, function() {
     console.log(`Example app listening on port ${port}!`);
 });
@@ -37,6 +41,13 @@ type GameState = {
     playerIds: string[]
     submissions: types.Submission[][]
 }
+
+// function uploadDrawing(drawing: types.Drawing): [string, Promise<void>] {
+//     const id = `uuid/${uuid()}`
+//     return [id, async function() {
+//         return 
+//     }()]
+// }
 
 function initGame(): GameState {
     return {
@@ -138,7 +149,7 @@ function projectGameForPlayer(state: GameState, playerId: string): types.PlayerG
     const roundNum = Math.min(...state.submissions.map(a => a.length))
     // Game is over.
     if (roundNum === numPlayers) {
-        const series: types.Series[] = state.playerIds.map(() => ({ entries: []}))
+        const series: types.Series[] = state.playerIds.map(() => ({ entries: [] }))
         for (let rIdx = 0; rIdx < numPlayers; rIdx++) {
             for (let pIdx = 0; pIdx < numPlayers; pIdx++) {
                 series[(pIdx + rIdx) % numPlayers].entries.push({
@@ -170,7 +181,7 @@ function projectGameForPlayer(state: GameState, playerId: string): types.PlayerG
             playerIds: state.playerIds,
             prompt: state.submissions[(playerIdx + 1) % state.playerIds.length][roundNum - 1]
         }
-    } 
+    }
 
     return {
         state: "WAITING_FOR_PROMPT",
@@ -179,8 +190,24 @@ function projectGameForPlayer(state: GameState, playerId: string): types.PlayerG
 }
 
 
-async function applyAction(db: FirebaseFirestore.Firestore, action: types.Action): Promise<void> {
-    console.log('action: ', action)
+async function applyAction(db: FirebaseFirestore.Firestore, req: types.ActionRequest): Promise<void> {
+    console.log(req)
+    const uploads = req.uploads || {}
+    const translatedUploadIds :{[id: string]: string}= {}
+    if (1 < Object.keys(uploads).length) {
+        throw new Error('too many uploads')
+    }
+    for (const requestId in uploads) {
+        const storageId = `uuid/${uuid()}`
+        const upload = uploads[requestId]
+        translatedUploadIds[requestId] = storageId
+
+        // TODO: Prevent abuse by limiting the number of points in a drawing.
+        await storage.bucket(GetConfig().gcsBucket).file(storageId).save(JSON.stringify(upload.drawing))
+    }
+
+    const action = replaceRefs(translatedUploadIds, req.action)
+
     const gameId = action.gameId;
     await db.runTransaction(async (tx: Transaction): Promise<void> => {
         let log = await gameLog.get(tx, gameId);
@@ -214,6 +241,14 @@ async function applyAction(db: FirebaseFirestore.Firestore, action: types.Action
         log.lastTimestamp = admin.firestore.FieldValue.serverTimestamp()
         log.entries.push(newEntry)
         gameLog.set(tx, gameId, log)
+    })
+}
+
+function replaceRefs(translatedUploadIds :{[id: string]: string}, action: types.Action): types.Action {
+    return produce(action, (draft) => {
+        if (draft.kind === 'make_move' && draft.submission.kind === 'drawing') {
+            draft.submission.drawing.id = translatedUploadIds[draft.submission.drawing.id]
+        }
     })
 }
 
@@ -282,10 +317,11 @@ function playerGameRef(db: Firestore, [playerId, gameId]: [string, string]): Fir
 const playerGame = mkDpl(db, playerGameRef, types.validate('PlayerGame'))
 
 app.options('/action', cors())
-app.post('/action', cors(), async function(req: Request<Dictionary<string>>, res) {
-    console.log(req.body)
-    await applyAction(db, req.body)
-    res.status(200)
-    res.json({})
+app.post('/action', cors(), async function(req: Request<Dictionary<string>>, res, next) {
+    applyAction(db, req.body).then(() => {
+        res.status(200)
+        res.json({})
+    }).catch(next)
 })
+
 

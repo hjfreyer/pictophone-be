@@ -25,7 +25,7 @@
     "deploy": "echo 'www.pictophone.app' > build/CNAME && gh-pages -d build -b gh-pages",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
-    "cptypes": "cp ../be/src/types.* src/"
+    "cptypes": " cp ../be/src/types.* src/ && sed -i \"s/import Ajv = require('ajv');/import Ajv from 'ajv';/;/^export [{]/d\" src/types.validator.ts"
   },
   "eslintConfig": {
     "extends": "react-app"

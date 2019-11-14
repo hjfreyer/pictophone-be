@@ -43,23 +43,39 @@ const SignIn: React.FC = () => {
 
 type GamePageParams = {
     playerId: string
-    dispatch: (a: types.Action) => void
+    dispatch: (a: types.ActionRequest) => void
 }
 
 const GamePage: React.FC<GamePageParams> = ({ playerId, dispatch }) => {
     const { gameId } = useParams()
 
     const startGame = () => dispatch({
-        kind: "start_game",
-        playerId: playerId!,
-        gameId: gameId!
+        action: {
+            kind: "start_game",
+            playerId: playerId!,
+            gameId: gameId!
+        }
     })
 
-    const submit = (submission: types.Submission) => dispatch({
-        kind: "make_move",
-        playerId: playerId!,
-        gameId: gameId!,
-        submission,
+    const submitWord = (word: string) => dispatch({
+        action: {
+            kind: "make_move",
+            playerId: playerId!,
+            gameId: gameId!,
+            submission: {kind: "word", word}
+        }
+    })
+
+     const submitDrawing = (drawing: types.Drawing) => dispatch({
+        action: {
+            kind: "make_move",
+            playerId: playerId!,
+            gameId: gameId!,
+            submission: {kind: "drawing", drawing: {id: 'request/0'}}
+        },
+        uploads: {
+            'request/0': {kind: "drawing", drawing}
+        }
     })
 
     return <FirestoreDocument
@@ -72,7 +88,8 @@ const GamePage: React.FC<GamePageParams> = ({ playerId, dispatch }) => {
             return <GameView
                 playerGame={pg}
                 startGame={startGame}
-                submit={submit}
+                submitWord={submitWord}
+                submitDrawing={submitDrawing}
             />
         }}
     />
@@ -81,7 +98,7 @@ const GamePage: React.FC<GamePageParams> = ({ playerId, dispatch }) => {
 
 
 
-async function postit(body: types.Action): Promise<void> {
+async function postit(body: types.ActionRequest): Promise<void> {
     const res = await fetch(Config().backendAddr + '/action', {
         method: 'post',
         body: JSON.stringify(body),
@@ -101,7 +118,7 @@ const Content: React.FC = () => {
         return <SignIn />
     }
 
-    const dispatch = async (a: types.Action): Promise<void> => {
+    const dispatch = async (a: types.ActionRequest): Promise<void> => {
         await postit(a)
     }
 

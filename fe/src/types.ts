@@ -1,13 +1,13 @@
 
-export type GameLog = {
-    lastTimestamp: any
-    entries: GameLogEntry[]
+// RPCs
+
+export type ActionRequest = {
+    action: Action
+    uploads?: {[uploadId: string]: Upload}
 }
 
-export type GameLogEntry = {
-    timestamp: any
-    action: Action
-}
+
+// Action
 
 export type Action = JoinGame | StartGame | MakeMove;
 
@@ -39,8 +39,13 @@ export type Path = {
     points: Point[]
 }
 
-export type Drawing = {
-    paths: Path[]
+export type Upload = {
+    kind: 'drawing'
+    drawing: Drawing
+}
+
+export type Ref = {
+    id: string
 }
 
 export type Submission = {
@@ -48,8 +53,16 @@ export type Submission = {
     word: string
 } | {
     kind: 'drawing'
-    drawing: Drawing
+    drawing: Ref
 }
+
+// Uploads
+
+export type Drawing = {
+    paths: Path[]
+}
+
+// Projected models.
 
 export type PlayerGame = (
     UnstartedGame
@@ -93,4 +106,15 @@ export type Series = {
 export type SeriesEntry = {
     playerId: string
     submission: Submission
+}
+
+// Internal data structures.
+export type GameLog = {
+    lastTimestamp: any
+    entries: GameLogEntry[]
+}
+
+export type GameLogEntry = {
+    timestamp: any
+    action: Action
 }

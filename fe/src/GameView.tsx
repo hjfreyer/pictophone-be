@@ -1,16 +1,19 @@
 
 import React, { useState, useEffect } from 'react';
+
 import * as types from './types'
 import Canvas, { DraftDrawing } from './Canvas'
 import Drawing from './Drawing'
+import { validate } from './types.validator'
 
 type GameViewProps = {
     playerGame: types.PlayerGame
     startGame: () => void
-    submit: (s: types.Submission) => void
+    submitWord: (word: string) => void
+    submitDrawing: (s: types.Drawing) => void
 }
 
-const GameView: React.FC<GameViewProps> = ({ playerGame, startGame, submit }) => {
+const GameView: React.FC<GameViewProps> = ({ playerGame, startGame, submitWord, submitDrawing }) => {
 
     const playerList = <div>
         Players: {playerGame.playerIds.map((p, idx) => <div key={idx}>{p}</div>)}
@@ -27,7 +30,7 @@ const GameView: React.FC<GameViewProps> = ({ playerGame, startGame, submit }) =>
         case "FIRST_PROMPT":
         case "WAITING_FOR_PROMPT":
         case "RESPOND_TO_PROMPT":
-            return <ActiveGame playerGame={playerGame} submit={submit} />
+            return <ActiveGame playerGame={playerGame} submitWord={submitWord} submitDrawing={submitDrawing} />
 
         case "GAME_OVER":
             return (
@@ -44,17 +47,21 @@ const GameView: React.FC<GameViewProps> = ({ playerGame, startGame, submit }) =>
 
 type ActiveGameProps = {
     playerGame: types.FirstPromptGame | types.WaitingForPromptGame | types.RespondToPromptGame
-    submit: (s: types.Submission) => void
+    submitWord: (word: string) => void
+    submitDrawing: (s: types.Drawing) => void
 }
 
-const ActiveGame: React.FC<ActiveGameProps> = ({ playerGame, submit }) => {
-    const [textSub, setTextSub] = useState("")
-    const [draftDrawing, setDraftDrawing] = useState<DraftDrawing>({
+const ActiveGame: React.FC<ActiveGameProps> = ({ playerGame, submitWord, submitDrawing }) => {
+    const initText = ''
+    const initDraftDrawing = {
         drawing: {
             paths: []
         },
         inProgress: {},
-    })
+    }
+    
+    const [textSub, setTextSub] = useState("")
+    const [draftDrawing, setDraftDrawing] = useState<DraftDrawing>(initDraftDrawing)
 
     const [dims, setDims] = useState({
         width: window.innerWidth,
@@ -70,12 +77,13 @@ const ActiveGame: React.FC<ActiveGameProps> = ({ playerGame, submit }) => {
 
     const doTextSub = (e: React.ChangeEvent<HTMLFormElement>) => {
         e.preventDefault()
-        submit({ kind: "word", word: textSub })
-        setTextSub("")
+        submitWord(textSub)
+        setTextSub(initText)
     }
 
     const doDrawingSub = () => {
-        submit({ kind: "drawing", drawing: draftDrawing.drawing })
+        submitDrawing(draftDrawing.drawing)
+        setDraftDrawing(initDraftDrawing)
     }
 
     const playerList = <div>
@@ -114,7 +122,7 @@ const ActiveGame: React.FC<ActiveGameProps> = ({ playerGame, submit }) => {
                 <button onClick={doDrawingSub}>Submit</button>
             </main>
             : <main id="game">
-                <Drawing drawing={playerGame.prompt.drawing}
+                <DownloadDrawing drawing={playerGame.prompt.drawing}
                     width={canvasWidth} height={canvasHeight} />
                 <form onSubmit={doTextSub}>
                     <input value={textSub} onChange={e => setTextSub(e.target.value)} />
@@ -176,10 +184,36 @@ const Entry: React.FC<{ entry: types.SeriesEntry }> = ({ entry }) => {
     } else {
         return <div>
             <h3>{entry.playerId} drew</h3>
-            <Drawing drawing={entry.submission.drawing}
+            <DownloadDrawing drawing={entry.submission.drawing}
                 width={500} height={500} />
         </div>
     }
 }
 
+type DownloadDrawingProps = {
+    drawing : types.Ref
+    width: number
+    height: number
+}
+
+const DownloadDrawing :React.FC<DownloadDrawingProps> = ({drawing, width, height}) => {
+    const [downloaded, setDownloaded] = useState<types.Drawing | null>(null)
+    useEffect(() => {
+        (async () => {
+            const res = await fetch(
+                `https://storage.googleapis.com/pictophone-app-drawings/${drawing.id}`, {
+
+                })
+            const d = validate('Drawing')(await res.json())
+            setDownloaded(d)
+        })()
+    }, [drawing])
+    
+    if (downloaded === null) {
+        return <div>Loading...</div>
+    }
+
+    return <Drawing drawing={downloaded} width={width} height={height} />
+
+}  
 export default GameView
