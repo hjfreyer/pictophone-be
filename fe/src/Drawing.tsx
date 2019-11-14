@@ -17,10 +17,16 @@ export const Drawing: React.FC<DrawingProps> = ({ drawing, width, height }) => {
         e.style.height = height + 'px'
     })
 
+    const scaled: types.Drawing = {
+        paths: drawing.paths.map(p => ({
+            points: p.points.map(pt => ({ x: pt.x * width, y: pt.y * height }))
+        }))
+    }
+
     return (
         <svg ref={svgRef}>
             {
-                drawing.paths.map((p, idx) =>
+                scaled.paths.map((p, idx) =>
                     <path key={idx}
                         d={renderPath(p)}
                         stroke="black"

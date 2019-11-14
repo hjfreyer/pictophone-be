@@ -189,6 +189,17 @@ function projectGameForPlayer(state: GameState, playerId: string): types.PlayerG
     }
 }
 
+function compressDrawing(drawing: types.Drawing): types.CompressedDrawing {
+    return {
+        paths: drawing.paths.map(p => {
+            const res : number[] = []
+            for (const pt of p.points) {
+                res.push(pt.x, pt.y)
+            }
+            return res
+        })
+    }
+}
 
 async function applyAction(db: FirebaseFirestore.Firestore, req: types.ActionRequest): Promise<void> {
     console.log(req)
@@ -203,7 +214,8 @@ async function applyAction(db: FirebaseFirestore.Firestore, req: types.ActionReq
         translatedUploadIds[requestId] = storageId
 
         // TODO: Prevent abuse by limiting the number of points in a drawing.
-        await storage.bucket(GetConfig().gcsBucket).file(storageId).save(JSON.stringify(upload.drawing))
+        await storage.bucket(GetConfig().gcsBucket).file(storageId).save(
+            JSON.stringify(compressDrawing(upload.drawing)))
     }
 
     const action = replaceRefs(translatedUploadIds, req.action)

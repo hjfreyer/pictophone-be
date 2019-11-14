@@ -62,6 +62,11 @@ export type Drawing = {
     paths: Path[]
 }
 
+export type CompressedDrawing = {
+    // Each path alternates between x and y. Each coordinate is normalzied between 0 and 1.
+    paths: number[][]
+}
+
 // Projected models.
 
 export type PlayerGame = (

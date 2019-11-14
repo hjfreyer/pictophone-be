@@ -184,8 +184,7 @@ const Entry: React.FC<{ entry: types.SeriesEntry }> = ({ entry }) => {
     } else {
         return <div>
             <h3>{entry.playerId} drew</h3>
-            <DownloadDrawing drawing={entry.submission.drawing}
-                width={500} height={500} />
+            <DownloadDrawing drawing={entry.submission.drawing} width={300} height={400} />
         </div>
     }
 }
@@ -196,6 +195,20 @@ type DownloadDrawingProps = {
     height: number
 }
 
+
+function decompressDrawing(compressed: types.CompressedDrawing ): types.Drawing {
+    return {
+        paths: compressed.paths.map(p => {
+            const res : types.Path = {points: []}
+            for (let i = 0; i < p.length; i += 2) {
+                res.points.push({x: p[i], y: p[i+1]})
+            }
+            return res
+        })
+    }
+}
+
+
 const DownloadDrawing :React.FC<DownloadDrawingProps> = ({drawing, width, height}) => {
     const [downloaded, setDownloaded] = useState<types.Drawing | null>(null)
     useEffect(() => {
@@ -204,8 +217,8 @@ const DownloadDrawing :React.FC<DownloadDrawingProps> = ({drawing, width, height
                 `https://storage.googleapis.com/pictophone-app-drawings/${drawing.id}`, {
 
                 })
-            const d = validate('Drawing')(await res.json())
-            setDownloaded(d)
+            const d = validate('CompressedDrawing')(await res.json())
+            setDownloaded(decompressDrawing(d))
         })()
     }, [drawing])
     

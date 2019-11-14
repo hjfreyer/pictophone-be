@@ -26,8 +26,8 @@ export const Canvas: React.FC<CanvasProps> = ({ draft, onChange, width, height }
                 draft.inProgress[ptId] = draft.drawing.paths.length
                 const rect = divRef.current!.getBoundingClientRect()
                 const pt = {
-                    x: pointers[ptId].x - rect.left,
-                    y: pointers[ptId].y - rect.top,
+                    x: (pointers[ptId].x - rect.left) / width,
+                    y: (pointers[ptId].y - rect.top) / height,
                 }
                 draft.drawing.paths.push({ points: [pt] })
             }
@@ -39,8 +39,8 @@ export const Canvas: React.FC<CanvasProps> = ({ draft, onChange, width, height }
             for (const ptId in pointers) {
                 const rect = divRef.current!.getBoundingClientRect()
                 const pt = {
-                    x: pointers[ptId].x - rect.left,
-                    y: pointers[ptId].y - rect.top,
+                    x: (pointers[ptId].x - rect.left) / width,
+                    y: (pointers[ptId].y - rect.top) / height,
                 }
                 draft.drawing.paths[draft.inProgress[ptId]].points.push(pt)
             }
@@ -59,6 +59,12 @@ export const Canvas: React.FC<CanvasProps> = ({ draft, onChange, width, height }
         return res
     }
 
+    function mouseToPointers(e: React.MouseEvent<HTMLDivElement>): PointerMap {
+        return {
+            mouse: { x: e.clientX, y: e.clientY }
+        }
+    }
+
     function touchStart(e: React.TouchEvent<HTMLDivElement>) {
         e.preventDefault()
         pointerStart(touchesToPointers(e.changedTouches))
@@ -68,14 +74,6 @@ export const Canvas: React.FC<CanvasProps> = ({ draft, onChange, width, height }
         e.preventDefault()
         pointerMove(touchesToPointers(e.changedTouches))
     }
-
-
-    function mouseToPointers(e: React.MouseEvent<HTMLDivElement>): PointerMap {
-        return {
-            mouse: { x: e.clientX, y: e.clientY }
-        }
-    }
-
 
     function mouseStart(e: React.MouseEvent<HTMLDivElement>) {
         if (e.buttons === 1) { pointerStart(mouseToPointers(e)) }
@@ -97,31 +95,6 @@ export const Canvas: React.FC<CanvasProps> = ({ draft, onChange, width, height }
             <Drawing drawing={draft.drawing}
                 width={width} height={height} />
         </div>)
-}
-
-
-function resize(ref: React.RefObject<SVGSVGElement>) {
-    const c: SVGSVGElement = ref.current!
-
-    c.style.width = 500 + 'px'
-    c.style.height = 500 + 'px'
-    // c.style.width = window.innerWidth + "px";
-    // c.style.height = window.innerHeight + "px";
-}
-
-function renderPath(p: types.Path): string {
-    if (p.points.length == 0) {
-        return ""
-    }
-    if (p.points.length == 1) {
-        const { x, y } = p.points[0]
-        return `M ${x} ${y} L ${x + 1} ${y}`
-    }
-    let res = `M ${p.points[0].x} ${p.points[0].y}`
-    for (const { x, y } of p.points.slice(1)) {
-        res += `L ${x} ${y}`
-    }
-    return res
 }
 
 export default Canvas
