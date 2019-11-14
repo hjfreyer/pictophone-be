@@ -25,7 +25,8 @@ sub_deploy() {
         --region us-east1 \
         --image gcr.io/pictophone-app/pictophone-be \
         --platform managed \
-        --allow-unauthenticated
+        --allow-unauthenticated \
+        --service-account=pictophone-api-prod@pictophone-app.iam.gserviceaccount.com
 }
 
 subcommand=$1

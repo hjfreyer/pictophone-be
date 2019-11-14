@@ -1,6 +1,6 @@
 [
     {
-      "origin": ["http://localhost:8080"],
+      "origin": ["http://localhost:8080", "https://pictophone.app", "https://www.pictophone.app"],
       "responseHeader": ["Content-Type"],
       "method": ["GET"],
       "maxAgeSeconds": 3600
