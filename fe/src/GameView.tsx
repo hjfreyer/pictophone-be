@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 
 import * as types from './types'
 import Canvas, { DraftDrawing } from './Canvas'
@@ -33,15 +33,7 @@ const GameView: React.FC<GameViewProps> = ({ playerGame, startGame, submitWord, 
             return <ActiveGame playerGame={playerGame} submitWord={submitWord} submitDrawing={submitDrawing} />
 
         case "GAME_OVER":
-            return (
-                <div>
-                    {playerList}
-                    {playerGame.series.map((s, idx) =>
-                        <Series key={idx} series={s} seriesIdx={idx} />
-                    )}
-
-                </div>
-            )
+            return <Series serieses={playerGame.series} />
     }
 }
 
@@ -59,7 +51,7 @@ const ActiveGame: React.FC<ActiveGameProps> = ({ playerGame, submitWord, submitD
         },
         inProgress: {},
     }
-    
+
     const [textSub, setTextSub] = useState("")
     const [draftDrawing, setDraftDrawing] = useState<DraftDrawing>(initDraftDrawing)
 
@@ -137,71 +129,68 @@ const ActiveGame: React.FC<ActiveGameProps> = ({ playerGame, submitWord, submitD
             return waitForPrompt
         case "RESPOND_TO_PROMPT":
             return respond(playerGame)
-        // if (playerGame.prompt.kind === 'word') {
-        //     return <div>
-        //         {playerList}
-        //         <div>Your prompt is: {playerGame.prompt.word}</div>
-        //         <div>Drawz!</div>
-        //         <Canvas draft={draftDrawing} onChange={setDraftDrawing} />
-        //         <button onClick={doDrawingSub}>Submit</button>
-        //     </div>
-        // } else {
-        //     return <div>
-        //         {playerList}
-        //         <div>Your prompt is:</div>
-        //         <Drawing drawing={playerGame.prompt.drawing}
-        //             width={500} height={500} />
-        //         <div>Describe!</div>
-        //         <form onSubmit={doTextSub}>
-        //             <input value={textSub} onChange={e => setTextSub(e.target.value)} />
-        //             <button>Submit</button>
-        //         </form>
-        //     </div>
-        // }
     }
 }
 
 type SeriesProps = {
-    series: types.Series
-    seriesIdx: number
+    serieses: types.Series[]
 }
 
-const Series: React.FC<SeriesProps> = ({ series, seriesIdx }) => {
-    return <div>
-        <h2>Series {seriesIdx}</h2>
+const Series: React.FC<SeriesProps> = ({ serieses }) => {
+    return <main id="sharing">
+        <div className="series">
+            Scroll this way ->
+        </div>
         {
-            series.entries.map((e, eIdx) => <Entry key={eIdx} entry={e} />)
+            serieses.map((series, seriesIdx) => <div key={seriesIdx} className="series">
+                {
+                    series.entries.map((e, eIdx) => <Entry key={eIdx} entry={e} />)
+                }
+            </div>)
         }
-    </div>
+    </main>
 }
 
 const Entry: React.FC<{ entry: types.SeriesEntry }> = ({ entry }) => {
+    const container = useRef<HTMLDivElement>(null)
+    const [dims, setDims] = useState({ width: 0, height: 0 })
+
+    useEffect(() => {
+        setDims({
+            width: container.current!.offsetWidth,
+            height: container.current!.offsetHeight,
+        });
+    }, [])
+
     if (entry.submission.kind === 'word') {
-        return <div>
-            <h3>{entry.playerId} said</h3>
-            <div>{entry.submission.word}</div>
-        </div>
+        return <div ref={container}
+            className="words">{entry.submission.word}</div>
     } else {
-        return <div>
-            <h3>{entry.playerId} drew</h3>
-            <DownloadDrawing drawing={entry.submission.drawing} width={300} height={400} />
+        const width = widthForBox(dims.width, dims.height)
+        return <div ref={container} className="drawing">
+            <DownloadDrawing drawing={entry.submission.drawing}
+                width={width} height={4 * width / 3} />
         </div>
     }
 }
 
+function widthForBox(width: number, height: number): number {
+    let widthFromHeight = height * 0.75
+    return Math.min(width, widthFromHeight)
+}
+
 type DownloadDrawingProps = {
-    drawing : types.Ref
+    drawing: types.Ref
     width: number
     height: number
 }
 
-
-function decompressDrawing(compressed: types.CompressedDrawing ): types.Drawing {
+function decompressDrawing(compressed: types.CompressedDrawing): types.Drawing {
     return {
         paths: compressed.paths.map(p => {
-            const res : types.Path = {points: []}
+            const res: types.Path = { points: [] }
             for (let i = 0; i < p.length; i += 2) {
-                res.points.push({x: p[i], y: p[i+1]})
+                res.points.push({ x: p[i], y: p[i + 1] })
             }
             return res
         })
@@ -209,24 +198,24 @@ function decompressDrawing(compressed: types.CompressedDrawing ): types.Drawing 
 }
 
 
-const DownloadDrawing :React.FC<DownloadDrawingProps> = ({drawing, width, height}) => {
+const DownloadDrawing: React.FC<DownloadDrawingProps> = ({ drawing, width, height }) => {
     const [downloaded, setDownloaded] = useState<types.Drawing | null>(null)
     useEffect(() => {
         (async () => {
             const res = await fetch(
                 `https://storage.googleapis.com/pictophone-app-drawings/${drawing.id}`, {
 
-                })
+            })
             const d = validate('CompressedDrawing')(await res.json())
             setDownloaded(decompressDrawing(d))
         })()
     }, [drawing])
-    
+
     if (downloaded === null) {
         return <div>Loading...</div>
     }
 
     return <Drawing drawing={downloaded} width={width} height={height} />
 
-}  
+}
 export default GameView
