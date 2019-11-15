@@ -64,7 +64,6 @@ code {
 
 #sharing {
     display: flex;
-    max-width: 400px;
     height: 100%;
 
     margin: auto;
