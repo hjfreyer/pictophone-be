@@ -30,6 +30,7 @@ export const Drawing: React.FC<DrawingProps> = ({ drawing, width, height }) => {
                     <path key={idx}
                         d={renderPath(p)}
                         stroke="black"
+                        strokeWidth="2"
                         fill="transparent" />
                 )
             }
