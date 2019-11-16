@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useRef } from 'react'
 import * as types from './types'
 import produce from 'immer'
 import Drawing from './Drawing'

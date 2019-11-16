@@ -78,10 +78,6 @@ const ActiveGame: React.FC<ActiveGameProps> = ({ playerGame, submitWord, submitD
         setDraftDrawing(initDraftDrawing)
     }
 
-    const playerList = <div>
-        Players: {playerGame.playerIds.map((p, idx) => <div key={idx}>{p}</div>)}
-    </div>
-
     const firstPrompt = <main id="game">
         <header>Pictophone!</header>
         <div className="instructions">Come up with a thing!</div>

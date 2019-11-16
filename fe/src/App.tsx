@@ -1,44 +1,53 @@
-import React, { useState } from 'react';
-import logo from './logo.svg';
+import React, { useState, useEffect } from 'react';
 import './App.css';
 
-import firebase from '@firebase/app';
-import '@firebase/firestore';
-import { FirestoreProvider, FirestoreCollection, FirestoreDocument } from 'react-firestore';
-
+import firebase from 'firebase/app';
+import 'firebase/auth';
+import 'firebase/firestore';
+import { FirestoreProvider, FirestoreDocument } from 'react-firestore';
+import StyledFirebaseAuth from 'react-firebaseui/StyledFirebaseAuth';
 import {
-    BrowserRouter as Router,
-    Switch,
-    useParams, useHistory, useLocation,
-    Route, Link, match, RouteComponentProps
+    BrowserRouter as Router, Switch, useParams, useLocation, Route, Redirect
 } from "react-router-dom";
-import * as types from './types';
-import { validate } from './types.validator'
 
 import GameView from './GameView'
 import Home from './Home'
 import Config from './config'
+import * as types from './types';
+import { validate } from './types.validator'
 
 const config = {
-    projectId: 'pictophone-app',
+    apiKey: "AIzaSyCzMg7Q2ByK5UxUd_x730LT8TmOmbA61MU",
+    authDomain: "pictophone-app.firebaseapp.com",
+    databaseURL: "https://pictophone-app.firebaseio.com",
+    projectId: "pictophone-app",
+    storageBucket: Config().storageBucket,
+    messagingSenderId: "837882351009",
+    appId: "1:837882351009:web:9056a6b26d58fb373ecfe0"
 };
 
 const app = firebase.initializeApp(config);
-const db = app.firestore!();
+const auth = app.auth()
 
-const SignIn: React.FC = () => {
-    const [id, setId] = useState<string>('')
-    const history = useHistory()
+const uiConfig = {
+    // Popup signin flow rather than redirect flow.
+    signInFlow: 'popup',
+    signInOptions: [
+        firebase.auth.GoogleAuthProvider.PROVIDER_ID,
+        firebase.auth.EmailAuthProvider.PROVIDER_ID,
+    ],
+    callbacks: {
+        // Avoid redirects after sign-in.
+        signInSuccessWithAuthResult: () => false
+    }
+};
 
-    return <div>
-        <h1>Sign In</h1>
-
-        <form onSubmit={() => history.push('?u=' + id)}>
-            <input
-                type="text" value={id} onChange={e => setId(e.target.value)} />
-            <button>Submit</button>
-        </form>
-    </div>
+const Landing: React.FC = () => {
+    return <React.Fragment>
+        <h1>Hey it's Pictophone!</h1>
+        <p>Care to sign in?</p>
+        <StyledFirebaseAuth uiConfig={uiConfig} firebaseAuth={firebase.auth()} />
+    </React.Fragment>
 }
 
 type GamePageParams = {
@@ -62,19 +71,19 @@ const GamePage: React.FC<GamePageParams> = ({ playerId, dispatch }) => {
             kind: "make_move",
             playerId: playerId!,
             gameId: gameId!,
-            submission: {kind: "word", word}
+            submission: { kind: "word", word }
         }
     })
 
-     const submitDrawing = (drawing: types.Drawing) => dispatch({
+    const submitDrawing = (drawing: types.Drawing) => dispatch({
         action: {
             kind: "make_move",
             playerId: playerId!,
             gameId: gameId!,
-            submission: {kind: "drawing", drawing: {id: 'request/0'}}
+            submission: { kind: "drawing", drawing: { id: 'request/0' } }
         },
         uploads: {
-            'request/0': {kind: "drawing", drawing}
+            'request/0': { kind: "drawing", drawing }
         }
     })
 
@@ -95,11 +104,8 @@ const GamePage: React.FC<GamePageParams> = ({ playerId, dispatch }) => {
     />
 }
 
-
-
-
 async function postit(body: types.ActionRequest): Promise<void> {
-    const res = await fetch(Config().backendAddr + '/action', {
+    await fetch(Config().backendAddr + '/action', {
         method: 'post',
         body: JSON.stringify(body),
         mode: 'cors',
@@ -110,12 +116,28 @@ async function postit(body: types.ActionRequest): Promise<void> {
     });
 }
 
-const Content: React.FC = () => {
-    const urlParams = new URLSearchParams(useLocation().search);
-    const playerId = urlParams.get('u');
+type AuthInfo = { ready: false } | { ready: true, user: firebase.User | null }
 
-    if (playerId === null) {
-        return <SignIn />
+const Content: React.FC = () => {
+    const location = useLocation()
+    const [authInfo, setAuthInfo] = useState<AuthInfo>({ ready: false })
+
+    useEffect(() => {
+        return auth.onAuthStateChanged(user => setAuthInfo({ ready: true, user }))
+    }, [])
+
+    if (!authInfo.ready) {
+        return <div>Loading!</div>
+    }
+
+    (window as any)['signout'] = () => auth.signOut()
+
+    if (!authInfo.user) {
+        if (location.pathname !== '/') {
+            return <Redirect to="/" />
+        } else {
+            return <Landing />
+        }
     }
 
     const dispatch = async (a: types.ActionRequest): Promise<void> => {
@@ -124,11 +146,15 @@ const Content: React.FC = () => {
 
     return <Switch>
         <Route path="/" exact>
-            <Home playerId={playerId} dispatch={dispatch} />
+            {
+                authInfo.user
+                    ? <Home playerId={authInfo.user.uid} dispatch={dispatch} />
+                    : <Landing />
+            }
         </Route>
 
         <Route path="/g/:gameId" exact>
-            <GamePage playerId={playerId} dispatch={dispatch} />
+            <GamePage playerId={authInfo.user.uid} dispatch={dispatch} />
         </Route>
     </Switch>
 }

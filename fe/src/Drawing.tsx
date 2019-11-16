@@ -39,10 +39,10 @@ export const Drawing: React.FC<DrawingProps> = ({ drawing, width, height }) => {
 }
 
 function renderPath(p: types.Path): string {
-    if (p.points.length == 0) {
+    if (p.points.length === 0) {
         return ""
     }
-    if (p.points.length == 1) {
+    if (p.points.length === 1) {
         const { x, y } = p.points[0]
         return `M ${x} ${y} L ${x + 1} ${y}`
     }

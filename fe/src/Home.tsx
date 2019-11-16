@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Link, useLocation } from 'react-router-dom'
-import { FirestoreProvider, FirestoreCollection, FirestoreDocument } from 'react-firestore';
+import { Link } from 'react-router-dom'
+import { FirestoreCollection } from 'react-firestore';
 
 import * as types from './types'
 
@@ -32,7 +32,7 @@ const Home: React.FC<HomeProps> = ({ playerId, dispatch }) => {
                             : <div>
                                 {data.map((r) => (
                                     <div key={r.id}>
-                                        <Link to={`/g/${r.id}?u=${playerId}`}>{r.id}</Link></div>))}
+                                        <Link to={`/g/${r.id}`}>{r.id}</Link></div>))}
                             </div>
                     }
                 </div>
