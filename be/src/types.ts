@@ -6,10 +6,10 @@ export type ActionRequest = {
     uploads?: {[uploadId: string]: Upload}
 }
 
-
 // Action
 
-export type Action = JoinGame | StartGame | MakeMove;
+export type Action = JoinGame | StartGame | MakeMove
+
 
 export type JoinGame = {
     kind: 'join_game'
@@ -30,24 +30,6 @@ export type MakeMove = {
     submission: Submission
 }
 
-export type Point = {
-    x: number,
-    y: number,
-}
-
-export type Path = {
-    points: Point[]
-}
-
-export type Upload = {
-    kind: 'drawing'
-    drawing: Drawing
-}
-
-export type Ref = {
-    id: string
-}
-
 export type Submission = {
     kind: 'word'
     word: string
@@ -58,8 +40,9 @@ export type Submission = {
 
 // Uploads
 
-export type Drawing = {
-    paths: Path[]
+export type Upload = {
+    kind: 'drawing'
+    drawing: Drawing
 }
 
 export type CompressedDrawing = {
@@ -113,6 +96,21 @@ export type SeriesEntry = {
     submission: Submission
 }
 
+// Other shared structures
+
+export type Drawing = {
+    paths: Path[]
+}
+
+export type Path = {
+    points: Point[]
+}
+
+export type Point = {
+    x: number,
+    y: number,
+}
+
 // Internal data structures.
 export type GameLog = {
     lastTimestamp: any
@@ -122,4 +120,8 @@ export type GameLog = {
 export type GameLogEntry = {
     timestamp: any
     action: Action
+}
+
+export type Ref = {
+    id: string
 }
