@@ -1,10 +1,10 @@
-import React, { useRef } from 'react'
-import * as types from './types'
 import produce from 'immer'
+import React, { useRef } from 'react'
 import Drawing from './Drawing'
+import { Drawing as DrawingModel } from './model/Upload'
 
 export type DraftDrawing = {
-    drawing: types.Drawing
+    drawing: DrawingModel
     inProgress: { [touchId: string]: number }
 }
 
@@ -15,7 +15,9 @@ type CanvasProps = {
     height: number
 }
 
-type PointerMap = { [touchId: string]: types.Point }
+type Point = { x: number, y: number }
+
+type PointerMap = { [touchId: string]: Point }
 
 export const Canvas: React.FC<CanvasProps> = ({ draft, onChange, width, height }) => {
     const divRef = useRef<HTMLDivElement>(null)
@@ -29,7 +31,7 @@ export const Canvas: React.FC<CanvasProps> = ({ draft, onChange, width, height }
                     x: (pointers[ptId].x - rect.left) / width,
                     y: (pointers[ptId].y - rect.top) / height,
                 }
-                draft.drawing.paths.push({ points: [pt] })
+                draft.drawing.paths.push([pt.x, pt.y])
             }
         }))
     }
@@ -42,7 +44,7 @@ export const Canvas: React.FC<CanvasProps> = ({ draft, onChange, width, height }
                     x: (pointers[ptId].x - rect.left) / width,
                     y: (pointers[ptId].y - rect.top) / height,
                 }
-                draft.drawing.paths[draft.inProgress[ptId]].points.push(pt)
+                draft.drawing.paths[draft.inProgress[ptId]].push(pt.x, pt.y)
             }
         }))
     }

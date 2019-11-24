@@ -1,21 +1,19 @@
 import React, { useState } from 'react';
-import { Link } from 'react-router-dom'
 import { FirestoreCollection } from 'react-firestore';
-
-import * as types from './types'
+import { Link } from 'react-router-dom';
+import * as base from './base';
 
 type HomeProps = {
     playerId: string
-    dispatch: (a: types.ActionRequest) => void
+    dispatch: base.Dispatch
 }
 
 const Home: React.FC<HomeProps> = ({ playerId, dispatch }) => {
-    const joinGame = (gameId: string) => dispatch({
-        action: {
-            kind: "join_game",
-            playerId,
-            gameId,
-        }
+    const joinGame = (gameId: string) => dispatch.action({
+        version: 0,
+        kind: "join_game",
+        playerId,
+        gameId,
     })
 
     return <div>

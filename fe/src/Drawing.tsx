@@ -1,10 +1,18 @@
 import React, { useRef, useEffect } from 'react'
-import * as types from './types'
+import { Drawing as DrawingModel } from './model/Upload'
 
 type DrawingProps = {
-    drawing: types.Drawing
+    drawing: DrawingModel
     width: number
     height: number
+}
+
+function scalePath(path: number[], sx: number, sy: number) {
+    const res: number[] = []
+    for (let i = 0; i < path.length; i += 2) {
+        res.push(path[i] * sx, path[i + 1] * sy)
+    }
+    return res
 }
 
 export const Drawing: React.FC<DrawingProps> = ({ drawing, width, height }) => {
@@ -17,10 +25,8 @@ export const Drawing: React.FC<DrawingProps> = ({ drawing, width, height }) => {
         e.style.height = height + 'px'
     })
 
-    const scaled: types.Drawing = {
-        paths: drawing.paths.map(p => ({
-            points: p.points.map(pt => ({ x: pt.x * width, y: pt.y * height }))
-        }))
+    const scaled: DrawingModel = {
+        paths: drawing.paths.map(path => scalePath(path, width, height))
     }
 
     return (
@@ -38,17 +44,18 @@ export const Drawing: React.FC<DrawingProps> = ({ drawing, width, height }) => {
     )
 }
 
-function renderPath(p: types.Path): string {
-    if (p.points.length === 0) {
+function renderPath(p: number[]): string {
+    if (p.length === 0) {
         return ""
     }
-    if (p.points.length === 1) {
-        const { x, y } = p.points[0]
+    if (p.length === 2) {
+        const x = p[0]
+        const y = p[1]
         return `M ${x} ${y} L ${x + 1} ${y}`
     }
-    let res = `M ${p.points[0].x} ${p.points[0].y}`
-    for (const { x, y } of p.points.slice(1)) {
-        res += `L ${x} ${y}`
+    let res = `M ${p[0]} ${p[1]}`
+    for (let idx = 0; idx < p.length; idx += 2) {
+        res += `L ${p[idx]} ${p[idx + 1]}`
     }
     return res
 }

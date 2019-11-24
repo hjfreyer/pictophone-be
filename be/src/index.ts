@@ -1,14 +1,23 @@
+import { DocumentReference, Firestore, Timestamp, Transaction } from '@google-cloud/firestore';
+import { Storage } from '@google-cloud/storage';
+import cors from 'cors';
 import express from 'express';
-import { Request, Dictionary } from 'express-serve-static-core';
-import produce from 'immer'
+import { Dictionary, Request } from 'express-serve-static-core';
 import admin from 'firebase-admin';
-import cors from 'cors'
-
-import * as types from './types.validator'
-import { Firestore, DocumentReference, Transaction } from '@google-cloud/firestore';
-import { Storage } from '@google-cloud/storage'
-import uuid from 'uuid/v1'
-import GetConfig from './config'
+import produce from 'immer';
+import uuid from 'uuid/v1';
+import GetConfig from './config';
+import { ActionMap } from './model/Action';
+import validateAction from './model/Action.validator';
+import { Action as Action0, JoinGame, MakeMove, StartGame } from './model/Action0';
+import Export from './model/Export';
+import validateExport from './model/Export.validator';
+import { PlayerGame, Series } from './model/Export0';
+import State0, { GameState, initState as initState0 } from './model/State0';
+import { Drawing } from './model/Upload';
+import validateUpload from './model/Upload.validator';
+import UploadResponse from './model/UploadResponse';
+import * as types from './types.validator';
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -17,98 +26,79 @@ admin.initializeApp({
 const storage = new Storage();
 const db = admin.firestore();
 
-// // Create a new express application instance
+// Create a new express application instance
 const app: express.Application = express();
 app.set('json spaces', 2)
 app.use(express.json());
-
 
 const port = process.env.PORT || 3000;
 app.listen(port, function() {
     console.log(`Example app listening on port ${port}!`);
 });
 
-
-type PlayerGames = {
-    [playerAndGameId: string]: types.PlayerGame
-}
-
-type GameState = {
-    state: 'UNSTARTED'
-    playerIds: string[]
-} | {
-    state: 'STARTED'
-    playerIds: string[]
-    submissions: types.Submission[][]
-}
-
-// function uploadDrawing(drawing: types.Drawing): [string, Promise<void>] {
-//     const id = `uuid/${uuid()}`
-//     return [id, async function() {
-//         return 
-//     }()]
-// }
-
-function initGame(): GameState {
-    return {
-        state: 'UNSTARTED',
-        playerIds: []
-    }
-}
-
-function integrateGame(acc: GameState, action: types.Action): GameState {
+function integrate0(acc: State0, action: Action0): State0 {
     switch (action.kind) {
-        case "join_game":
+        case 'join_game':
             return produce(joinGame)(acc, action)
-        case "start_game":
+        case 'start_game':
             return produce(startGame)(acc, action)
-        case "make_move":
+        case 'make_move':
             return produce(makeMove)(acc, action)
     }
 }
 
-function joinGame(game: GameState, action: types.JoinGame) {
+function joinGame(game: State0, action: JoinGame) {
     if (game.state !== 'UNSTARTED') {
         return
     }
-    if (game.playerIds.indexOf(action.playerId) != -1) {
+
+    if (game.playerOrder.indexOf(action.playerId) != -1) {
         return;
     }
 
-    game.playerIds.push(action.playerId);
+    game.players[action.playerId] = {
+        id: action.playerId
+    }
+    game.playerOrder.push(action.playerId);
 }
 
-function startGame(game: GameState, action: types.StartGame): GameState {
+function mapValues<V1, V2>(obj: { [k: string]: V1 }, fn: (k: string, v: V1) => V2): { [k: string]: V2 } {
+    return Object.assign({}, ...Object.entries(obj).map(([k, v]) => {
+        return { [k]: fn(k, v) }
+    }))
+}
+
+function startGame(game: State0, action: StartGame): State0 {
     if (game.state !== 'UNSTARTED') {
         return game
     }
-    if (game.playerIds.length == 0) {
+    if (game.playerOrder.length === 0) {
         return game
     }
 
     return {
         ...game,
         state: 'STARTED',
-        submissions: game.playerIds.map(() => [])
+        players: mapValues(game.players, (k, v) => ({ ...v, submissions: [] }))
     }
 }
 
-function makeMove(game: GameState, action: types.MakeMove) {
+function makeMove(game: State0, action: MakeMove) {
     if (game.state !== 'STARTED') {
         return
     }
-    const playerIdx = game.playerIds.indexOf(action.playerId)
-    if (playerIdx === -1) {
+    const playerId = action.playerId
+    if (!(playerId in game.players)) {
         return
     }
 
-    const roundNum = Math.min(...game.submissions.map(a => a.length));
-    if (game.submissions[playerIdx].length !== roundNum) {
+    const roundNum = Math.min(...Object.values(game.players).map(a => a.submissions.length))
+    if (game.players[playerId].submissions.length !== roundNum) {
         return
     }
 
     // Game is over.
-    if (roundNum === game.playerIds.length) {
+    if (roundNum === game.playerOrder.length) {
         return
     }
 
@@ -119,161 +109,143 @@ function makeMove(game: GameState, action: types.MakeMove) {
         return
     }
 
-    game.submissions[playerIdx].push(action.submission)
+    game.players[playerId].submissions.push(action.submission)
 }
 
-function projectGame(gameId: string, state: GameState): PlayerGames {
-    const res: PlayerGames = {}
-
-    for (const playerId of state.playerIds) {
-        res[`${playerId},${gameId}`] = projectGameForPlayer(state, playerId)
-    }
-
-    return res
+function exportState(gameId: string, stateEntry: types.StateEntry): Export[] {
+    return stateEntry.versions[0]!.playerOrder.map(playerId => ({
+        version: 0,
+        kind: 'player_game',
+        gameId,
+        playerId,
+        ...exportStateForPlayer(stateEntry.versions[0]!, playerId)
+    }));
 }
 
-function projectGameForPlayer(state: GameState, playerId: string): types.PlayerGame {
-    const numPlayers = state.playerIds.length
+function exportStateForPlayer(state: State0, playerId: string): PlayerGame {
     if (state.state === 'UNSTARTED') {
         return {
-            state: "UNSTARTED",
-            playerIds: state.playerIds,
+            state: 'UNSTARTED',
+            playerIds: state.playerOrder,
         }
     }
 
-    const playerIdx = state.playerIds.indexOf(playerId)
-    if (playerIdx === -1) {
-        throw new Error("baad")
-    }
+    const numPlayers = state.playerOrder.length
+    const roundNum = Math.min(...Object.values(state.players).map(a => a.submissions.length))
 
-    const roundNum = Math.min(...state.submissions.map(a => a.length))
     // Game is over.
     if (roundNum === numPlayers) {
-        const series: types.Series[] = state.playerIds.map(() => ({ entries: [] }))
+        const series: Series[] = state.playerOrder.map(() => ({ entries: [] }))
         for (let rIdx = 0; rIdx < numPlayers; rIdx++) {
             for (let pIdx = 0; pIdx < numPlayers; pIdx++) {
                 series[(pIdx + rIdx) % numPlayers].entries.push({
-                    playerId: state.playerIds[pIdx],
-                    submission: state.submissions[pIdx][rIdx]
+                    playerId: state.playerOrder[pIdx],
+                    submission: state.players[state.playerOrder[pIdx]].submissions[rIdx]
                 })
             }
         }
 
         return {
-            state: "GAME_OVER",
-            playerIds: state.playerIds,
+            state: 'GAME_OVER',
+            playerIds: state.playerOrder,
             series,
         }
     }
 
-    // const maxSubmissions = Math.max(...state.submissions.map(a => a.length))
-
-    if (state.submissions[playerIdx].length === 0) {
+    if (state.players[playerId].submissions.length === 0) {
         return {
-            state: "FIRST_PROMPT",
-            playerIds: state.playerIds,
+            state: 'FIRST_PROMPT',
+            playerIds: state.playerOrder,
         }
     }
 
-    if (state.submissions[playerIdx].length === roundNum) {
+    if (state.players[playerId].submissions.length === roundNum) {
+        const playerIdx = state.playerOrder.indexOf(playerId)
+        if (playerIdx === -1) {
+            throw new Error('baad')
+        }
+        const nextPlayerIdx = (playerIdx + 1) % state.playerOrder.length
         return {
-            state: "RESPOND_TO_PROMPT",
-            playerIds: state.playerIds,
-            prompt: state.submissions[(playerIdx + 1) % state.playerIds.length][roundNum - 1]
+            state: 'RESPOND_TO_PROMPT',
+            playerIds: state.playerOrder,
+            prompt: state.players[state.playerOrder[nextPlayerIdx]].submissions[roundNum - 1]
         }
     }
 
     return {
-        state: "WAITING_FOR_PROMPT",
-        playerIds: state.playerIds,
+        state: 'WAITING_FOR_PROMPT',
+        playerIds: state.playerOrder,
     }
 }
 
-function compressDrawing(drawing: types.Drawing): types.CompressedDrawing {
+function initStateEntry(): types.StateEntry {
     return {
-        paths: drawing.paths.map(p => {
-            const res : number[] = []
-            for (const pt of p.points) {
-                res.push(pt.x, pt.y)
-            }
-            return res
-        })
+        iteration: 0,
+        lastModified: Timestamp.fromMillis(0),
+        minVersion: 0,
+        maxVersion: 0,
+        versions: {
+            [0]: initState0()
+        }
     }
 }
 
-async function applyAction(db: FirebaseFirestore.Firestore, req: types.ActionRequest): Promise<void> {
-    console.log(req)
-    const uploads = req.uploads || {}
-    const translatedUploadIds :{[id: string]: string}= {}
-    if (1 < Object.keys(uploads).length) {
-        throw new Error('too many uploads')
+function integrate(states: types.StateEntry, actions: Partial<ActionMap>): types.StateEntry {
+    return {
+        iteration: states.iteration + 1,
+        lastModified: admin.firestore.FieldValue.serverTimestamp(),
+        minVersion: 0,
+        maxVersion: 0,
+        versions: {
+            [0]: integrate0(states.versions[0]!, actions[0]!)
+        }
     }
-    for (const requestId in uploads) {
-        const storageId = `uuid/${uuid()}`
-        const upload = uploads[requestId]
-        translatedUploadIds[requestId] = storageId
+}
 
-        // TODO: Prevent abuse by limiting the number of points in a drawing.
-        await storage.bucket(GetConfig().gcsBucket).file(storageId).save(
-            JSON.stringify(compressDrawing(upload.drawing)))
+function exportKey(e: Export): string {
+    switch (e.kind) {
+        case 'player_game':
+            return JSON.stringify([e.version, e.playerId, e.gameId])
     }
+}
 
-    const action = replaceRefs(translatedUploadIds, req.action)
+type ExportMap = { [key: string]: Export }
+function indexExports(exports: Export[]): ExportMap {
+    const res: ExportMap = {}
+
+    for (const e of exports) {
+        res[exportKey(e)] = e
+    }
+    return res
+}
+
+async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise<void> {
+    const action = validateAction(body)
+    console.log(action)
 
     const gameId = action.gameId;
     await db.runTransaction(async (tx: Transaction): Promise<void> => {
-        let log = await gameLog.get(tx, gameId);
-        if (log === null) {
-            log = {
-                lastTimestamp: null,
-                entries: []
-            }
-        }
+        const prevState = await gameState.get(tx, gameId) || initStateEntry()
+        const prevExports = indexExports(exportState(gameId, prevState))
 
-        let state = initGame();
-        for (const entry of log.entries) {
-            state = integrateGame(state, entry.action)
-        }
+        const newState = integrate(prevState, { [0]: action })
+        const newExports = indexExports(exportState(gameId, newState))
 
-        const prevProjection = projectGame(gameId, state)
-
-        state = integrateGame(state, action)
-
-        const newProjection = projectGame(gameId, state)
-
-        applyDiff(tx, prevProjection, newProjection)
-
-        const newEntry: types.GameLogEntry = {
-            action,
-            timestamp: null
-        }
-        if (0 < log.entries.length) {
-            log.entries[log.entries.length - 1].timestamp = log.lastTimestamp
-        }
-        log.lastTimestamp = admin.firestore.FieldValue.serverTimestamp()
-        log.entries.push(newEntry)
-        gameLog.set(tx, gameId, log)
+        gameState.set(tx, gameId, newState)
+        applyDiff(tx, prevExports, newExports)
     })
 }
 
-function replaceRefs(translatedUploadIds :{[id: string]: string}, action: types.Action): types.Action {
-    return produce(action, (draft) => {
-        if (draft.kind === 'make_move' && draft.submission.kind === 'drawing') {
-            draft.submission.drawing.id = translatedUploadIds[draft.submission.drawing.id]
-        }
-    })
-}
-
-function applyDiff(tx: Transaction, prevP: PlayerGames, newP: PlayerGames): void {
+function applyDiff(tx: Transaction, prevP: ExportMap, newP: ExportMap): void {
     for (const prevKey in prevP) {
         if (!(prevKey in newP)) {
-            const split = prevKey.split(',') as [string, string]
-            playerGame.delete(tx, split)
+            const key = JSON.parse(prevKey) as [number, string, string]
+            playerGame.delete(tx, key)
         }
     }
     for (const newKey in newP) {
-        const split = newKey.split(',') as [string, string]
-        playerGame.set(tx, split, newP[newKey])
+        const key = JSON.parse(newKey) as [number, string, string]
+        playerGame.set(tx, key, newP[newKey])
     }
 }
 
@@ -305,35 +277,56 @@ function mkDpl<K, V>(
         }
     }
 }
-// //const get : Getter<KeyType, ValueType> = async (tx, k) => {
-// const get: Getter<KeyType, ValueType> = async (tx, k) => {
 
-// }
-// const set: Setter<KeyType, ValueType> = 
-// const delete : Deleter < KeyType >
-//     return [getter, setter]
-// }
-
-function gameLogRef(db: Firestore, gameId: string): FirebaseFirestore.DocumentReference {
-    return db.collection('games').doc(gameId)
+function gameStateRef(db: Firestore, gameId: string): FirebaseFirestore.DocumentReference {
+    return db.collection('state').doc(`game:${gameId}`)
 }
 
-const gameLog = mkDpl(db, gameLogRef, types.validate('GameLog'))
+const gameState = mkDpl(db, gameStateRef, types.validate('StateEntry'))
 
-function playerGameRef(db: Firestore, [playerId, gameId]: [string, string]): FirebaseFirestore.DocumentReference {
-    return db.collection('versions').doc('0')
+function playerGameRef(db: Firestore, [version, playerId, gameId]: [number, string, string]): FirebaseFirestore.DocumentReference {
+    return db.collection('versions').doc('' + version)
         .collection('players').doc(playerId)
         .collection('games').doc(gameId)
 }
 
-const playerGame = mkDpl(db, playerGameRef, types.validate('PlayerGame'))
+const playerGame = mkDpl(db, playerGameRef, validateExport)
+
+const MAX_POINTS = 50_000
+
+async function doUpload(body: unknown): Promise<UploadResponse> {
+    const upload = validateUpload(body)
+
+    if (MAX_POINTS < numPoints(upload)) {
+        throw new Error('too many points in drawing')
+    }
+
+    const id = `uuid/${uuid()}`
+    await storage.bucket(GetConfig().gcsBucket).file(id).save(JSON.stringify(upload))
+
+    return { id }
+}
+
+function numPoints(drawing: Drawing): number {
+    let res = 0
+    for (const path of drawing.paths) {
+        res += path.length / 2
+    }
+    return res
+}
 
 app.options('/action', cors())
-app.post('/action', cors(), async function(req: Request<Dictionary<string>>, res, next) {
-    applyAction(db, req.body).then(() => {
+app.post('/action', cors(), function(req: Request<Dictionary<string>>, res, next) {
+    doAction(db, req.body).then(() => {
         res.status(200)
         res.json({})
     }).catch(next)
 })
 
-
+app.options('/upload', cors())
+app.post('/upload', cors(), function(req: Request<Dictionary<string>>, res, next) {
+    doUpload(req.body).then(resp => {
+        res.status(200)
+        res.json(resp)
+    }).catch(next)
+})

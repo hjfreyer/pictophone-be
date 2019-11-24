@@ -1,24 +1,22 @@
 
-import React, { useState, useEffect, useRef } from 'react';
-
-import * as types from './types'
-import Canvas, { DraftDrawing } from './Canvas'
-import Drawing from './Drawing'
-import { validate } from './types.validator'
+import React, { useEffect, useRef, useState } from 'react';
+import Canvas, { DraftDrawing } from './Canvas';
+import Drawing from './Drawing';
+import * as export0 from './model/Export0';
+import { Drawing as DrawingModel } from './model/Upload';
+import validateUpload from './model/Upload.validator';
 
 type GameViewProps = {
-    playerGame: types.PlayerGame
+    playerGame: export0.PlayerGame
     startGame: () => void
     submitWord: (word: string) => void
-    submitDrawing: (s: types.Drawing) => void
+    submitDrawing: (s: DrawingModel) => void
 }
 
 const GameView: React.FC<GameViewProps> = ({ playerGame, startGame, submitWord, submitDrawing }) => {
-
     const playerList = <div>
         Players: {playerGame.playerIds.map((p, idx) => <div key={idx}>{p}</div>)}
     </div>
-
 
     switch (playerGame.state) {
         case "UNSTARTED":
@@ -38,9 +36,9 @@ const GameView: React.FC<GameViewProps> = ({ playerGame, startGame, submitWord, 
 }
 
 type ActiveGameProps = {
-    playerGame: types.FirstPromptGame | types.WaitingForPromptGame | types.RespondToPromptGame
+    playerGame: export0.FirstPromptGame | export0.WaitingForPromptGame | export0.RespondToPromptGame
     submitWord: (word: string) => void
-    submitDrawing: (s: types.Drawing) => void
+    submitDrawing: (s: DrawingModel) => void
 }
 
 const ActiveGame: React.FC<ActiveGameProps> = ({ playerGame, submitWord, submitDrawing }) => {
@@ -99,7 +97,7 @@ const ActiveGame: React.FC<ActiveGameProps> = ({ playerGame, submitWord, submitD
     const canvasWidth = Math.min(canvasWidth1, dims.width * 0.95)
     const canvasHeight = canvasWidth * 4 / 3
 
-    const respond = (playerGame: types.RespondToPromptGame) =>
+    const respond = (playerGame: export0.RespondToPromptGame) =>
         playerGame.prompt.kind === 'word'
             ? <main id="game">
                 <div className="word-prompt" >
@@ -110,7 +108,7 @@ const ActiveGame: React.FC<ActiveGameProps> = ({ playerGame, submitWord, submitD
                 <button onClick={doDrawingSub}>Submit</button>
             </main>
             : <main id="game">
-                <DownloadDrawing drawing={playerGame.prompt.drawing}
+                <DownloadDrawing drawingId={playerGame.prompt.drawingId}
                     width={canvasWidth} height={canvasHeight} />
                 <form onSubmit={doTextSub}>
                     <input value={textSub} onChange={e => setTextSub(e.target.value)} />
@@ -129,7 +127,7 @@ const ActiveGame: React.FC<ActiveGameProps> = ({ playerGame, submitWord, submitD
 }
 
 type SeriesProps = {
-    serieses: types.Series[]
+    serieses: export0.Series[]
 }
 
 const Series: React.FC<SeriesProps> = ({ serieses }) => {
@@ -147,7 +145,7 @@ const Series: React.FC<SeriesProps> = ({ serieses }) => {
     </main>
 }
 
-const Entry: React.FC<{ entry: types.SeriesEntry }> = ({ entry }) => {
+const Entry: React.FC<{ entry: export0.SeriesEntry }> = ({ entry }) => {
     const container = useRef<HTMLDivElement>(null)
     const [dims, setDims] = useState({ width: 0, height: 0 })
 
@@ -164,7 +162,7 @@ const Entry: React.FC<{ entry: types.SeriesEntry }> = ({ entry }) => {
     } else {
         const width = widthForBox(dims.width, dims.height)
         return <div ref={container} className="drawing">
-            <DownloadDrawing drawing={entry.submission.drawing}
+            <DownloadDrawing drawingId={entry.submission.drawingId}
                 width={width} height={4 * width / 3} />
         </div>
     }
@@ -176,36 +174,23 @@ function widthForBox(width: number, height: number): number {
 }
 
 type DownloadDrawingProps = {
-    drawing: types.Ref
+    drawingId: string
     width: number
     height: number
 }
 
-function decompressDrawing(compressed: types.CompressedDrawing): types.Drawing {
-    return {
-        paths: compressed.paths.map(p => {
-            const res: types.Path = { points: [] }
-            for (let i = 0; i < p.length; i += 2) {
-                res.points.push({ x: p[i], y: p[i + 1] })
-            }
-            return res
-        })
-    }
-}
-
-
-const DownloadDrawing: React.FC<DownloadDrawingProps> = ({ drawing, width, height }) => {
-    const [downloaded, setDownloaded] = useState<types.Drawing | null>(null)
+const DownloadDrawing: React.FC<DownloadDrawingProps> = ({ drawingId, width, height }) => {
+    const [downloaded, setDownloaded] = useState<DrawingModel | null>(null)
     useEffect(() => {
         (async () => {
             const res = await fetch(
-                `https://storage.googleapis.com/pictophone-app-drawings/${drawing.id}`, {
+                `https://storage.googleapis.com/pictophone-app-drawings/${drawingId}`, {
 
             })
-            const d = validate('CompressedDrawing')(await res.json())
-            setDownloaded(decompressDrawing(d))
+            const d = validateUpload(await res.json())
+            setDownloaded(d)
         })()
-    }, [drawing])
+    }, [drawingId])
 
     if (downloaded === null) {
         return <div>Loading...</div>

@@ -1,20 +1,21 @@
-import React, { useState, useEffect } from 'react';
-import './App.css';
-
 import firebase from 'firebase/app';
 import 'firebase/auth';
 import 'firebase/firestore';
-import { FirestoreProvider, FirestoreDocument } from 'react-firestore';
+import React, { useEffect, useState } from 'react';
 import StyledFirebaseAuth from 'react-firebaseui/StyledFirebaseAuth';
-import {
-    BrowserRouter as Router, Switch, useParams, useLocation, Route, Redirect
-} from "react-router-dom";
-
-import GameView from './GameView'
-import Home from './Home'
-import Config from './config'
-import * as types from './types';
-import { validate } from './types.validator'
+import { FirestoreDocument, FirestoreProvider } from 'react-firestore';
+import { BrowserRouter as Router, Redirect, Route, Switch, useLocation, useParams } from "react-router-dom";
+import './App.css';
+import * as base from './base';
+import Config from './config';
+import GameView from './GameView';
+import Home from './Home';
+import Action from './model/Action';
+import validateExport from './model/Export.validator';
+import * as export0 from './model/Export0';
+import * as upload from './model/Upload';
+import UploadResponse from './model/UploadResponse';
+import validateUploadResponse from './model/UploadResponse.validator';
 
 const config = {
     apiKey: "AIzaSyCzMg7Q2ByK5UxUd_x730LT8TmOmbA61MU",
@@ -50,42 +51,39 @@ const Landing: React.FC = () => {
     </React.Fragment>
 }
 
-type GamePageParams = {
+type GamePageProps = {
     playerId: string
-    dispatch: (a: types.ActionRequest) => void
+    dispatch: base.Dispatch
 }
 
-const GamePage: React.FC<GamePageParams> = ({ playerId, dispatch }) => {
+const GamePage: React.FC<GamePageProps> = ({ playerId, dispatch }) => {
     const { gameId } = useParams()
 
-    const startGame = () => dispatch({
-        action: {
-            kind: "start_game",
-            playerId: playerId!,
-            gameId: gameId!
-        }
+    const startGame = () => dispatch.action({
+        version: 0,
+        kind: "start_game",
+        playerId: playerId!,
+        gameId: gameId!
     })
 
-    const submitWord = (word: string) => dispatch({
-        action: {
+    const submitWord = (word: string) => dispatch.action({
+        version: 0,
+        kind: "make_move",
+        playerId: playerId!,
+        gameId: gameId!,
+        submission: { kind: "word", word }
+    })
+
+    const submitDrawing = async (drawing: upload.Drawing) => {
+        const resp = await dispatch.upload({ kind: 'drawing', ...drawing })
+        await dispatch.action({
+            version: 0,
             kind: "make_move",
             playerId: playerId!,
             gameId: gameId!,
-            submission: { kind: "word", word }
-        }
-    })
-
-    const submitDrawing = (drawing: types.Drawing) => dispatch({
-        action: {
-            kind: "make_move",
-            playerId: playerId!,
-            gameId: gameId!,
-            submission: { kind: "drawing", drawing: { id: 'request/0' } }
-        },
-        uploads: {
-            'request/0': { kind: "drawing", drawing }
-        }
-    })
+            submission: { kind: "drawing", drawingId: resp.id }
+        })
+    }
 
     return <FirestoreDocument
         path={`versions/0/players/${playerId}/games/${gameId}`}
@@ -93,7 +91,7 @@ const GamePage: React.FC<GamePageParams> = ({ playerId, dispatch }) => {
             if (isLoading) {
                 return <span>Loading...</span>;
             }
-            const pg: types.PlayerGame = validate('PlayerGame')(data);
+            const pg: export0.PlayerGame = validateExport(data);
             return <GameView
                 playerGame={pg}
                 startGame={startGame}
@@ -104,7 +102,7 @@ const GamePage: React.FC<GamePageParams> = ({ playerId, dispatch }) => {
     />
 }
 
-async function postit(body: types.ActionRequest): Promise<void> {
+async function postAction(body: Action): Promise<void> {
     await fetch(Config().backendAddr + '/action', {
         method: 'post',
         body: JSON.stringify(body),
@@ -114,6 +112,19 @@ async function postit(body: types.ActionRequest): Promise<void> {
             'Accept': 'application/json',       // receive json
         },
     });
+}
+
+async function postUpload(u: upload.Upload): Promise<UploadResponse> {
+    const resp = await fetch(Config().backendAddr + '/upload', {
+        method: 'post',
+        body: JSON.stringify(u),
+        mode: 'cors',
+        headers: {
+            'Content-Type': 'application/json',
+            'Accept': 'application/json',       // receive json
+        },
+    })
+    return validateUploadResponse(await resp.json())
 }
 
 type AuthInfo = { ready: false } | { ready: true, user: firebase.User | null }
@@ -140,8 +151,9 @@ const Content: React.FC = () => {
         }
     }
 
-    const dispatch = async (a: types.ActionRequest): Promise<void> => {
-        await postit(a)
+    const dispatch: base.Dispatch = {
+        action: postAction,
+        upload: postUpload,
     }
 
     return <Switch>
