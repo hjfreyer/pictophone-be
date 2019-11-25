@@ -9,7 +9,7 @@ import uuid from 'uuid/v1';
 import GetConfig from './config';
 import { ActionMap } from './model/Action';
 import validateAction from './model/Action.validator';
-import Action0, {JoinGame, MakeMove, StartGame } from './model/Action0';
+import Action0, { JoinGame, MakeMove, StartGame } from './model/Action0';
 import Export from './model/Export';
 import validateExport from './model/Export.validator';
 import { PlayerGame, Series } from './model/Export0';
@@ -113,12 +113,12 @@ function makeMove(game: State0, action: MakeMove) {
 }
 
 function exportState(gameId: string, stateEntry: types.StateEntry): Export[] {
-    return stateEntry.versions[0]!.playerOrder.map(playerId => ({
+    return stateEntry.state.playerOrder.map(playerId => ({
         version: 0,
         kind: 'player_game',
         gameId,
         playerId,
-        ...exportStateForPlayer(stateEntry.versions[0]!, playerId)
+        ...exportStateForPlayer(stateEntry.state, playerId)
     }));
 }
 
@@ -180,25 +180,19 @@ function exportStateForPlayer(state: State0, playerId: string): PlayerGame {
 
 function initStateEntry(): types.StateEntry {
     return {
+        generation: 0,
         iteration: 0,
         lastModified: Timestamp.fromMillis(0),
-        minVersion: 0,
-        maxVersion: 0,
-        versions: {
-            [0]: initState0()
-        }
+        state: initState0()
     }
 }
 
 function integrate(states: types.StateEntry, actions: Partial<ActionMap>): types.StateEntry {
     return {
+        generation: 0,
         iteration: states.iteration + 1,
         lastModified: admin.firestore.FieldValue.serverTimestamp(),
-        minVersion: 0,
-        maxVersion: 0,
-        versions: {
-            [0]: integrate0(states.versions[0]!, actions[0]!)
-        }
+        state: integrate0(states.state, actions[0]!)
     }
 }
 

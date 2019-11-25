@@ -10,12 +10,19 @@ export {StateEntry};
 export const Schema = {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
-    "Partial<StateMap>": {
+    "StateEntry": {
       "defaultProperties": [
       ],
-      "description": "Make all properties in T optional",
       "properties": {
-        "0": {
+        "generation": {
+          "type": "number"
+        },
+        "iteration": {
+          "type": "number"
+        },
+        "lastModified": {
+        },
+        "state": {
           "anyOf": [
             {
               "allOf": [
@@ -206,33 +213,11 @@ export const Schema = {
           ]
         }
       },
-      "type": "object"
-    },
-    "StateEntry": {
-      "defaultProperties": [
-      ],
-      "properties": {
-        "iteration": {
-          "type": "number"
-        },
-        "lastModified": {
-        },
-        "maxVersion": {
-          "type": "number"
-        },
-        "minVersion": {
-          "type": "number"
-        },
-        "versions": {
-          "$ref": "#/definitions/Partial<StateMap>"
-        }
-      },
       "required": [
+        "generation",
         "iteration",
         "lastModified",
-        "maxVersion",
-        "minVersion",
-        "versions"
+        "state"
       ],
       "type": "object"
     }

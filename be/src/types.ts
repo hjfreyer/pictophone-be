@@ -1,11 +1,11 @@
 
-import { StateMap } from './model/State'
+import State from './model/State'
 
 // Internal data structures.
 export type StateEntry = {
+    generation: number
     iteration: number
-    minVersion: number
-    maxVersion: number
     lastModified: any
-    versions: Partial<StateMap>
+
+    state: State
 }
