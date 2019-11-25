@@ -26,12 +26,19 @@ export const ActionSchema = {
         },
         "playerId": {
           "type": "string"
+        },
+        "version": {
+          "enum": [
+            0
+          ],
+          "type": "number"
         }
       },
       "required": [
         "gameId",
         "kind",
-        "playerId"
+        "playerId",
+        "version"
       ],
       "type": "object"
     },
@@ -50,12 +57,19 @@ export const ActionSchema = {
         },
         "playerId": {
           "type": "string"
+        },
+        "version": {
+          "enum": [
+            0
+          ],
+          "type": "number"
         }
       },
       "required": [
         "gameId",
         "kind",
-        "playerId"
+        "playerId",
+        "version"
       ],
       "type": "object"
     },
@@ -118,13 +132,20 @@ export const ActionSchema = {
               "type": "object"
             }
           ]
+        },
+        "version": {
+          "enum": [
+            0
+          ],
+          "type": "number"
         }
       },
       "required": [
         "gameId",
         "kind",
         "playerId",
-        "submission"
+        "submission",
+        "version"
       ],
       "type": "object"
     }

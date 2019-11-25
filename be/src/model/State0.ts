@@ -24,10 +24,11 @@ type StartedGamePlayer = {
     submissions: Submission[]
 }
 
-export type State = GameState & { kind: 'game_state' }
+export type State0 = GameState & { version: 0, kind: 'game_state' }
 
-export function initState(): State {
+export function initState0(): State0 {
     return {
+        version: 0,
         kind: 'game_state',
         state: 'UNSTARTED',
         players: {},
@@ -35,4 +36,4 @@ export function initState(): State {
     }
 }
 
-export default State
+export default State0

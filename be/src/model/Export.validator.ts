@@ -28,12 +28,19 @@ export const ExportSchema = {
             },
             "playerId": {
               "type": "string"
+            },
+            "version": {
+              "enum": [
+                0
+              ],
+              "type": "number"
             }
           },
           "required": [
             "gameId",
             "kind",
-            "playerId"
+            "playerId",
+            "version"
           ],
           "type": "object"
         },
@@ -79,12 +86,19 @@ export const ExportSchema = {
             },
             "playerId": {
               "type": "string"
+            },
+            "version": {
+              "enum": [
+                0
+              ],
+              "type": "number"
             }
           },
           "required": [
             "gameId",
             "kind",
-            "playerId"
+            "playerId",
+            "version"
           ],
           "type": "object"
         },
@@ -130,12 +144,19 @@ export const ExportSchema = {
             },
             "playerId": {
               "type": "string"
+            },
+            "version": {
+              "enum": [
+                0
+              ],
+              "type": "number"
             }
           },
           "required": [
             "gameId",
             "kind",
-            "playerId"
+            "playerId",
+            "version"
           ],
           "type": "object"
         },
@@ -181,12 +202,19 @@ export const ExportSchema = {
             },
             "playerId": {
               "type": "string"
+            },
+            "version": {
+              "enum": [
+                0
+              ],
+              "type": "number"
             }
           },
           "required": [
             "gameId",
             "kind",
-            "playerId"
+            "playerId",
+            "version"
           ],
           "type": "object"
         },
@@ -277,12 +305,19 @@ export const ExportSchema = {
             },
             "playerId": {
               "type": "string"
+            },
+            "version": {
+              "enum": [
+                0
+              ],
+              "type": "number"
             }
           },
           "required": [
             "gameId",
             "kind",
-            "playerId"
+            "playerId",
+            "version"
           ],
           "type": "object"
         },

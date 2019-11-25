@@ -9,8 +9,6 @@ export type StateMap = {
     [V in Version]: StateVersion<V>
 }
 
-export type State = {
-    [V in Version]: StateVersion<V> & { version: V }
-}[Version];
+export type State = StateVersion<Version>
 
 export default State

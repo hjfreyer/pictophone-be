@@ -64,10 +64,17 @@ export const StateSchema = {
                 "game_state"
               ],
               "type": "string"
+            },
+            "version": {
+              "enum": [
+                0
+              ],
+              "type": "number"
             }
           },
           "required": [
-            "kind"
+            "kind",
+            "version"
           ],
           "type": "object"
         }
@@ -174,10 +181,17 @@ export const StateSchema = {
                 "game_state"
               ],
               "type": "string"
+            },
+            "version": {
+              "enum": [
+                0
+              ],
+              "type": "number"
             }
           },
           "required": [
-            "kind"
+            "kind",
+            "version"
           ],
           "type": "object"
         }

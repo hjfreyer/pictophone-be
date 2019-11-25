@@ -9,8 +9,6 @@ export type ActionMap = {
     [V in Version]: ActionVersion<V>
 }
 
-export type Action = {
-    [V in Version]: ActionVersion<V> & { version: V }
-}[Version];
+export type Action = ActionVersion<Version>
 
 export default Action

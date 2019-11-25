@@ -10,6 +10,7 @@ export type PlayerGame = (
 )
 
 type Base = {
+    version: 0
     kind: 'player_game'
     playerId: string
     gameId: string
@@ -51,5 +52,5 @@ export type SeriesEntry = {
     submission: Submission
 }
 
-export type Export = (Base & PlayerGame)
-export default Export
+export type Export0 = (Base & PlayerGame)
+export default Export0
