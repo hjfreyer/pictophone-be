@@ -2,7 +2,7 @@
 import State from './model/State'
 import { ExportVersion } from './model/base'
 
-type ExportState = 'NOT_EXPORTED' | 'EXPORTED' | 'DIRTY'
+export type ExportState = 'NOT_EXPORTED' | 'EXPORTED' | 'DIRTY'
 
 export type ExportStateMap = {
     [version: string]: ExportState
