@@ -1,14 +1,14 @@
 import Action0 from './Action0';
-import { Version } from './base';
+import { ActionVersion } from './base';
 
-export type ActionVersion<Ver extends Version> =
+export type ActionByVersion<Ver extends ActionVersion> =
     Ver extends 0 ? Action0
     : never
 
 export type ActionMap = {
-    [V in Version]: ActionVersion<V>
+    [V in ActionVersion]: ActionByVersion<V>
 }
 
-export type Action = ActionVersion<Version>
+export type Action = ActionByVersion<ActionVersion>
 
 export default Action

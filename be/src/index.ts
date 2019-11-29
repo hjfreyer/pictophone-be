@@ -12,12 +12,17 @@ import validateAction from './model/Action.validator';
 import Action0, { JoinGame, MakeMove, StartGame } from './model/Action0';
 import Export from './model/Export';
 import validateExport from './model/Export.validator';
-import { PlayerGame, Series } from './model/Export0';
+import Export0, * as export0 from './model/Export0';
 import State0, { GameState, initState0 } from './model/State0';
 import { Drawing } from './model/Upload';
 import validateUpload from './model/Upload.validator';
 import UploadResponse from './model/UploadResponse';
 import * as types from './types.validator';
+import State from './model/State';
+import Export1_0_0, * as export1_0_0 from './model/Export1.0.0';
+import { StateSchema } from './model/State.validator';
+import { StateEntry, ExportStateMap } from './types';
+import { ExportVersion } from './model/base';
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -112,17 +117,68 @@ function makeMove(game: State0, action: MakeMove) {
     game.players[playerId].submissions.push(action.submission)
 }
 
-function exportState(gameId: string, stateEntry: types.StateEntry): Export[] {
-    return stateEntry.state.playerOrder.map(playerId => ({
-        version: 0,
+
+type EsmState = {
+    prev: ExportStateMap
+    next: ExportStateMap
+}
+
+function upgradeExportMap(esm: ExportStateMap): EsmState {
+    const known: Record<string, boolean> = { '0': true, 'v1.0.0': true }
+
+    const prev = produce(esm, prev => {
+        // Fill in any missing gaps in esm.
+        for (const version in known) {
+            if (!(version in prev)) {
+                prev[version] = 'NOT_EXPORTED'
+            }
+        }
+    })
+    let next: ExportStateMap = mapValues(prev, (version, state) => {
+        if (version in known) {
+            switch (state) {
+                case 'DIRTY': return 'DIRTY'
+                case 'EXPORTED': return 'EXPORTED'
+                case 'NOT_EXPORTED': return 'EXPORTED'
+            }
+        }
+        switch (state) {
+            case 'DIRTY': return 'DIRTY'
+            case 'EXPORTED': return 'DIRTY'
+            case 'NOT_EXPORTED': return 'NOT_EXPORTED'
+        }
+    })
+
+    return { prev, next }
+}
+
+function exportState(gameId: string, state: State,
+    exports: ExportStateMap): Export[] {
+
+    const res: Export[] = []
+    if (exports['0'] === 'EXPORTED') {
+        res.push(...exportState0(gameId, state))
+    }
+
+    if (exports['v1.0.0'] === 'EXPORTED') {
+        res.push(...exportState1_0_0(gameId, state))
+    }
+
+    return res
+}
+
+
+function exportState0(gameId: string, state: State): Export[] {
+    return state.playerOrder.map(playerId => ({
+        version: '0',
         kind: 'player_game',
         gameId,
         playerId,
-        ...exportStateForPlayer(stateEntry.state, playerId)
+        ...exportStateForPlayer0(state, playerId)
     }));
 }
 
-function exportStateForPlayer(state: State0, playerId: string): PlayerGame {
+function exportStateForPlayer0(state: State0, playerId: string): export0.PlayerGame {
     if (state.state === 'UNSTARTED') {
         return {
             state: 'UNSTARTED',
@@ -135,7 +191,7 @@ function exportStateForPlayer(state: State0, playerId: string): PlayerGame {
 
     // Game is over.
     if (roundNum === numPlayers) {
-        const series: Series[] = state.playerOrder.map(() => ({ entries: [] }))
+        const series: export0.Series[] = state.playerOrder.map(() => ({ entries: [] }))
         for (let rIdx = 0; rIdx < numPlayers; rIdx++) {
             for (let pIdx = 0; pIdx < numPlayers; pIdx++) {
                 series[(pIdx + rIdx) % numPlayers].entries.push({
@@ -178,21 +234,86 @@ function exportStateForPlayer(state: State0, playerId: string): PlayerGame {
     }
 }
 
+function exportState1_0_0(gameId: string, state: State): Export1_0_0[] {
+    return state.playerOrder.map(playerId => ({
+        version: 'v1.0.0',
+        kind: 'player_game',
+        playerId,
+        gameId,
+        ...exportStateForPlayer1_0_0(state, playerId)
+    }))
+}
+
+function exportStateForPlayer1_0_0(state: State0, playerId: string): export1_0_0.PlayerGame {
+    const players: export1_0_0.PlayerMap = mapValues(state.players, (_, { id }) => ({
+        id,
+        displayName: id,
+    }))
+
+    if (state.state === 'UNSTARTED') {
+        return {
+            state: 'UNSTARTED',
+            players
+        }
+    }
+
+    const numPlayers = state.playerOrder.length
+    const roundNum = Math.min(...Object.values(state.players).map(a => a.submissions.length))
+
+    // Game is over.
+    if (roundNum === numPlayers) {
+        const series: export1_0_0.Series[] = state.playerOrder.map(() => ({ entries: [] }))
+        for (let rIdx = 0; rIdx < numPlayers; rIdx++) {
+            for (let pIdx = 0; pIdx < numPlayers; pIdx++) {
+                series[(pIdx + rIdx) % numPlayers].entries.push({
+                    playerId: state.playerOrder[pIdx],
+                    submission: state.players[state.playerOrder[pIdx]].submissions[rIdx]
+                })
+            }
+        }
+
+        return {
+            state: 'GAME_OVER',
+            players,
+            series,
+        }
+    }
+
+    if (state.players[playerId].submissions.length === 0) {
+        return {
+            state: 'FIRST_PROMPT',
+            players,
+        }
+    }
+
+    if (state.players[playerId].submissions.length === roundNum) {
+        const playerIdx = state.playerOrder.indexOf(playerId)
+        if (playerIdx === -1) {
+            throw new Error('baad')
+        }
+        const nextPlayerIdx = (playerIdx + 1) % state.playerOrder.length
+        return {
+            state: 'RESPOND_TO_PROMPT',
+            players,
+            prompt: state.players[state.playerOrder[nextPlayerIdx]].submissions[roundNum - 1]
+        }
+    }
+
+    return {
+        state: 'WAITING_FOR_PROMPT',
+        players,
+    }
+}
+
 function initStateEntry(): types.StateEntry {
     return {
         generation: 0,
         iteration: 0,
         lastModified: Timestamp.fromMillis(0),
-        state: initState0()
-    }
-}
-
-function integrate(states: types.StateEntry, actions: Partial<ActionMap>): types.StateEntry {
-    return {
-        generation: 0,
-        iteration: states.iteration + 1,
-        lastModified: admin.firestore.FieldValue.serverTimestamp(),
-        state: integrate0(states.state, actions[0]!)
+        state: initState0(),
+        exports: {
+            [0]: 'EXPORTED'
+        },
     }
 }
 
@@ -220,12 +341,22 @@ async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise
     const gameId = action.gameId;
     await db.runTransaction(async (tx: Transaction): Promise<void> => {
         const prevState = await gameState.get(tx, gameId) || initStateEntry()
-        const prevExports = indexExports(exportState(gameId, prevState))
 
-        const newState = integrate(prevState, { [0]: action })
-        const newExports = indexExports(exportState(gameId, newState))
+        const exports = upgradeExportMap(prevState.exports)
 
-        gameState.set(tx, gameId, newState)
+        const prevExports = indexExports(exportState(
+            gameId, prevState.state, exports.prev))
+
+        const newState = integrate0(prevState.state, action)
+        const newExports = indexExports(exportState(gameId, newState, exports.next))
+
+        gameState.set(tx, gameId, {
+            generation: 1,
+            iteration: prevState.iteration + 1,
+            exports: exports.next,
+            lastModified: admin.firestore.FieldValue.serverTimestamp(),
+            state: newState,
+        })
         applyDiff(tx, prevExports, newExports)
     })
 }

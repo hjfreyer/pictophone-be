@@ -10,7 +10,7 @@ export type PlayerGame = (
 )
 
 type Base = {
-    version: 0
+    version: '0'
     kind: 'player_game'
     playerId: string
     gameId: string

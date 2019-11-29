@@ -1,5 +1,5 @@
 
-for f in Action Action0 Export Export0 Upload UploadResponse base; do
+for f in Action Action0 Export Export0 Export1.0.0 Upload UploadResponse base; do
     cp ../be/src/model/$f.ts src/model/
 done
 

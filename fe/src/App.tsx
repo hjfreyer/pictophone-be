@@ -16,6 +16,8 @@ import * as export0 from './model/Export0';
 import * as upload from './model/Upload';
 import UploadResponse from './model/UploadResponse';
 import validateUploadResponse from './model/UploadResponse.validator';
+import Export from './model/Export';
+import {strict as assert} from 'assert'
 
 const config = {
     apiKey: "AIzaSyCzMg7Q2ByK5UxUd_x730LT8TmOmbA61MU",
@@ -91,9 +93,10 @@ const GamePage: React.FC<GamePageProps> = ({ playerId, dispatch }) => {
             if (isLoading) {
                 return <span>Loading...</span>;
             }
-            const pg: export0.PlayerGame = validateExport(data);
+            const pgAny: Export = validateExport(data);
+            assert(pgAny.version === '0')
             return <GameView
-                playerGame={pg}
+                playerGame={pgAny as export0.Export0}
                 startGame={startGame}
                 submitWord={submitWord}
                 submitDrawing={submitDrawing}

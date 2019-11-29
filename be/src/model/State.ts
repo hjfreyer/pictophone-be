@@ -1,14 +1,14 @@
-import { Version } from './base';
+import { ActionVersion } from './base';
 import State0 from './State0';
 
-export type StateVersion<V extends Version> =
+export type StateByVersion<V extends ActionVersion> =
     V extends 0 ? State0
     : never
 
 export type StateMap = {
-    [V in Version]: StateVersion<V>
+    [V in ActionVersion]: StateByVersion<V>
 }
 
-export type State = StateVersion<Version>
+export type State = StateByVersion<ActionVersion>
 
 export default State
