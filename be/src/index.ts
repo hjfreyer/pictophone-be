@@ -8,18 +8,19 @@ import produce from 'immer'
 import uuid from 'uuid/v1'
 import { updateGeneration } from './batch'
 import GetConfig from './config'
+import exportState0to0 from './exports/0-0'
+import exportState0to1_0_0 from './exports/0-v1.0.0'
 import validateAction from './model/Action.validator'
 import Action0, { JoinGame, MakeMove, StartGame } from './model/Action0'
 import Export from './model/Export'
 import validateExport from './model/Export.validator'
-import * as export0 from './model/Export0'
-import Export1_0_0, * as export1_0_0 from './model/Export1.0.0'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
 import State from './model/State'
 import State0, { initState0 } from './model/State0'
 import { ExportStateMap } from './types'
 import * as types from './types.validator'
+import { mapValues } from './util'
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -64,12 +65,6 @@ function joinGame(game: State0, action: JoinGame) {
     game.playerOrder.push(action.playerId)
 }
 
-function mapValues<V1, V2>(obj: { [k: string]: V1 }, fn: (k: string, v: V1) => V2): { [k: string]: V2 } {
-    return Object.assign({}, ...Object.entries(obj).map(([k, v]) => {
-        return { [k]: fn(k, v) }
-    }))
-}
-
 function startGame(game: State0, action: StartGame): State0 {
     if (game.state !== 'UNSTARTED') {
         return game
@@ -81,7 +76,7 @@ function startGame(game: State0, action: StartGame): State0 {
     return {
         ...game,
         state: 'STARTED',
-        players: mapValues(game.players, (k, v) => ({ ...v, submissions: [] }))
+        players: mapValues(game.players, (_, v) => ({ ...v, submissions: [] }))
     }
 }
 
@@ -154,152 +149,14 @@ function exportState(gameId: string, state: State,
 
     const res: Export[] = []
     if (exports['0'] === 'EXPORTED') {
-        res.push(...exportState0(gameId, state))
+        res.push(...exportState0to0(gameId, state))
     }
 
     if (exports['v1.0.0'] === 'EXPORTED') {
-        res.push(...exportState1_0_0(gameId, state))
+        res.push(...exportState0to1_0_0(gameId, state))
     }
 
     return res
-}
-
-
-function exportState0(gameId: string, state: State): Export[] {
-    return state.playerOrder.map(playerId => ({
-        version: '0',
-        kind: 'player_game',
-        gameId,
-        playerId,
-        ...exportStateForPlayer0(state, playerId)
-    }))
-}
-
-function exportStateForPlayer0(state: State0, playerId: string): export0.PlayerGame {
-    if (state.state === 'UNSTARTED') {
-        return {
-            state: 'UNSTARTED',
-            playerIds: state.playerOrder,
-        }
-    }
-
-    const numPlayers = state.playerOrder.length
-    const roundNum = Math.min(...Object.values(state.players).map(a => a.submissions.length))
-
-    // Game is over.
-    if (roundNum === numPlayers) {
-        const series: export0.Series[] = state.playerOrder.map(() => ({ entries: [] }))
-        for (let rIdx = 0; rIdx < numPlayers; rIdx++) {
-            for (let pIdx = 0; pIdx < numPlayers; pIdx++) {
-                series[(pIdx + rIdx) % numPlayers].entries.push({
-                    playerId: state.playerOrder[pIdx],
-                    submission: state.players[state.playerOrder[pIdx]].submissions[rIdx]
-                })
-            }
-        }
-
-        return {
-            state: 'GAME_OVER',
-            playerIds: state.playerOrder,
-            series,
-        }
-    }
-
-    if (state.players[playerId].submissions.length === 0) {
-        return {
-            state: 'FIRST_PROMPT',
-            playerIds: state.playerOrder,
-        }
-    }
-
-    if (state.players[playerId].submissions.length === roundNum) {
-        const playerIdx = state.playerOrder.indexOf(playerId)
-        if (playerIdx === -1) {
-            throw new Error('baad')
-        }
-        const nextPlayerIdx = (playerIdx + 1) % state.playerOrder.length
-        return {
-            state: 'RESPOND_TO_PROMPT',
-            playerIds: state.playerOrder,
-            prompt: state.players[state.playerOrder[nextPlayerIdx]].submissions[roundNum - 1]
-        }
-    }
-
-    return {
-        state: 'WAITING_FOR_PROMPT',
-        playerIds: state.playerOrder,
-    }
-}
-
-function exportState1_0_0(gameId: string, state: State): Export1_0_0[] {
-    return state.playerOrder.map(playerId => ({
-        version: 'v1.0.0',
-        kind: 'player_game',
-        playerId,
-        gameId,
-        ...exportStateForPlayer1_0_0(state, playerId)
-    }))
-}
-
-function exportStateForPlayer1_0_0(state: State0, playerId: string): export1_0_0.PlayerGame {
-    const players: export1_0_0.PlayerMap = mapValues(state.players, (_, { id }) => ({
-        id,
-        displayName: id,
-    }))
-
-    if (state.state === 'UNSTARTED') {
-        return {
-            state: 'UNSTARTED',
-            players
-        }
-    }
-
-    const numPlayers = state.playerOrder.length
-    const roundNum = Math.min(...Object.values(state.players).map(a => a.submissions.length))
-
-    // Game is over.
-    if (roundNum === numPlayers) {
-        const series: export1_0_0.Series[] = state.playerOrder.map(() => ({ entries: [] }))
-        for (let rIdx = 0; rIdx < numPlayers; rIdx++) {
-            for (let pIdx = 0; pIdx < numPlayers; pIdx++) {
-                series[(pIdx + rIdx) % numPlayers].entries.push({
-                    playerId: state.playerOrder[pIdx],
-                    submission: state.players[state.playerOrder[pIdx]].submissions[rIdx]
-                })
-            }
-        }
-
-        return {
-            state: 'GAME_OVER',
-            players,
-            series,
-        }
-    }
-
-    if (state.players[playerId].submissions.length === 0) {
-        return {
-            state: 'FIRST_PROMPT',
-            players,
-        }
-    }
-
-    if (state.players[playerId].submissions.length === roundNum) {
-        const playerIdx = state.playerOrder.indexOf(playerId)
-        if (playerIdx === -1) {
-            throw new Error('baad')
-        }
-        const nextPlayerIdx = (playerIdx + 1) % state.playerOrder.length
-        return {
-            state: 'RESPOND_TO_PROMPT',
-            players,
-            prompt: state.players[state.playerOrder[nextPlayerIdx]].submissions[roundNum - 1]
-        }
-    }
-
-    return {
-        state: 'WAITING_FOR_PROMPT',
-        players,
-    }
 }
 
 function initStateEntry(): types.StateEntry {
@@ -456,6 +313,6 @@ app.post('/upload', cors(), function(req: Request<Dictionary<string>>, res, next
 app.post('/batch/update-generation', function(req: Request<Dictionary<string>>, res, next) {
     updateGeneration(db).then(finished => {
         res.status(200)
-        res.json({finished})
+        res.json({ finished })
     }).catch(next)
 })
