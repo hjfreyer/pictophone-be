@@ -10,3 +10,6 @@ export type Submission = {
     kind: 'drawing'
     drawingId: string
 }
+
+export const GENERATION = 1
+export const EXPORT_VERSIONS = ['0', 'v1.0.0']

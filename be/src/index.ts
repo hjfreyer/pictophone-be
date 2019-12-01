@@ -6,6 +6,7 @@ import { Dictionary, Request } from 'express-serve-static-core'
 import admin from 'firebase-admin'
 import produce from 'immer'
 import uuid from 'uuid/v1'
+import { updateGeneration } from './batch'
 import GetConfig from './config'
 import validateAction from './model/Action.validator'
 import Action0, { JoinGame, MakeMove, StartGame } from './model/Action0'
@@ -449,5 +450,12 @@ app.post('/upload', cors(), function(req: Request<Dictionary<string>>, res, next
     doUpload(req.body).then(resp => {
         res.status(200)
         res.json(resp)
+    }).catch(next)
+})
+
+app.post('/batch/update-generation', function(req: Request<Dictionary<string>>, res, next) {
+    updateGeneration(db).then(finished => {
+        res.status(200)
+        res.json({finished})
     }).catch(next)
 })
