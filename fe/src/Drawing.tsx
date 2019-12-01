@@ -1,5 +1,5 @@
 import React, { useRef, useEffect } from 'react'
-import { Drawing as DrawingModel } from './model/Upload'
+import { Drawing as DrawingModel } from './model/rpc'
 
 type DrawingProps = {
     drawing: DrawingModel
@@ -26,6 +26,7 @@ export const Drawing: React.FC<DrawingProps> = ({ drawing, width, height }) => {
     })
 
     const scaled: DrawingModel = {
+        kind: 'drawing',
         paths: drawing.paths.map(path => scalePath(path, width, height))
     }
 

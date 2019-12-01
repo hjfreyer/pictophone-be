@@ -1,7 +1,7 @@
 import produce from 'immer'
 import React, { useRef } from 'react'
 import Drawing from './Drawing'
-import { Drawing as DrawingModel } from './model/Upload'
+import { Drawing as DrawingModel } from './model/rpc'
 
 export type DraftDrawing = {
     drawing: DrawingModel

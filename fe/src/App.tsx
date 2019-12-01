@@ -1,23 +1,22 @@
-import firebase from 'firebase/app';
-import 'firebase/auth';
-import 'firebase/firestore';
-import React, { useEffect, useState } from 'react';
-import StyledFirebaseAuth from 'react-firebaseui/StyledFirebaseAuth';
-import { FirestoreDocument, FirestoreProvider } from 'react-firestore';
-import { BrowserRouter as Router, Redirect, Route, Switch, useLocation, useParams } from "react-router-dom";
-import './App.css';
-import * as base from './base';
-import Config from './config';
-import GameView from './GameView';
-import Home from './Home';
-import Action from './model/Action';
-import validateExport from './model/Export.validator';
-import * as export0 from './model/Export0';
-import * as upload from './model/Upload';
-import UploadResponse from './model/UploadResponse';
-import validateUploadResponse from './model/UploadResponse.validator';
-import Export from './model/Export';
-import {strict as assert} from 'assert'
+import { strict as assert } from 'assert'
+import firebase from 'firebase/app'
+import 'firebase/auth'
+import 'firebase/firestore'
+import React, { useEffect, useState } from 'react'
+import StyledFirebaseAuth from 'react-firebaseui/StyledFirebaseAuth'
+import { FirestoreDocument, FirestoreProvider } from 'react-firestore'
+import { BrowserRouter as Router, Redirect, Route, Switch, useLocation, useParams } from "react-router-dom"
+import './App.css'
+import * as base from './base'
+import Config from './config'
+import GameView from './GameView'
+import Home from './Home'
+import Action from './model/Action'
+import Export from './model/Export'
+import validateExport from './model/Export.validator'
+import * as export0 from './model/Export0'
+import { Drawing, Upload, UploadResponse } from './model/rpc'
+import { validate as validateRpc } from './model/rpc.validator'
 
 const config = {
     apiKey: "AIzaSyCzMg7Q2ByK5UxUd_x730LT8TmOmbA61MU",
@@ -27,9 +26,9 @@ const config = {
     storageBucket: Config().storageBucket,
     messagingSenderId: "837882351009",
     appId: "1:837882351009:web:9056a6b26d58fb373ecfe0"
-};
+}
 
-const app = firebase.initializeApp(config);
+const app = firebase.initializeApp(config)
 const auth = app.auth()
 
 const uiConfig = {
@@ -43,7 +42,7 @@ const uiConfig = {
         // Avoid redirects after sign-in.
         signInSuccessWithAuthResult: () => false
     }
-};
+}
 
 const Landing: React.FC = () => {
     return <React.Fragment>
@@ -76,7 +75,7 @@ const GamePage: React.FC<GamePageProps> = ({ playerId, dispatch }) => {
         submission: { kind: "word", word }
     })
 
-    const submitDrawing = async (drawing: upload.Drawing) => {
+    const submitDrawing = async (drawing: Drawing) => {
         const resp = await dispatch.upload({ kind: 'drawing', ...drawing })
         await dispatch.action({
             version: 0,
@@ -91,9 +90,9 @@ const GamePage: React.FC<GamePageProps> = ({ playerId, dispatch }) => {
         path={`versions/0/players/${playerId}/games/${gameId}`}
         render={({ isLoading, data }: { isLoading: boolean, data: any }) => {
             if (isLoading) {
-                return <span>Loading...</span>;
+                return <span>Loading...</span>
             }
-            const pgAny: Export = validateExport(data);
+            const pgAny: Export = validateExport(data)
             assert(pgAny.version === '0')
             return <GameView
                 playerGame={pgAny as export0.Export0}
@@ -114,10 +113,10 @@ async function postAction(body: Action): Promise<void> {
             'Content-Type': 'application/json',
             'Accept': 'application/json',       // receive json
         },
-    });
+    })
 }
 
-async function postUpload(u: upload.Upload): Promise<UploadResponse> {
+async function postUpload(u: Upload): Promise<UploadResponse> {
     const resp = await fetch(Config().backendAddr + '/upload', {
         method: 'post',
         body: JSON.stringify(u),
@@ -127,7 +126,7 @@ async function postUpload(u: upload.Upload): Promise<UploadResponse> {
             'Accept': 'application/json',       // receive json
         },
     })
-    return validateUploadResponse(await resp.json())
+    return validateRpc('UploadResponse')(await resp.json())
 }
 
 type AuthInfo = { ready: false } | { ready: true, user: firebase.User | null }
@@ -182,4 +181,4 @@ const App: React.FC = () => {
     </FirestoreProvider>
 }
 
-export default App;
+export default App

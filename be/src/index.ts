@@ -1,45 +1,41 @@
-import { DocumentReference, Firestore, Timestamp, Transaction } from '@google-cloud/firestore';
-import { Storage } from '@google-cloud/storage';
-import cors from 'cors';
-import express from 'express';
-import { Dictionary, Request } from 'express-serve-static-core';
-import admin from 'firebase-admin';
-import produce from 'immer';
-import uuid from 'uuid/v1';
-import GetConfig from './config';
-import { ActionMap } from './model/Action';
-import validateAction from './model/Action.validator';
-import Action0, { JoinGame, MakeMove, StartGame } from './model/Action0';
-import Export from './model/Export';
-import validateExport from './model/Export.validator';
-import Export0, * as export0 from './model/Export0';
-import State0, { GameState, initState0 } from './model/State0';
-import { Drawing } from './model/Upload';
-import validateUpload from './model/Upload.validator';
-import UploadResponse from './model/UploadResponse';
-import * as types from './types.validator';
-import State from './model/State';
-import Export1_0_0, * as export1_0_0 from './model/Export1.0.0';
-import { StateSchema } from './model/State.validator';
-import { StateEntry, ExportStateMap } from './types';
-import { ExportVersion } from './model/base';
+import { DocumentReference, Firestore, Timestamp, Transaction } from '@google-cloud/firestore'
+import { Storage } from '@google-cloud/storage'
+import cors from 'cors'
+import express from 'express'
+import { Dictionary, Request } from 'express-serve-static-core'
+import admin from 'firebase-admin'
+import produce from 'immer'
+import uuid from 'uuid/v1'
+import GetConfig from './config'
+import validateAction from './model/Action.validator'
+import Action0, { JoinGame, MakeMove, StartGame } from './model/Action0'
+import Export from './model/Export'
+import validateExport from './model/Export.validator'
+import * as export0 from './model/Export0'
+import Export1_0_0, * as export1_0_0 from './model/Export1.0.0'
+import { Drawing, UploadResponse } from './model/rpc'
+import { validate as validateRpc } from './model/rpc.validator'
+import State from './model/State'
+import State0, { initState0 } from './model/State0'
+import { ExportStateMap } from './types'
+import * as types from './types.validator'
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
-});
+})
 
-const storage = new Storage();
-const db = admin.firestore();
+const storage = new Storage()
+const db = admin.firestore()
 
 // Create a new express application instance
-const app: express.Application = express();
+const app: express.Application = express()
 app.set('json spaces', 2)
-app.use(express.json());
+app.use(express.json())
 
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 3000
 app.listen(port, function() {
-    console.log(`Example app listening on port ${port}!`);
-});
+    console.log(`Example app listening on port ${port}!`)
+})
 
 function integrate0(acc: State0, action: Action0): State0 {
     switch (action.kind) {
@@ -58,13 +54,13 @@ function joinGame(game: State0, action: JoinGame) {
     }
 
     if (game.playerOrder.indexOf(action.playerId) != -1) {
-        return;
+        return
     }
 
     game.players[action.playerId] = {
         id: action.playerId
     }
-    game.playerOrder.push(action.playerId);
+    game.playerOrder.push(action.playerId)
 }
 
 function mapValues<V1, V2>(obj: { [k: string]: V1 }, fn: (k: string, v: V1) => V2): { [k: string]: V2 } {
@@ -175,7 +171,7 @@ function exportState0(gameId: string, state: State): Export[] {
         gameId,
         playerId,
         ...exportStateForPlayer0(state, playerId)
-    }));
+    }))
 }
 
 function exportStateForPlayer0(state: State0, playerId: string): export0.PlayerGame {
@@ -338,7 +334,7 @@ async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise
     const action = validateAction(body)
     console.log(action)
 
-    const gameId = action.gameId;
+    const gameId = action.gameId
     await db.runTransaction(async (tx: Transaction): Promise<void> => {
         const prevState = await gameState.get(tx, gameId) || initStateEntry()
 
@@ -392,7 +388,7 @@ function mkDpl<K, V>(
             if (!data.exists) {
                 return null
             }
-            return parser(data.data());
+            return parser(data.data())
         },
         set: (tx, k, v) => {
             tx.set(reffer(db, k), v)
@@ -420,7 +416,7 @@ const playerGame = mkDpl(db, playerGameRef, validateExport)
 const MAX_POINTS = 50_000
 
 async function doUpload(body: unknown): Promise<UploadResponse> {
-    const upload = validateUpload(body)
+    const upload = validateRpc('Upload')(body)
 
     if (MAX_POINTS < numPoints(upload)) {
         throw new Error('too many points in drawing')

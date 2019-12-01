@@ -1,10 +1,10 @@
 
-import React, { useEffect, useRef, useState } from 'react';
-import Canvas, { DraftDrawing } from './Canvas';
-import Drawing from './Drawing';
-import * as export0 from './model/Export0';
-import { Drawing as DrawingModel } from './model/Upload';
-import validateUpload from './model/Upload.validator';
+import React, { useEffect, useRef, useState } from 'react'
+import Canvas, { DraftDrawing } from './Canvas'
+import Drawing from './Drawing'
+import * as export0 from './model/Export0'
+import { Drawing as DrawingModel } from './model/rpc'
+import { validate as validateRpc } from './model/rpc.validator'
 
 type GameViewProps = {
     playerGame: export0.PlayerGame
@@ -45,6 +45,7 @@ const ActiveGame: React.FC<ActiveGameProps> = ({ playerGame, submitWord, submitD
     const initText = ''
     const initDraftDrawing = {
         drawing: {
+            kind: 'drawing' as 'drawing',
             paths: []
         },
         inProgress: {},
@@ -56,13 +57,13 @@ const ActiveGame: React.FC<ActiveGameProps> = ({ playerGame, submitWord, submitD
     const [dims, setDims] = useState({
         width: window.innerWidth,
         height: window.innerHeight
-    });
+    })
 
     useEffect(() => {
         return window.addEventListener('resize', () => setDims({
             width: window.innerWidth,
             height: window.innerHeight
-        }));
+        }))
     }, [])
 
     const doTextSub = (e: React.ChangeEvent<HTMLFormElement>) => {
@@ -153,7 +154,7 @@ const Entry: React.FC<{ entry: export0.SeriesEntry }> = ({ entry }) => {
         setDims({
             width: container.current!.offsetWidth,
             height: container.current!.offsetHeight,
-        });
+        })
     }, [])
 
     if (entry.submission.kind === 'word') {
@@ -187,7 +188,7 @@ const DownloadDrawing: React.FC<DownloadDrawingProps> = ({ drawingId, width, hei
                 `https://storage.googleapis.com/pictophone-app-drawings/${drawingId}`, {
 
             })
-            const d = validateUpload(await res.json())
+            const d = validateRpc('Upload')(await res.json())
             setDownloaded(d)
         })()
     }, [drawingId])

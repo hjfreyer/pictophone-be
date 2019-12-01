@@ -28,7 +28,7 @@
     "deploy": "echo 'www.pictophone.app' > build/CNAME && gh-pages -d build -b gh-pages",
     "test": "react-scripts test",
     "eject": "react-scripts eject",
-    "cptypes": "sh -e cptypes.sh"
+    "cpmodel": "sh -e cpmodel.sh"
   },
   "eslintConfig": {
     "extends": "react-app"
