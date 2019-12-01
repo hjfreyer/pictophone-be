@@ -7,8 +7,9 @@ import { StateEntry, validate } from "./types.validator"
 function updateGenerationForState(state: StateEntry): void {
     state.generation = GENERATION
     for (const version of EXPORT_VERSIONS) {
-        if (!(version in state.exports)) { }
-        state.exports[version] = 'NOT_EXPORTED'
+        if (!(version in state.exports)) {
+            state.exports[version] = 'NOT_EXPORTED'
+        }
     }
 }
 
