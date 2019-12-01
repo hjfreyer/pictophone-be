@@ -46,6 +46,7 @@
     ]
   },
   "devDependencies": {
-    "gh-pages": "^2.1.1"
+    "gh-pages": "^2.1.1",
+    "typescript-json-validator": "^2.4.0"
   }
 }

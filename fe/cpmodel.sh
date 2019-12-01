@@ -1,11 +1,16 @@
 
+ACTION_VERSION=0
+EXPORT_VERSION=0
+
 rm src/model/*
 
-for f in Action Action0 Export Export0 Export1.0.0 rpc base; do
+for f in "Action${ACTION_VERSION}" "Export${EXPORT_VERSION}" rpc base; do
     cp ../be/src/model/$f.ts src/model/
 done
 
-for f in Export rpc; do
-    cp ../be/src/model/$f.validator.ts src/model/
+typescript-json-validator "src/model/Export${EXPORT_VERSION}.ts"
+typescript-json-validator --collection src/model/rpc.ts
+
+for f in "Export${EXPORT_VERSION}" rpc; do
     sed -i "s/import Ajv = require('ajv');/import Ajv from 'ajv';/;/^export [{]/d" src/model/$f.validator.ts
 done

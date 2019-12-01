@@ -1,4 +1,4 @@
-import Action from "./model/Action"
+import Action from "./model/Action0"
 import { Upload, UploadResponse } from "./model/rpc"
 
 export type Dispatch = {
