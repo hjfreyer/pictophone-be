@@ -6,14 +6,14 @@ import { Dictionary, Request } from 'express-serve-static-core'
 import admin from 'firebase-admin'
 import produce from 'immer'
 import uuid from 'uuid/v1'
-import { updateGeneration } from './batch'
+import { backfillExports, updateGeneration } from './batch'
 import GetConfig from './config'
+import { applyExportDiff } from './exports'
 import exportState0to0 from './exports/0-0'
 import exportState0to1_0_0 from './exports/0-v1.0.0'
 import validateAction from './model/Action.validator'
 import Action0, { JoinGame, MakeMove, StartGame } from './model/Action0'
 import Export from './model/Export'
-import validateExport from './model/Export.validator'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
 import State from './model/State'
@@ -171,23 +171,6 @@ function initStateEntry(): types.StateEntry {
     }
 }
 
-function exportKey(e: Export): string {
-    switch (e.kind) {
-        case 'player_game':
-            return JSON.stringify([e.version, e.playerId, e.gameId])
-    }
-}
-
-type ExportMap = { [key: string]: Export }
-function indexExports(exports: Export[]): ExportMap {
-    const res: ExportMap = {}
-
-    for (const e of exports) {
-        res[exportKey(e)] = e
-    }
-    return res
-}
-
 async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise<void> {
     const action = validateAction(body)
     console.log(action)
@@ -198,11 +181,11 @@ async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise
 
         const exports = upgradeExportMap(prevState.exports)
 
-        const prevExports = indexExports(exportState(
-            gameId, prevState.state, exports.prev))
+        const prevExports = exportState(
+            gameId, prevState.state, exports.prev)
 
         const newState = integrate0(prevState.state, action)
-        const newExports = indexExports(exportState(gameId, newState, exports.next))
+        const newExports = exportState(gameId, newState, exports.next)
 
         gameState.set(tx, gameId, {
             generation: 1,
@@ -211,22 +194,10 @@ async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise
             lastModified: admin.firestore.FieldValue.serverTimestamp(),
             state: newState,
         })
-        applyDiff(tx, prevExports, newExports)
+        applyExportDiff(db, tx, prevExports, newExports)
     })
 }
 
-function applyDiff(tx: Transaction, prevP: ExportMap, newP: ExportMap): void {
-    for (const prevKey in prevP) {
-        if (!(prevKey in newP)) {
-            const key = JSON.parse(prevKey) as [number, string, string]
-            playerGame.delete(tx, key)
-        }
-    }
-    for (const newKey in newP) {
-        const key = JSON.parse(newKey) as [number, string, string]
-        playerGame.set(tx, key, newP[newKey])
-    }
-}
 
 type DPL<K, V> = {
     get(tx: Transaction, k: K): Promise<V | null>
@@ -262,14 +233,6 @@ function gameStateRef(db: Firestore, gameId: string): FirebaseFirestore.Document
 }
 
 const gameState = mkDpl(db, gameStateRef, types.validate('StateEntry'))
-
-function playerGameRef(db: Firestore, [version, playerId, gameId]: [number, string, string]): FirebaseFirestore.DocumentReference {
-    return db.collection('versions').doc('' + version)
-        .collection('players').doc(playerId)
-        .collection('games').doc(gameId)
-}
-
-const playerGame = mkDpl(db, playerGameRef, validateExport)
 
 const MAX_POINTS = 50_000
 
@@ -314,5 +277,12 @@ app.post('/batch/update-generation', function(req: Request<Dictionary<string>>, 
     updateGeneration(db).then(finished => {
         res.status(200)
         res.json({ finished })
+    }).catch(next)
+})
+
+app.post('/batch/backfill-exports', function(req: Request<Dictionary<string>>, res, next) {
+    backfillExports(db).then(result => {
+        res.status(200)
+        res.json(result)
     }).catch(next)
 })
