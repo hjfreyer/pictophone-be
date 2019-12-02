@@ -1,4 +1,3 @@
-import { strict as assert } from 'assert'
 import firebase from 'firebase/app'
 import 'firebase/auth'
 import 'firebase/firestore'
@@ -12,11 +11,10 @@ import Config from './config'
 import GameView from './GameView'
 import Home from './Home'
 import Action from './model/Action0'
-import Export from './model/Export0'
-import validateExport from './model/Export0.validator'
-import * as export0 from './model/Export0'
+import validateExport from './model/Export1_1_0.validator'
 import { Drawing, Upload, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
+import Export from './model/Export1_1_0'
 
 const config = {
     apiKey: "AIzaSyCzMg7Q2ByK5UxUd_x730LT8TmOmbA61MU",
@@ -87,15 +85,14 @@ const GamePage: React.FC<GamePageProps> = ({ playerId, dispatch }) => {
     }
 
     return <FirestoreDocument
-        path={`versions/0/players/${playerId}/games/${gameId}`}
+        path={`versions/${base.EXPORT_VERSION}/players/${playerId}/games/${gameId}`}
         render={({ isLoading, data }: { isLoading: boolean, data: any }) => {
             if (isLoading) {
                 return <span>Loading...</span>
             }
             const pgAny: Export = validateExport(data)
-            assert(pgAny.version === '0')
             return <GameView
-                playerGame={pgAny as export0.Export0}
+                playerGame={pgAny}
                 startGame={startGame}
                 submitWord={submitWord}
                 submitDrawing={submitDrawing}

@@ -5,3 +5,5 @@ export type Dispatch = {
     action(a: Action): Promise<void>
     upload(u: Upload): Promise<UploadResponse>
 }
+
+export const EXPORT_VERSION = 'v1.1.0'

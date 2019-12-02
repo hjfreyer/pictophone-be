@@ -2,12 +2,12 @@
 import React, { useEffect, useRef, useState } from 'react'
 import Canvas, { DraftDrawing } from './Canvas'
 import Drawing from './Drawing'
-import * as export0 from './model/Export0'
 import { Drawing as DrawingModel } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
+import * as exp from './model/Export1_1_0'
 
 type GameViewProps = {
-    playerGame: export0.PlayerGame
+    playerGame: exp.PlayerGame
     startGame: () => void
     submitWord: (word: string) => void
     submitDrawing: (s: DrawingModel) => void
@@ -15,7 +15,11 @@ type GameViewProps = {
 
 const GameView: React.FC<GameViewProps> = ({ playerGame, startGame, submitWord, submitDrawing }) => {
     const playerList = <div>
-        Players: {playerGame.playerIds.map((p, idx) => <div key={idx}>{p}</div>)}
+        Players: {
+            playerGame.playerOrder.map((p, idx) =>
+                <div key={idx}>{playerGame.players[p].displayName}</div>
+                )
+        }
     </div>
 
     switch (playerGame.state) {
@@ -36,7 +40,7 @@ const GameView: React.FC<GameViewProps> = ({ playerGame, startGame, submitWord, 
 }
 
 type ActiveGameProps = {
-    playerGame: export0.FirstPromptGame | export0.WaitingForPromptGame | export0.RespondToPromptGame
+    playerGame: exp.FirstPromptGame | exp.WaitingForPromptGame | exp.RespondToPromptGame
     submitWord: (word: string) => void
     submitDrawing: (s: DrawingModel) => void
 }
@@ -98,7 +102,7 @@ const ActiveGame: React.FC<ActiveGameProps> = ({ playerGame, submitWord, submitD
     const canvasWidth = Math.min(canvasWidth1, dims.width * 0.95)
     const canvasHeight = canvasWidth * 4 / 3
 
-    const respond = (playerGame: export0.RespondToPromptGame) =>
+    const respond = (playerGame: exp.RespondToPromptGame) =>
         playerGame.prompt.kind === 'word'
             ? <main id="game">
                 <div className="word-prompt" >
@@ -128,7 +132,7 @@ const ActiveGame: React.FC<ActiveGameProps> = ({ playerGame, submitWord, submitD
 }
 
 type SeriesProps = {
-    serieses: export0.Series[]
+    serieses: exp.Series[]
 }
 
 const Series: React.FC<SeriesProps> = ({ serieses }) => {
@@ -146,7 +150,7 @@ const Series: React.FC<SeriesProps> = ({ serieses }) => {
     </main>
 }
 
-const Entry: React.FC<{ entry: export0.SeriesEntry }> = ({ entry }) => {
+const Entry: React.FC<{ entry: exp.SeriesEntry }> = ({ entry }) => {
     const container = useRef<HTMLDivElement>(null)
     const [dims, setDims] = useState({ width: 0, height: 0 })
 
