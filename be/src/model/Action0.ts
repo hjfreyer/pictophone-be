@@ -1,6 +1,4 @@
 
-import { Submission } from './base'
-
 export type Action0 = JoinGame | StartGame | MakeMove
 
 export type JoinGame = {
@@ -23,6 +21,14 @@ export type MakeMove = {
     playerId: string
     gameId: string
     submission: Submission
+}
+
+export type Submission = {
+    kind: 'word'
+    word: string
+} | {
+    kind: 'drawing'
+    drawingId: string
 }
 
 export default Action0

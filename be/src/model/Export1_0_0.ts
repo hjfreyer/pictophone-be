@@ -1,6 +1,4 @@
 
-import { Submission } from './base'
-
 type Base = {
     version: 'v1.0.0'
     kind: 'player_game'
@@ -59,6 +57,15 @@ export type PlayerGame = (
     | RespondToPromptGame
     | FinishedGame
 )
+
+
+export type Submission = {
+    kind: 'word'
+    word: string
+} | {
+    kind: 'drawing'
+    drawingId: string
+}
 
 export type Export1_0_0 = Base&PlayerGame
 export default Export1_0_0

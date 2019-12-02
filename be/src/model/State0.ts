@@ -1,6 +1,4 @@
 
-import { Submission } from './base'
-
 export type GameState = (UnstartedGameState | StartedGameState) 
 
 type UnstartedGameState = {
@@ -22,6 +20,14 @@ type StartedGameState = {
 type StartedGamePlayer = {
     id: string   
     submissions: Submission[]
+}
+
+export type Submission = {
+    kind: 'word'
+    word: string
+} | {
+    kind: 'drawing'
+    drawingId: string
 }
 
 export type State0 = GameState & { version: 0, kind: 'game_state' }

@@ -1,9 +1,8 @@
 import { DocumentReference, FieldPath, Firestore, Transaction } from '@google-cloud/firestore'
 import produce from 'immer'
+import { GENERATION } from './base'
 import { applyExportDiff, getExporter } from './exports'
-import { EXPORT_VERSIONS, GENERATION, ExportVersion } from './model/base'
-import Export from './model/Export'
-import State0 from './model/State0'
+import { Version as ExportVersion, VERSIONS as EXPORT_VERSIONS } from './model/Export'
 import { StateEntry, validate } from './types.validator'
 
 function updateGenerationForState(state: StateEntry): void {

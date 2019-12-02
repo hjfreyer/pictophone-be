@@ -11,7 +11,7 @@ import GetConfig from './config'
 import { getExporter, applyExportDiff } from './exports'
 import validateAction from './model/Action.validator'
 import Action0, { JoinGame, MakeMove, StartGame } from './model/Action0'
-import Export from './model/Export'
+import Export, {VERSIONS as EXPORT_VERSIONS} from './model/Export'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
 import State from './model/State'
@@ -19,7 +19,7 @@ import State0, { initState0 } from './model/State0'
 import { ExportStateMap } from './types'
 import * as types from './types.validator'
 import { mapValues } from './util'
-import { EXPORT_VERSIONS, GENERATION } from './model/base'
+import { GENERATION } from './base'
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()

@@ -4,7 +4,7 @@ EXPORT_VERSION=1_1_0
 
 rm src/model/*
 
-for f in "Action${ACTION_VERSION}" "Export${EXPORT_VERSION}" rpc base; do
+for f in "Action${ACTION_VERSION}" "Export${EXPORT_VERSION}" rpc; do
     cp ../be/src/model/$f.ts src/model/
 done
 

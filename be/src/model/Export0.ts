@@ -1,6 +1,4 @@
 
-import { Submission } from './base'
-
 export type PlayerGame = (
     UnstartedGame
     | FirstPromptGame
@@ -50,6 +48,14 @@ export type Series = {
 export type SeriesEntry = {
     playerId: string
     submission: Submission
+}
+
+export type Submission = {
+    kind: 'word'
+    word: string
+} | {
+    kind: 'drawing'
+    drawingId: string
 }
 
 export type Export0 = (Base & PlayerGame)
