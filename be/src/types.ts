@@ -1,6 +1,5 @@
 
 import State from './model/State'
-import { ExportVersion } from './model/base'
 
 export type ExportState = 'NOT_EXPORTED' | 'EXPORTED' | 'DIRTY'
 
