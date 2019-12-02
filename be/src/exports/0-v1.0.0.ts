@@ -1,5 +1,5 @@
 import State0 from '../model/State0'
-import Export1_0_0, { PlayerGame, PlayerMap, Series } from '../model/Export1.0.0'
+import Export1_0_0, { PlayerGame, PlayerMap, Series } from '../model/Export1_0_0'
 import { mapValues } from '../util'
 
 export default function exportState(gameId: string, state: State0): Export1_0_0[] {

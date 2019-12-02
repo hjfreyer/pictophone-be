@@ -1,6 +1,6 @@
 import { ExportVersion } from './base'
 import Export0 from './Export0'
-import Export1_0_0 from './Export1.0.0'
+import Export1_0_0 from './Export1_0_0'
 
 export type ExportByVersion<V extends ExportVersion> =
     V extends '0' ? Export0 :
