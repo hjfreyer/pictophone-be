@@ -8,9 +8,7 @@ import produce from 'immer'
 import uuid from 'uuid/v1'
 import { backfillExports, updateGeneration } from './batch'
 import GetConfig from './config'
-import { applyExportDiff } from './exports'
-import exportState0to0 from './exports/0-0'
-import exportState0to1_0_0 from './exports/0-v1.0.0'
+import { getExporter, applyExportDiff } from './exports'
 import validateAction from './model/Action.validator'
 import Action0, { JoinGame, MakeMove, StartGame } from './model/Action0'
 import Export from './model/Export'
@@ -21,6 +19,7 @@ import State0, { initState0 } from './model/State0'
 import { ExportStateMap } from './types'
 import * as types from './types.validator'
 import { mapValues } from './util'
+import { EXPORT_VERSIONS, GENERATION } from './model/base'
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -116,18 +115,18 @@ type EsmState = {
 }
 
 function upgradeExportMap(esm: ExportStateMap): EsmState {
-    const known: Record<string, boolean> = { '0': true, 'v1.0.0': true }
+    const known = new Set<string>(EXPORT_VERSIONS)
 
     const prev = produce(esm, prev => {
         // Fill in any missing gaps in esm.
-        for (const version in known) {
+        for (const version of EXPORT_VERSIONS) {
             if (!(version in prev)) {
                 prev[version] = 'NOT_EXPORTED'
             }
         }
     })
     let next: ExportStateMap = mapValues(prev, (version, state) => {
-        if (version in known) {
+        if (known.has(version)) {
             switch (state) {
                 case 'DIRTY': return 'DIRTY'
                 case 'EXPORTED': return 'EXPORTED'
@@ -148,12 +147,10 @@ function exportState(gameId: string, state: State,
     exports: ExportStateMap): Export[] {
 
     const res: Export[] = []
-    if (exports['0'] === 'EXPORTED') {
-        res.push(...exportState0to0(gameId, state))
-    }
-
-    if (exports['v1.0.0'] === 'EXPORTED') {
-        res.push(...exportState0to1_0_0(gameId, state))
+    for (const version of EXPORT_VERSIONS) {
+        if (exports[version] === 'EXPORTED') {
+            res.push(...getExporter(version)(gameId, state))
+        }
     }
 
     return res
@@ -165,9 +162,7 @@ function initStateEntry(): types.StateEntry {
         iteration: 0,
         lastModified: Timestamp.fromMillis(0),
         state: initState0(),
-        exports: {
-            [0]: 'EXPORTED'
-        },
+        exports: {},
     }
 }
 
@@ -188,7 +183,7 @@ async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise
         const newExports = exportState(gameId, newState, exports.next)
 
         gameState.set(tx, gameId, {
-            generation: 1,
+            generation: GENERATION,
             iteration: prevState.iteration + 1,
             exports: exports.next,
             lastModified: admin.firestore.FieldValue.serverTimestamp(),

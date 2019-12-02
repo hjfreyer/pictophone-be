@@ -1,12 +1,10 @@
-import { DocumentReference, FieldPath, Firestore, Transaction } from "@google-cloud/firestore"
-import produce from "immer"
-import { applyExportDiff } from "./exports"
-import exportState0to0 from "./exports/0-0"
-import exportState0to1_0_0 from "./exports/0-v1.0.0"
-import { EXPORT_VERSIONS, GENERATION } from "./model/base"
-import Export from "./model/Export"
-import State0 from "./model/State0"
-import { StateEntry, validate } from "./types.validator"
+import { DocumentReference, FieldPath, Firestore, Transaction } from '@google-cloud/firestore'
+import produce from 'immer'
+import { applyExportDiff, getExporter } from './exports'
+import { EXPORT_VERSIONS, GENERATION, ExportVersion } from './model/base'
+import Export from './model/Export'
+import State0 from './model/State0'
+import { StateEntry, validate } from './types.validator'
 
 function updateGenerationForState(state: StateEntry): void {
     state.generation = GENERATION
@@ -48,7 +46,7 @@ export async function updateGeneration(db: Firestore): Promise<boolean> {
 
 async function updateExportTx(
     db: Firestore, tx: Transaction,
-    doc: DocumentReference, version: string): Promise<void> {
+    doc: DocumentReference, version: ExportVersion): Promise<void> {
     const stateEntryDoc = await tx.get(doc)
     if (!stateEntryDoc.exists) {
         return  // Race. Got deleted.
@@ -62,16 +60,10 @@ async function updateExportTx(
     })
     tx.set(doc, newStateEntry)
 
-    const versionMakerMap: Record<string,
-        (gameId: string, state: State0) => Export[]> = {
-        '0': exportState0to0,
-        'v1.0.0': exportState0to1_0_0,
-    }
-
     // Hack.
     const gameId = doc.id.replace('game:', '')
 
-    const newExports = versionMakerMap[version](gameId, stateEntry.state)
+    const newExports = getExporter(version)(gameId, stateEntry.state)
     applyExportDiff(db, tx, [], newExports)
 }
 
@@ -86,7 +78,7 @@ export type BackfillStatusMap = {
     [version: string]: BackfillStatus
 }
 
-async function backfillExportsForVersion(db: Firestore, version: string): Promise<BackfillStatus> {
+async function backfillExportsForVersion(db: Firestore, version: ExportVersion): Promise<BackfillStatus> {
     const dirtyRefs = await db.collection('state')
         .where(new FieldPath('exports', version), '==', 'DIRTY')
         .select()

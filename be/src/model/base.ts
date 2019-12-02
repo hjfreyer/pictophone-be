@@ -1,7 +1,7 @@
 
 export type ActionVersion = 0
 
-export type ExportVersion = '0' | 'v1.0.0'
+export type ExportVersion = '0' | 'v1.0.0' | 'v1.1.0'
 
 export type Submission = {
     kind: 'word'
@@ -11,5 +11,5 @@ export type Submission = {
     drawingId: string
 }
 
-export const GENERATION = 1
-export const EXPORT_VERSIONS = ['0', 'v1.0.0']
+export const GENERATION = 2
+export const EXPORT_VERSIONS : ExportVersion[] = ['0', 'v1.0.0', 'v1.1.0']
