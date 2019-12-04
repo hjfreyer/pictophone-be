@@ -890,17 +890,1117 @@ export const ExportSchema = {
           "type": "object"
         }
       ]
+    },
+    {
+      "allOf": [
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "gameId": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "player_game"
+              ],
+              "type": "string"
+            },
+            "playerId": {
+              "type": "string"
+            },
+            "version": {
+              "enum": [
+                "v1.1.0"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "gameId",
+            "kind",
+            "playerId",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "playerOrder": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "players": {
+              "additionalProperties": {
+                "defaultProperties": [
+                ],
+                "properties": {
+                  "displayName": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "displayName"
+                ],
+                "type": "object"
+              },
+              "defaultProperties": [
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "playerOrder",
+            "players"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "UNSTARTED"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    {
+      "allOf": [
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "gameId": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "player_game"
+              ],
+              "type": "string"
+            },
+            "playerId": {
+              "type": "string"
+            },
+            "version": {
+              "enum": [
+                "v1.1.0"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "gameId",
+            "kind",
+            "playerId",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "playerOrder": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "players": {
+              "additionalProperties": {
+                "defaultProperties": [
+                ],
+                "properties": {
+                  "displayName": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "displayName"
+                ],
+                "type": "object"
+              },
+              "defaultProperties": [
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "playerOrder",
+            "players"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "FIRST_PROMPT"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    {
+      "allOf": [
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "gameId": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "player_game"
+              ],
+              "type": "string"
+            },
+            "playerId": {
+              "type": "string"
+            },
+            "version": {
+              "enum": [
+                "v1.1.0"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "gameId",
+            "kind",
+            "playerId",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "playerOrder": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "players": {
+              "additionalProperties": {
+                "defaultProperties": [
+                ],
+                "properties": {
+                  "displayName": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "displayName"
+                ],
+                "type": "object"
+              },
+              "defaultProperties": [
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "playerOrder",
+            "players"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "WAITING_FOR_PROMPT"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    {
+      "allOf": [
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "gameId": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "player_game"
+              ],
+              "type": "string"
+            },
+            "playerId": {
+              "type": "string"
+            },
+            "version": {
+              "enum": [
+                "v1.1.0"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "gameId",
+            "kind",
+            "playerId",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "playerOrder": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "players": {
+              "additionalProperties": {
+                "defaultProperties": [
+                ],
+                "properties": {
+                  "displayName": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "displayName"
+                ],
+                "type": "object"
+              },
+              "defaultProperties": [
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "playerOrder",
+            "players"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "prompt": {
+              "anyOf": [
+                {
+                  "defaultProperties": [
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "word"
+                      ],
+                      "type": "string"
+                    },
+                    "word": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "word"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "defaultProperties": [
+                  ],
+                  "properties": {
+                    "drawingId": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "drawing"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "drawingId",
+                    "kind"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "state": {
+              "enum": [
+                "RESPOND_TO_PROMPT"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "prompt",
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    {
+      "allOf": [
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "gameId": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "player_game"
+              ],
+              "type": "string"
+            },
+            "playerId": {
+              "type": "string"
+            },
+            "version": {
+              "enum": [
+                "v1.1.0"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "gameId",
+            "kind",
+            "playerId",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "playerOrder": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "players": {
+              "additionalProperties": {
+                "defaultProperties": [
+                ],
+                "properties": {
+                  "displayName": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "displayName"
+                ],
+                "type": "object"
+              },
+              "defaultProperties": [
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "playerOrder",
+            "players"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "series": {
+              "items": {
+                "defaultProperties": [
+                ],
+                "properties": {
+                  "entries": {
+                    "items": {
+                      "defaultProperties": [
+                      ],
+                      "properties": {
+                        "playerId": {
+                          "type": "string"
+                        },
+                        "submission": {
+                          "anyOf": [
+                            {
+                              "defaultProperties": [
+                              ],
+                              "properties": {
+                                "kind": {
+                                  "enum": [
+                                    "word"
+                                  ],
+                                  "type": "string"
+                                },
+                                "word": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "word"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "defaultProperties": [
+                              ],
+                              "properties": {
+                                "drawingId": {
+                                  "type": "string"
+                                },
+                                "kind": {
+                                  "enum": [
+                                    "drawing"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "drawingId",
+                                "kind"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "playerId",
+                        "submission"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "entries"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "state": {
+              "enum": [
+                "GAME_OVER"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "series",
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    {
+      "allOf": [
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "gameId": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "player_game"
+              ],
+              "type": "string"
+            },
+            "playerId": {
+              "type": "string"
+            },
+            "version": {
+              "enum": [
+                "v1.2.0"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "gameId",
+            "kind",
+            "playerId",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "playerOrder": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "players": {
+              "additionalProperties": {
+                "defaultProperties": [
+                ],
+                "properties": {
+                  "displayName": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "displayName"
+                ],
+                "type": "object"
+              },
+              "defaultProperties": [
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "playerOrder",
+            "players"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "UNSTARTED"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    {
+      "allOf": [
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "gameId": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "player_game"
+              ],
+              "type": "string"
+            },
+            "playerId": {
+              "type": "string"
+            },
+            "version": {
+              "enum": [
+                "v1.2.0"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "gameId",
+            "kind",
+            "playerId",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "playerOrder": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "players": {
+              "additionalProperties": {
+                "defaultProperties": [
+                ],
+                "properties": {
+                  "displayName": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "displayName"
+                ],
+                "type": "object"
+              },
+              "defaultProperties": [
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "playerOrder",
+            "players"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "FIRST_PROMPT"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    {
+      "allOf": [
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "gameId": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "player_game"
+              ],
+              "type": "string"
+            },
+            "playerId": {
+              "type": "string"
+            },
+            "version": {
+              "enum": [
+                "v1.2.0"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "gameId",
+            "kind",
+            "playerId",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "playerOrder": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "players": {
+              "additionalProperties": {
+                "defaultProperties": [
+                ],
+                "properties": {
+                  "displayName": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "displayName"
+                ],
+                "type": "object"
+              },
+              "defaultProperties": [
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "playerOrder",
+            "players"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "WAITING_FOR_PROMPT"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    {
+      "allOf": [
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "gameId": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "player_game"
+              ],
+              "type": "string"
+            },
+            "playerId": {
+              "type": "string"
+            },
+            "version": {
+              "enum": [
+                "v1.2.0"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "gameId",
+            "kind",
+            "playerId",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "playerOrder": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "players": {
+              "additionalProperties": {
+                "defaultProperties": [
+                ],
+                "properties": {
+                  "displayName": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "displayName"
+                ],
+                "type": "object"
+              },
+              "defaultProperties": [
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "playerOrder",
+            "players"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "prompt": {
+              "anyOf": [
+                {
+                  "defaultProperties": [
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "word"
+                      ],
+                      "type": "string"
+                    },
+                    "word": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "word"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "defaultProperties": [
+                  ],
+                  "properties": {
+                    "drawingId": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "drawing"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "drawingId",
+                    "kind"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "state": {
+              "enum": [
+                "RESPOND_TO_PROMPT"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "prompt",
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    {
+      "allOf": [
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "gameId": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "player_game"
+              ],
+              "type": "string"
+            },
+            "playerId": {
+              "type": "string"
+            },
+            "version": {
+              "enum": [
+                "v1.2.0"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "gameId",
+            "kind",
+            "playerId",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "playerOrder": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "players": {
+              "additionalProperties": {
+                "defaultProperties": [
+                ],
+                "properties": {
+                  "displayName": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "displayName"
+                ],
+                "type": "object"
+              },
+              "defaultProperties": [
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "playerOrder",
+            "players"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "series": {
+              "items": {
+                "defaultProperties": [
+                ],
+                "properties": {
+                  "entries": {
+                    "items": {
+                      "defaultProperties": [
+                      ],
+                      "properties": {
+                        "playerId": {
+                          "type": "string"
+                        },
+                        "submission": {
+                          "anyOf": [
+                            {
+                              "defaultProperties": [
+                              ],
+                              "properties": {
+                                "kind": {
+                                  "enum": [
+                                    "word"
+                                  ],
+                                  "type": "string"
+                                },
+                                "word": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "kind",
+                                "word"
+                              ],
+                              "type": "object"
+                            },
+                            {
+                              "defaultProperties": [
+                              ],
+                              "properties": {
+                                "drawingId": {
+                                  "type": "string"
+                                },
+                                "kind": {
+                                  "enum": [
+                                    "drawing"
+                                  ],
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "drawingId",
+                                "kind"
+                              ],
+                              "type": "object"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "playerId",
+                        "submission"
+                      ],
+                      "type": "object"
+                    },
+                    "type": "array"
+                  }
+                },
+                "required": [
+                  "entries"
+                ],
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "state": {
+              "enum": [
+                "GAME_OVER"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "series",
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
     }
   ]
 };
 export type ValidateFunction<T> = ((data: unknown) => data is T) & Pick<Ajv.ValidateFunction, 'errors'>
-const rawValidateExport = ajv.compile(ExportSchema) as ValidateFunction<Export>;
+export const isExport = ajv.compile(ExportSchema) as ValidateFunction<Export>;
 export default function validate(value: unknown): Export {
-  if (rawValidateExport(value)) {
+  if (isExport(value)) {
     return value;
   } else {
     throw new Error(
-      ajv.errorsText(rawValidateExport.errors!.filter((e: any) => e.keyword !== 'if'), {dataVar: 'Export'}) +
+      ajv.errorsText(isExport.errors!.filter((e: any) => e.keyword !== 'if'), {dataVar: 'Export'}) +
       '\n\n' +
       inspect(value),
     );

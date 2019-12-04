@@ -148,17 +148,381 @@ export const ActionSchema = {
         "version"
       ],
       "type": "object"
+    },
+    {
+      "allOf": [
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "gameId": {
+              "type": "string"
+            },
+            "playerId": {
+              "type": "string"
+            },
+            "version": {
+              "enum": [
+                "v1.1.0"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "gameId",
+            "playerId",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "displayName": {
+              "minLength": 0,
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "join_game"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "displayName",
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    {
+      "allOf": [
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "gameId": {
+              "type": "string"
+            },
+            "playerId": {
+              "type": "string"
+            },
+            "version": {
+              "enum": [
+                "v1.1.0"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "gameId",
+            "playerId",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "start_game"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    {
+      "allOf": [
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "gameId": {
+              "type": "string"
+            },
+            "playerId": {
+              "type": "string"
+            },
+            "version": {
+              "enum": [
+                "v1.1.0"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "gameId",
+            "playerId",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "make_move"
+              ],
+              "type": "string"
+            },
+            "submission": {
+              "anyOf": [
+                {
+                  "defaultProperties": [
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "word"
+                      ],
+                      "type": "string"
+                    },
+                    "word": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "word"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "defaultProperties": [
+                  ],
+                  "properties": {
+                    "drawingId": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "drawing"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "drawingId",
+                    "kind"
+                  ],
+                  "type": "object"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "submission"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    {
+      "allOf": [
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "gameId": {
+              "type": "string"
+            },
+            "playerId": {
+              "type": "string"
+            },
+            "version": {
+              "enum": [
+                "v1.2.0"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "gameId",
+            "playerId",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "displayName": {
+              "minLength": 0,
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "join_game"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "displayName",
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    {
+      "allOf": [
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "gameId": {
+              "type": "string"
+            },
+            "playerId": {
+              "type": "string"
+            },
+            "version": {
+              "enum": [
+                "v1.2.0"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "gameId",
+            "playerId",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "start_game"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    {
+      "allOf": [
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "gameId": {
+              "type": "string"
+            },
+            "playerId": {
+              "type": "string"
+            },
+            "version": {
+              "enum": [
+                "v1.2.0"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "gameId",
+            "playerId",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "kind": {
+              "enum": [
+                "make_move"
+              ],
+              "type": "string"
+            },
+            "submission": {
+              "anyOf": [
+                {
+                  "defaultProperties": [
+                  ],
+                  "properties": {
+                    "kind": {
+                      "enum": [
+                        "word"
+                      ],
+                      "type": "string"
+                    },
+                    "word": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "kind",
+                    "word"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "defaultProperties": [
+                  ],
+                  "properties": {
+                    "drawingId": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "drawing"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "drawingId",
+                    "kind"
+                  ],
+                  "type": "object"
+                }
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "submission"
+          ],
+          "type": "object"
+        }
+      ]
     }
   ]
 };
 export type ValidateFunction<T> = ((data: unknown) => data is T) & Pick<Ajv.ValidateFunction, 'errors'>
-const rawValidateAction = ajv.compile(ActionSchema) as ValidateFunction<Action>;
+export const isAction = ajv.compile(ActionSchema) as ValidateFunction<Action>;
 export default function validate(value: unknown): Action {
-  if (rawValidateAction(value)) {
+  if (isAction(value)) {
     return value;
   } else {
     throw new Error(
-      ajv.errorsText(rawValidateAction.errors!.filter((e: any) => e.keyword !== 'if'), {dataVar: 'Action'}) +
+      ajv.errorsText(isAction.errors!.filter((e: any) => e.keyword !== 'if'), {dataVar: 'Action'}) +
       '\n\n' +
       inspect(value),
     );

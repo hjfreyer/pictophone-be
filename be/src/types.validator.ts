@@ -31,6 +31,24 @@ export const Schema = {
       ],
       "type": "object"
     },
+    "Record<string,Submission[]>": {
+      "defaultProperties": [
+      ],
+      "description": "Construct a type with a set of properties K of type T",
+      "type": "object"
+    },
+    "Record<string,Submission[]>_1": {
+      "defaultProperties": [
+      ],
+      "description": "Construct a type with a set of properties K of type T",
+      "type": "object"
+    },
+    "Record<string,string>": {
+      "defaultProperties": [
+      ],
+      "description": "Construct a type with a set of properties K of type T",
+      "type": "object"
+    },
     "StateEntry": {
       "defaultProperties": [
       ],
@@ -239,6 +257,246 @@ export const Schema = {
                   "required": [
                     "kind",
                     "version"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "defaultProperties": [
+                  ],
+                  "properties": {
+                    "displayNames": {
+                      "$ref": "#/definitions/Record<string,string>"
+                    },
+                    "gameId": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "game"
+                      ],
+                      "type": "string"
+                    },
+                    "playerOrder": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "version": {
+                      "enum": [
+                        "v1.1.0"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "displayNames",
+                    "gameId",
+                    "kind",
+                    "playerOrder",
+                    "version"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "defaultProperties": [
+                  ],
+                  "properties": {
+                    "state": {
+                      "enum": [
+                        "UNSTARTED"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "defaultProperties": [
+                  ],
+                  "properties": {
+                    "displayNames": {
+                      "$ref": "#/definitions/Record<string,string>"
+                    },
+                    "gameId": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "game"
+                      ],
+                      "type": "string"
+                    },
+                    "playerOrder": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "version": {
+                      "enum": [
+                        "v1.1.0"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "displayNames",
+                    "gameId",
+                    "kind",
+                    "playerOrder",
+                    "version"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "defaultProperties": [
+                  ],
+                  "properties": {
+                    "state": {
+                      "enum": [
+                        "STARTED"
+                      ],
+                      "type": "string"
+                    },
+                    "submissions": {
+                      "$ref": "#/definitions/Record<string,Submission[]>"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "submissions"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "defaultProperties": [
+                  ],
+                  "properties": {
+                    "displayNames": {
+                      "$ref": "#/definitions/Record<string,string>"
+                    },
+                    "gameId": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "game"
+                      ],
+                      "type": "string"
+                    },
+                    "playerOrder": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "version": {
+                      "enum": [
+                        "v1.2.0"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "displayNames",
+                    "gameId",
+                    "kind",
+                    "playerOrder",
+                    "version"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "defaultProperties": [
+                  ],
+                  "properties": {
+                    "state": {
+                      "enum": [
+                        "UNSTARTED"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "defaultProperties": [
+                  ],
+                  "properties": {
+                    "displayNames": {
+                      "$ref": "#/definitions/Record<string,string>"
+                    },
+                    "gameId": {
+                      "type": "string"
+                    },
+                    "kind": {
+                      "enum": [
+                        "game"
+                      ],
+                      "type": "string"
+                    },
+                    "playerOrder": {
+                      "items": {
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
+                    "version": {
+                      "enum": [
+                        "v1.2.0"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "displayNames",
+                    "gameId",
+                    "kind",
+                    "playerOrder",
+                    "version"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "defaultProperties": [
+                  ],
+                  "properties": {
+                    "state": {
+                      "enum": [
+                        "STARTED"
+                      ],
+                      "type": "string"
+                    },
+                    "submissions": {
+                      "$ref": "#/definitions/Record<string,Submission[]>_1"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "submissions"
                   ],
                   "type": "object"
                 }

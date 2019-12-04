@@ -196,17 +196,277 @@ export const StateSchema = {
           "type": "object"
         }
       ]
+    },
+    {
+      "allOf": [
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "displayNames": {
+              "$ref": "#/definitions/Record<string,string>"
+            },
+            "gameId": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "game"
+              ],
+              "type": "string"
+            },
+            "playerOrder": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "version": {
+              "enum": [
+                "v1.1.0"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "displayNames",
+            "gameId",
+            "kind",
+            "playerOrder",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "UNSTARTED"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    {
+      "allOf": [
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "displayNames": {
+              "$ref": "#/definitions/Record<string,string>"
+            },
+            "gameId": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "game"
+              ],
+              "type": "string"
+            },
+            "playerOrder": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "version": {
+              "enum": [
+                "v1.1.0"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "displayNames",
+            "gameId",
+            "kind",
+            "playerOrder",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "STARTED"
+              ],
+              "type": "string"
+            },
+            "submissions": {
+              "$ref": "#/definitions/Record<string,Submission[]>"
+            }
+          },
+          "required": [
+            "state",
+            "submissions"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    {
+      "allOf": [
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "displayNames": {
+              "$ref": "#/definitions/Record<string,string>"
+            },
+            "gameId": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "game"
+              ],
+              "type": "string"
+            },
+            "playerOrder": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "version": {
+              "enum": [
+                "v1.2.0"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "displayNames",
+            "gameId",
+            "kind",
+            "playerOrder",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "UNSTARTED"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "state"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    {
+      "allOf": [
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "displayNames": {
+              "$ref": "#/definitions/Record<string,string>"
+            },
+            "gameId": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "game"
+              ],
+              "type": "string"
+            },
+            "playerOrder": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "version": {
+              "enum": [
+                "v1.2.0"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "displayNames",
+            "gameId",
+            "kind",
+            "playerOrder",
+            "version"
+          ],
+          "type": "object"
+        },
+        {
+          "defaultProperties": [
+          ],
+          "properties": {
+            "state": {
+              "enum": [
+                "STARTED"
+              ],
+              "type": "string"
+            },
+            "submissions": {
+              "$ref": "#/definitions/Record<string,Submission[]>_1"
+            }
+          },
+          "required": [
+            "state",
+            "submissions"
+          ],
+          "type": "object"
+        }
+      ]
     }
-  ]
+  ],
+  "definitions": {
+    "Record<string,Submission[]>": {
+      "defaultProperties": [
+      ],
+      "description": "Construct a type with a set of properties K of type T",
+      "type": "object"
+    },
+    "Record<string,Submission[]>_1": {
+      "defaultProperties": [
+      ],
+      "description": "Construct a type with a set of properties K of type T",
+      "type": "object"
+    },
+    "Record<string,string>": {
+      "defaultProperties": [
+      ],
+      "description": "Construct a type with a set of properties K of type T",
+      "type": "object"
+    }
+  }
 };
 export type ValidateFunction<T> = ((data: unknown) => data is T) & Pick<Ajv.ValidateFunction, 'errors'>
-const rawValidateState = ajv.compile(StateSchema) as ValidateFunction<State>;
+export const isState = ajv.compile(StateSchema) as ValidateFunction<State>;
 export default function validate(value: unknown): State {
-  if (rawValidateState(value)) {
+  if (isState(value)) {
     return value;
   } else {
     throw new Error(
-      ajv.errorsText(rawValidateState.errors!.filter((e: any) => e.keyword !== 'if'), {dataVar: 'State'}) +
+      ajv.errorsText(isState.errors!.filter((e: any) => e.keyword !== 'if'), {dataVar: 'State'}) +
       '\n\n' +
       inspect(value),
     );
