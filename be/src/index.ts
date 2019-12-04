@@ -1,4 +1,4 @@
-import { DocumentReference, Firestore, Timestamp, Transaction, setLogFunction } from '@google-cloud/firestore'
+import { DocumentReference, Firestore, Transaction } from '@google-cloud/firestore'
 import { Storage } from '@google-cloud/storage'
 import cors from 'cors'
 import express from 'express'
@@ -6,21 +6,17 @@ import { Dictionary, Request } from 'express-serve-static-core'
 import admin from 'firebase-admin'
 import produce from 'immer'
 import uuid from 'uuid/v1'
-import { backfillExports, updateGeneration, checkExports } from './batch'
+import { backfillExports, checkExports, updateGeneration } from './batch'
 import GetConfig from './config'
 import { applyExportDiff } from './exports'
+import * as logic from './logic'
 import validateAction, { Action } from './model/Action.validator'
-import Action0, { JoinGame, MakeMove, StartGame } from './model/Action0'
 import Export, { VERSIONS as EXPORT_VERSIONS } from './model/Export'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
 import State from './model/State'
 import { ExportStateMap } from './types'
 import * as types from './types.validator'
-import { mapValues } from './util'
-import { GENERATION } from './base'
-import * as logic from './logic'
-import { StateSchema } from './model/State.validator'
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -95,19 +91,13 @@ function firstAction(action: Action): ActionOutput {
 
     // 4 and 6 are unnecessary, as initial states can't have export.
 
-    // 5
-    const nextState0 = logic.migrateState(action.gameId, nextState, 0)
-    const nextState1_1_0 = logic.migrateState(action.gameId, nextState, 'v1.1.0')
-
-    // 7
-    const exports = [
-        ...logic.exportState(action.gameId, nextState0),
-        ...logic.exportState(action.gameId, nextState1_1_0)
-    ]
-
-    const exportMap :ExportStateMap= {
-        0: 'EXPORTED',
-        'v1.1.0': 'EXPORTED',
+    // 5 + 7
+    const exportMap: ExportStateMap = {}
+    const exports: Export[] = []
+    for (const version of logic.STATE_VERSIONS) {
+        exportMap[version] = 'EXPORTED'
+        const migrated = logic.migrateState(action.gameId, nextState, version)
+        exports.push(...logic.exportState(action.gameId, migrated))
     }
 
     // Step 8 is handled by the caller.
@@ -129,31 +119,18 @@ function act({ prevState, prevExportMap, action }: ActionInput): ActionOutput {
     // 3
     const nextState = logic.integrate(prevState, action)
 
-    // 4
-        const prevState0 = logic.migrateState(action.gameId, prevState, 0)
-    const prevState1_1_0 = logic.migrateState(action.gameId, prevState, 'v1.1.0')
-
-    // 5
-    const nextState0 = logic.migrateState(action.gameId, nextState, 0)
-    const nextState1_1_0 = logic.migrateState(action.gameId, nextState, 'v1.1.0')
-
-    // 6
+    // 4, 5, 6, 7
     const exportMap = upgradeExportMap(prevExportMap)
-    const prevExports : Export[] = []
-    if (exportMap['0'] === 'EXPORTED') {
-        prevExports.push(...logic.exportState(action.gameId, prevState0))
-    }
-    if (exportMap['v1.1.0'] === 'EXPORTED') {
-        prevExports.push(...logic.exportState(action.gameId, prevState1_1_0))
-    }
-
-    // 7
-    const nextExports : Export[] = []
-    if (exportMap['0'] === 'EXPORTED') {
-        nextExports.push(...logic.exportState(action.gameId, nextState0))
-    }
-    if (exportMap['v1.1.0'] === 'EXPORTED') {
-        nextExports.push(...logic.exportState(action.gameId, nextState1_1_0))
+    const prevExports: Export[] = []
+    const nextExports: Export[] = []
+    for (const version of logic.STATE_VERSIONS) {
+        if (exportMap[version] !== 'EXPORTED') {
+            continue
+        }
+        const prevMigrated = logic.migrateState(action.gameId, prevState, version)
+        prevExports.push(...logic.exportState(action.gameId, prevMigrated))
+        const nextMigrated = logic.migrateState(action.gameId, nextState, version)
+        nextExports.push(...logic.exportState(action.gameId, nextMigrated))
     }
 
     // Step 8 is handled by the caller.
@@ -176,7 +153,7 @@ async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise
         if (prevStateEntry === null) {
             const { nextState, exportMap, nextExports } = firstAction(action)
             gameState.set(tx, gameId, {
-                generation: GENERATION,
+                generation: 0,
                 iteration: 1,
                 exports: exportMap,
                 lastModified: admin.firestore.FieldValue.serverTimestamp(),
@@ -191,7 +168,7 @@ async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise
             })
 
             gameState.set(tx, gameId, {
-                generation: GENERATION,
+                generation: 0,
                 iteration: prevStateEntry.iteration + 1,
                 exports: exportMap,
                 lastModified: admin.firestore.FieldValue.serverTimestamp(),

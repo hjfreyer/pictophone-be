@@ -1,15 +1,16 @@
 import { DocumentReference, FieldPath, Firestore, Transaction } from '@google-cloud/firestore'
 import produce from 'immer'
-import { GENERATION } from './base'
 import { applyExportDiff, checkExport } from './exports'
-import { Version as ExportVersion, VERSIONS as EXPORT_VERSIONS } from './model/Export'
+import { Version as ExportVersion } from './model/Export'
 import { StateEntry, validate } from './types.validator'
 import { migrateState, exportState, STATE_VERSIONS } from './logic'
 import State from './model/State'
 
+const GENERATION = 4
+
 function updateGenerationForState(state: StateEntry): void {
     state.generation = GENERATION
-    for (const version of EXPORT_VERSIONS) {
+    for (const version of STATE_VERSIONS) {
         if (!(version in state.exports)) {
             state.exports[version] = 'NOT_EXPORTED'
         }
@@ -132,7 +133,7 @@ async function checkExportsForDoc(db: Firestore, tx: Transaction, doc: DocumentR
     const gameId = doc.id.replace('game:', '')
 
     for (const version of STATE_VERSIONS) {
-        if (stateEntry.exports[version] === 'EXPORTED') {
+        if (version !== 'v1.1.0' && stateEntry.exports[version] === 'EXPORTED') {
             console.log('..', version)
             const migrated = migrateState(gameId, stateEntry.state, version)
             for (const exp of exportState(gameId, migrated)) {
@@ -140,15 +141,26 @@ async function checkExportsForDoc(db: Firestore, tx: Transaction, doc: DocumentR
             }
         }
     }
+    tx.set(doc, { generation: GENERATION }, { mergeFields: ['generation'] })
 }
 
-export async function checkExports(db: Firestore): Promise<void> {
-    const states = await db.collection('state')
-        .select()
-        .get()
+export type CheckExportsResult = {
+    state: 'FINISHED' | 'NOT_FINISHED'
+}
 
-    for (const doc of states.docs) {
+export async function checkExports(db: Firestore): Promise<CheckExportsResult> {
+    const uncheckedRefs = await db.collection('state')
+        .where('generation', '<', GENERATION)
+        .select()
+        .limit(10)
+        .get()
+    if (uncheckedRefs.empty) {
+        return {state: 'FINISHED'}
+    }
+
+    for (const doc of uncheckedRefs.docs) {
         console.log('checking', doc.ref.path)
         await db.runTransaction(tx => checkExportsForDoc(db, tx, doc.ref))
     }
+    return {state: 'NOT_FINISHED'}
 }
