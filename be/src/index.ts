@@ -6,7 +6,7 @@ import { Dictionary, Request } from 'express-serve-static-core'
 import admin from 'firebase-admin'
 import produce from 'immer'
 import uuid from 'uuid/v1'
-import { backfillExports, updateGeneration } from './batch'
+import { backfillExports, updateGeneration, checkExports } from './batch'
 import GetConfig from './config'
 import { applyExportDiff } from './exports'
 import validateAction, { Action } from './model/Action.validator'
@@ -285,6 +285,13 @@ app.post('/batch/update-generation', function(req: Request<Dictionary<string>>, 
 
 app.post('/batch/backfill-exports', function(req: Request<Dictionary<string>>, res, next) {
     backfillExports(db).then(result => {
+        res.status(200)
+        res.json(result)
+    }).catch(next)
+})
+
+app.post('/batch/check-exports', function(req: Request<Dictionary<string>>, res, next) {
+    checkExports(db).then(result => {
         res.status(200)
         res.json(result)
     }).catch(next)

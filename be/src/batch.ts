@@ -1,7 +1,7 @@
 import { DocumentReference, FieldPath, Firestore, Transaction } from '@google-cloud/firestore'
 import produce from 'immer'
 import { GENERATION } from './base'
-import { applyExportDiff } from './exports'
+import { applyExportDiff, checkExport } from './exports'
 import { Version as ExportVersion, VERSIONS as EXPORT_VERSIONS } from './model/Export'
 import { StateEntry, validate } from './types.validator'
 import { migrateState, exportState, STATE_VERSIONS } from './logic'
@@ -83,7 +83,7 @@ export type BackfillStatusMap = {
 
 async function backfillExportsForVersion(db: Firestore, version: State['version']): Promise<BackfillStatus> {
     const dirtyRefs = await db.collection('state')
-        .where(new FieldPath('exports', ''+version), '==', 'DIRTY')
+        .where(new FieldPath('exports', '' + version), '==', 'DIRTY')
         .select()
         .limit(10)
         .get()
@@ -96,7 +96,7 @@ async function backfillExportsForVersion(db: Firestore, version: State['version'
     }
 
     const unExportedRefs = await db.collection('state')
-        .where(new FieldPath('exports', ''+version), '==', 'NOT_EXPORTED')
+        .where(new FieldPath('exports', '' + version), '==', 'NOT_EXPORTED')
         .select()
         .limit(10)
         .get()
@@ -119,4 +119,36 @@ export async function backfillExports(db: Firestore): Promise<BackfillStatusMap>
         res[version] = await backfillExportsForVersion(db, version)
     }
     return res
+}
+
+async function checkExportsForDoc(db: Firestore, tx: Transaction, doc: DocumentReference): Promise<void> {
+    const stateEntryDoc = await tx.get(doc)
+    if (!stateEntryDoc.exists) {
+        return  // Race. Got deleted.
+    }
+    const stateEntry = validate('StateEntry')(stateEntryDoc.data())
+
+    // Hack.
+    const gameId = doc.id.replace('game:', '')
+
+    for (const version of STATE_VERSIONS) {
+        if (stateEntry.exports[version] === 'EXPORTED') {
+            console.log('..', version)
+            const migrated = migrateState(gameId, stateEntry.state, version)
+            for (const exp of exportState(gameId, migrated)) {
+                await checkExport(db, tx, exp)
+            }
+        }
+    }
+}
+
+export async function checkExports(db: Firestore): Promise<void> {
+    const states = await db.collection('state')
+        .select()
+        .get()
+
+    for (const doc of states.docs) {
+        console.log('checking', doc.ref.path)
+        await db.runTransaction(tx => checkExportsForDoc(db, tx, doc.ref))
+    }
 }
