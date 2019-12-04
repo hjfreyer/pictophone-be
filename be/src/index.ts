@@ -1,4 +1,4 @@
-import { DocumentReference, Firestore, Timestamp, Transaction } from '@google-cloud/firestore'
+import { DocumentReference, Firestore, Timestamp, Transaction, setLogFunction } from '@google-cloud/firestore'
 import { Storage } from '@google-cloud/storage'
 import cors from 'cors'
 import express from 'express'
@@ -8,18 +8,19 @@ import produce from 'immer'
 import uuid from 'uuid/v1'
 import { backfillExports, updateGeneration } from './batch'
 import GetConfig from './config'
-import { getExporter, applyExportDiff } from './exports'
-import validateAction from './model/Action.validator'
+import { applyExportDiff } from './exports'
+import validateAction, { Action } from './model/Action.validator'
 import Action0, { JoinGame, MakeMove, StartGame } from './model/Action0'
-import Export, {VERSIONS as EXPORT_VERSIONS} from './model/Export'
+import Export, { VERSIONS as EXPORT_VERSIONS } from './model/Export'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
 import State from './model/State'
-import State0, { initState0 } from './model/State0'
 import { ExportStateMap } from './types'
 import * as types from './types.validator'
 import { mapValues } from './util'
 import { GENERATION } from './base'
+import * as logic from './logic'
+import { StateSchema } from './model/State.validator'
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -38,131 +39,129 @@ app.listen(port, function() {
     console.log(`Example app listening on port ${port}!`)
 })
 
-function integrate0(acc: State0, action: Action0): State0 {
-    switch (action.kind) {
-        case 'join_game':
-            return produce(joinGame)(acc, action)
-        case 'start_game':
-            return produce(startGame)(acc, action)
-        case 'make_move':
-            return produce(makeMove)(acc, action)
-    }
-}
-
-function joinGame(game: State0, action: JoinGame) {
-    if (game.state !== 'UNSTARTED') {
-        return
-    }
-
-    if (game.playerOrder.indexOf(action.playerId) != -1) {
-        return
-    }
-
-    game.players[action.playerId] = {
-        id: action.playerId
-    }
-    game.playerOrder.push(action.playerId)
-}
-
-function startGame(game: State0, action: StartGame): State0 {
-    if (game.state !== 'UNSTARTED') {
-        return game
-    }
-    if (game.playerOrder.length === 0) {
-        return game
-    }
-
-    return {
-        ...game,
-        state: 'STARTED',
-        players: mapValues(game.players, (_, v) => ({ ...v, submissions: [] }))
-    }
-}
-
-function makeMove(game: State0, action: MakeMove) {
-    if (game.state !== 'STARTED') {
-        return
-    }
-    const playerId = action.playerId
-    if (!(playerId in game.players)) {
-        return
-    }
-
-    const roundNum = Math.min(...Object.values(game.players).map(a => a.submissions.length))
-    if (game.players[playerId].submissions.length !== roundNum) {
-        return
-    }
-
-    // Game is over.
-    if (roundNum === game.playerOrder.length) {
-        return
-    }
-
-    if (roundNum % 2 === 0 && action.submission.kind === 'drawing') {
-        return
-    }
-    if (roundNum % 2 === 1 && action.submission.kind === 'word') {
-        return
-    }
-
-    game.players[playerId].submissions.push(action.submission)
-}
-
-
-type EsmState = {
-    prev: ExportStateMap
-    next: ExportStateMap
-}
-
-function upgradeExportMap(esm: ExportStateMap): EsmState {
+function upgradeExportMap(esm: ExportStateMap): ExportStateMap {
     const known = new Set<string>(EXPORT_VERSIONS)
 
-    const prev = produce(esm, prev => {
+    return produce(esm, esm => {
         // Fill in any missing gaps in esm.
         for (const version of EXPORT_VERSIONS) {
-            if (!(version in prev)) {
-                prev[version] = 'NOT_EXPORTED'
+            if (!(version in esm)) {
+                esm[version] = 'NOT_EXPORTED'
             }
         }
-    })
-    let next: ExportStateMap = mapValues(prev, (version, state) => {
-        if (known.has(version)) {
-            switch (state) {
-                case 'DIRTY': return 'DIRTY'
-                case 'EXPORTED': return 'EXPORTED'
-                case 'NOT_EXPORTED': return 'EXPORTED'
-            }
-        }
-        switch (state) {
-            case 'DIRTY': return 'DIRTY'
-            case 'EXPORTED': return 'DIRTY'
-            case 'NOT_EXPORTED': return 'NOT_EXPORTED'
-        }
-    })
 
-    return { prev, next }
+        // Mark any unknown exported as dirty.
+        for (const version in esm) {
+            if (!known.has(version) && esm[version] === 'EXPORTED') {
+                esm[version] = 'DIRTY'
+            }
+        }
+    })
 }
 
-function exportState(gameId: string, state: State,
-    exports: ExportStateMap): Export[] {
+// Algorithm for applying an action:
+//
+// 1. Upgrade the state until it's at least as new as the action. Call it PS.
+// 2. Upgrade the action until it's at least as new as the state. Call it A.
+// 3. Integrate the A into PS. Call the result NS.
+// 4. Produce prevStates[v] for all known versions by upgrading and downgrading from PS.
+// 5. Produce nextStates[v] for all known versions by upgrading and downgrading from NS.
+// 6. Export prevStates[v] for all known versions IFF v is exported (according to 
+//    the export map).
+// 7. Export nextStates[v] for all known versions IFF v is exported (according to 
+//    the export map).
+// 8. Apply the diff of the given exports.
+//
+// TODO: Monitor whether redundant upgrade/downgrade paths all agree with each other.
+type ActionInput = {
+    prevState: State
+    prevExportMap: ExportStateMap
+    action: Action
+}
 
-    const res: Export[] = []
-    for (const version of EXPORT_VERSIONS) {
-        if (exports[version] === 'EXPORTED') {
-            res.push(...getExporter(version)(gameId, state))
-        }
+type ActionOutput = {
+    nextState: State
+    exportMap: ExportStateMap
+    prevExports: Export[]
+    nextExports: Export[]
+}
+
+function firstAction(action: Action): ActionOutput {
+    // Steps 1+2 are trivial in this case.
+    const prevState = logic.initState(action.version, action.gameId)
+
+    // 3
+    const nextState = logic.integrate(prevState, action)
+
+    // 4 and 6 are unnecessary, as initial states can't have export.
+
+    // 5
+    const nextState0 = logic.migrateState(action.gameId, nextState, 0)
+    const nextState1_1_0 = logic.migrateState(action.gameId, nextState, 'v1.1.0')
+
+    // 7
+    const exports = [
+        ...logic.exportState(action.gameId, nextState0),
+        ...logic.exportState(action.gameId, nextState1_1_0)
+    ]
+
+    const exportMap :ExportStateMap= {
+        0: 'EXPORTED',
+        'v1.1.0': 'EXPORTED',
     }
 
-    return res
+    // Step 8 is handled by the caller.
+    return {
+        nextState,
+        exportMap,
+        prevExports: [],
+        nextExports: exports,
+    }
 }
 
-function initStateEntry(): types.StateEntry {
+function act({ prevState, prevExportMap, action }: ActionInput): ActionOutput {
+    // 1
+    prevState = logic.upgradeState(action.gameId, prevState, action.version)
+
+    // 2
+    action = logic.upgradeAction(action, prevState.version)
+
+    // 3
+    const nextState = logic.integrate(prevState, action)
+
+    // 4
+        const prevState0 = logic.migrateState(action.gameId, prevState, 0)
+    const prevState1_1_0 = logic.migrateState(action.gameId, prevState, 'v1.1.0')
+
+    // 5
+    const nextState0 = logic.migrateState(action.gameId, nextState, 0)
+    const nextState1_1_0 = logic.migrateState(action.gameId, nextState, 'v1.1.0')
+
+    // 6
+    const exportMap = upgradeExportMap(prevExportMap)
+    const prevExports : Export[] = []
+    if (exportMap['0'] === 'EXPORTED') {
+        prevExports.push(...logic.exportState(action.gameId, prevState0))
+    }
+    if (exportMap['v1.1.0'] === 'EXPORTED') {
+        prevExports.push(...logic.exportState(action.gameId, prevState1_1_0))
+    }
+
+    // 7
+    const nextExports : Export[] = []
+    if (exportMap['0'] === 'EXPORTED') {
+        nextExports.push(...logic.exportState(action.gameId, nextState0))
+    }
+    if (exportMap['v1.1.0'] === 'EXPORTED') {
+        nextExports.push(...logic.exportState(action.gameId, nextState1_1_0))
+    }
+
+    // Step 8 is handled by the caller.
     return {
-        generation: 0,
-        iteration: 0,
-        lastModified: Timestamp.fromMillis(0),
-        state: initState0(),
-        exports: {},
+        nextState,
+        exportMap,
+        prevExports,
+        nextExports,
     }
 }
 
@@ -172,27 +171,36 @@ async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise
 
     const gameId = action.gameId
     await db.runTransaction(async (tx: Transaction): Promise<void> => {
-        const prevState = await gameState.get(tx, gameId) || initStateEntry()
+        const prevStateEntry = await gameState.get(tx, gameId)
 
-        const exports = upgradeExportMap(prevState.exports)
+        if (prevStateEntry === null) {
+            const { nextState, exportMap, nextExports } = firstAction(action)
+            gameState.set(tx, gameId, {
+                generation: GENERATION,
+                iteration: 1,
+                exports: exportMap,
+                lastModified: admin.firestore.FieldValue.serverTimestamp(),
+                state: nextState,
+            })
+            applyExportDiff(db, tx, [], nextExports)
+        } else {
+            const { nextState, exportMap, prevExports, nextExports } = act({
+                prevState: prevStateEntry.state,
+                prevExportMap: prevStateEntry.exports,
+                action,
+            })
 
-        const prevExports = exportState(
-            gameId, prevState.state, exports.prev)
-
-        const newState = integrate0(prevState.state, action)
-        const newExports = exportState(gameId, newState, exports.next)
-
-        gameState.set(tx, gameId, {
-            generation: GENERATION,
-            iteration: prevState.iteration + 1,
-            exports: exports.next,
-            lastModified: admin.firestore.FieldValue.serverTimestamp(),
-            state: newState,
-        })
-        applyExportDiff(db, tx, prevExports, newExports)
+            gameState.set(tx, gameId, {
+                generation: GENERATION,
+                iteration: prevStateEntry.iteration + 1,
+                exports: exportMap,
+                lastModified: admin.firestore.FieldValue.serverTimestamp(),
+                state: nextState,
+            })
+            applyExportDiff(db, tx, prevExports, nextExports)
+        }
     })
 }
-
 
 type DPL<K, V> = {
     get(tx: Transaction, k: K): Promise<V | null>
