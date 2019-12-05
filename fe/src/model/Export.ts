@@ -1,6 +1,6 @@
 
 type Base = {
-    version: 'v1.1.0'
+    version: 'v1.2.0'
     kind: 'player_game'
     playerId: string
     gameId: string
@@ -66,5 +66,5 @@ export type Submission = {
     drawingId: string
 }
 
-export type Export1_1_0 = Base & PlayerGame
-export default Export1_1_0
+export type Export = Base & PlayerGame
+export default Export

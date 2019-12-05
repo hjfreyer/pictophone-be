@@ -1,4 +1,4 @@
-import Action from "./model/Action0"
+import Action from "./model/Action"
 import { Upload, UploadResponse } from "./model/rpc"
 
 export type Dispatch = {
@@ -6,4 +6,4 @@ export type Dispatch = {
     upload(u: Upload): Promise<UploadResponse>
 }
 
-export const EXPORT_VERSION = 'v1.1.0'
+export const MODEL_VERSION = 'v1.2.0'

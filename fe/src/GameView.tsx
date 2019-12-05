@@ -4,7 +4,7 @@ import Canvas, { DraftDrawing } from './Canvas'
 import Drawing from './Drawing'
 import { Drawing as DrawingModel } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
-import * as exp from './model/Export1_1_0'
+import * as exp from './model/Export'
 
 type GameViewProps = {
     playerGame: exp.PlayerGame

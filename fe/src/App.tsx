@@ -10,11 +10,11 @@ import * as base from './base'
 import Config from './config'
 import GameView from './GameView'
 import Home from './Home'
-import Action from './model/Action0'
-import validateExport from './model/Export1_1_0.validator'
+import Action from './model/Action'
+import validateExport from './model/Export.validator'
 import { Drawing, Upload, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
-import Export from './model/Export1_1_0'
+import Export from './model/Export'
 
 const config = {
     apiKey: "AIzaSyCzMg7Q2ByK5UxUd_x730LT8TmOmbA61MU",
@@ -59,14 +59,14 @@ const GamePage: React.FC<GamePageProps> = ({ playerId, dispatch }) => {
     const { gameId } = useParams()
 
     const startGame = () => dispatch.action({
-        version: 0,
+        version: base.MODEL_VERSION,
         kind: "start_game",
         playerId: playerId!,
         gameId: gameId!
     })
 
     const submitWord = (word: string) => dispatch.action({
-        version: 0,
+        version: base.MODEL_VERSION,
         kind: "make_move",
         playerId: playerId!,
         gameId: gameId!,
@@ -76,7 +76,7 @@ const GamePage: React.FC<GamePageProps> = ({ playerId, dispatch }) => {
     const submitDrawing = async (drawing: Drawing) => {
         const resp = await dispatch.upload({ kind: 'drawing', ...drawing })
         await dispatch.action({
-            version: 0,
+            version: base.MODEL_VERSION,
             kind: "make_move",
             playerId: playerId!,
             gameId: gameId!,
@@ -85,7 +85,7 @@ const GamePage: React.FC<GamePageProps> = ({ playerId, dispatch }) => {
     }
 
     return <FirestoreDocument
-        path={`versions/${base.EXPORT_VERSION}/players/${playerId}/games/${gameId}`}
+        path={`versions/${base.MODEL_VERSION}/players/${playerId}/games/${gameId}`}
         render={({ isLoading, data }: { isLoading: boolean, data: any }) => {
             if (isLoading) {
                 return <span>Loading...</span>
@@ -159,7 +159,9 @@ const Content: React.FC = () => {
         <Route path="/" exact>
             {
                 authInfo.user
-                    ? <Home playerId={authInfo.user.uid} dispatch={dispatch} />
+                    ? <Home playerId={authInfo.user.uid}
+                        defaultDisplayName={authInfo.user.displayName || ''}
+                        dispatch={dispatch} />
                     : <Landing />
             }
         </Route>

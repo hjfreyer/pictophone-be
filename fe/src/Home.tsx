@@ -5,20 +5,44 @@ import * as base from './base';
 
 type HomeProps = {
     playerId: string
+    defaultDisplayName: string
     dispatch: base.Dispatch
 }
 
-const Home: React.FC<HomeProps> = ({ playerId, dispatch }) => {
-    const joinGame = (gameId: string) => dispatch.action({
-        version: 0,
+const Home: React.FC<HomeProps> = ({ playerId, defaultDisplayName, dispatch }) => {
+    const [gameId, setGameId] = useState("")
+    const [displayName, setDisplayName] = useState(defaultDisplayName)
+
+    const joinGame = () => dispatch.action({
+        version: 'v1.2.0',
         kind: "join_game",
         playerId,
         gameId,
+        displayName,
     })
 
     return <div>
         <h1>User page for {playerId}</h1>
-        <JoinGame join={joinGame} />
+        <div>
+            <h2>Join A Game</h2>
+            <form onSubmit={(e) => { e.preventDefault(); joinGame() }}>
+                <div>
+                    <label>Game Name
+                <input
+                            type="text"
+                            value={gameId} onChange={e => setGameId(e.target.value)} />
+                    </label>
+                </div>
+                <div>
+                    <label>Your Name
+                <input
+                            type="text"
+                            value={displayName} onChange={e => setDisplayName(e.target.value)} />
+                    </label>
+                </div>
+                <button>Submit</button>
+            </form>
+        </div>
         <h2>Existing Games</h2>
         <FirestoreCollection
             path={`versions/0/players/${playerId}/games`}
@@ -35,21 +59,6 @@ const Home: React.FC<HomeProps> = ({ playerId, dispatch }) => {
                     }
                 </div>
             )} />
-    </div>
-}
-
-const JoinGame = ({ join }: {
-    join: (gid: string) => void
-}) => {
-    const [gid, setGid] = useState("")
-    return <div>
-        <h2>Join A Game</h2>
-        <form onSubmit={(e) => { e.preventDefault(); join(gid) }}>
-            <input
-                type="text"
-                value={gid} onChange={e => setGid(e.target.value)} />
-            <button>Submit</button>
-        </form>
     </div>
 }
 
