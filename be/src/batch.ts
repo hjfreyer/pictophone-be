@@ -6,7 +6,7 @@ import { StateEntry, validate } from './types.validator'
 import { migrateState, exportState, STATE_VERSIONS } from './logic'
 import State from './model/State'
 
-const GENERATION = 4
+const GENERATION = 5
 
 function updateGenerationForState(state: StateEntry): void {
     state.generation = GENERATION
