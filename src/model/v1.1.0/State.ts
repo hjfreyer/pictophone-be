@@ -26,6 +26,6 @@ export type Submission = {
     drawingId: string
 }
 
-export type State1_1_0 = GameState
+export type State = GameState
 
-export default State1_1_0
+export default State

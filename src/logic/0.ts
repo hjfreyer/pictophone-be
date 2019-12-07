@@ -1,7 +1,7 @@
 import produce from 'immer'
-import Action, { JoinGame, MakeMove, StartGame } from '../model/Action0'
-import Export, { PlayerGame, Series } from '../model/Export0'
-import State from '../model/State0'
+import Action, { JoinGame, MakeMove, StartGame } from '../model/v0/Action'
+import Export, { PlayerGame, Series } from '../model/v0/Export'
+import State from '../model/v0/State'
 import { mapValues } from '../util'
 
 // Integration

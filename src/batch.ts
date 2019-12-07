@@ -1,10 +1,10 @@
 import { DocumentReference, FieldPath, Firestore, Transaction } from '@google-cloud/firestore'
 import produce from 'immer'
 import { applyExportDiff, checkExport } from './exports'
-import { Version as ExportVersion } from './model/Export'
+import { Version as ExportVersion } from './model/AnyExport'
 import { StateEntry, validate } from './types.validator'
 import { migrateState, exportState, STATE_VERSIONS } from './logic'
-import State from './model/State'
+import State from './model/AnyState'
 
 const GENERATION = 5
 

@@ -1,8 +1,10 @@
 
+const VERSION = 'v1.2.0'
+
 export type GameState = (UnstartedGameState | StartedGameState) 
 
 type Base = {
-    version: 'v1.2.0'
+    version: typeof VERSION
     kind: 'game'
     gameId: string
     playerOrder: string[]
@@ -26,6 +28,6 @@ export type Submission = {
     drawingId: string
 }
 
-export type State1_2_0 = GameState
+export type State = GameState
 
-export default State1_2_0
+export default State

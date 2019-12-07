@@ -1,9 +1,9 @@
 import produce from 'immer'
-import PreviousAction from '../model/Action0'
-import Action, { JoinGame, MakeMove, StartGame } from '../model/Action1_1_0'
-import Export, { PlayerGame, PlayerMap, Series } from '../model/Export1_1_0'
-import PreviousState, { StartedGamePlayer, UnstartedGamePlayer } from '../model/State0'
-import State from '../model/State1_1_0'
+import PreviousAction from '../model/v0/Action'
+import Action, { JoinGame, MakeMove, StartGame } from '../model/v1.1.0/Action'
+import Export, { PlayerGame, PlayerMap, Series } from '../model/v1.1.0/Export'
+import PreviousState, { StartedGamePlayer, UnstartedGamePlayer } from '../model/v0/State'
+import State from '../model/v1.1.0/State'
 import { mapValues } from '../util'
 
 

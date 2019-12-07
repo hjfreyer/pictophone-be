@@ -1,9 +1,16 @@
 
+const VERSION = 'v1.2.0'
+
 type Base = {
-    version: 'v1.0.0'
+    version: typeof VERSION
     kind: 'player_game'
     playerId: string
     gameId: string
+}
+
+type WithPlayers = {
+    players: PlayerMap
+    playerOrder: string[]
 }
 
 export type PlayerMap = {
@@ -14,30 +21,25 @@ export type Player = {
     displayName: string
 }
 
-export type UnstartedGame =  {
+export type UnstartedGame = WithPlayers & {
     state: 'UNSTARTED'
-    players: PlayerMap
 }
 
-export type FirstPromptGame ={
+export type FirstPromptGame = WithPlayers & {
     state: 'FIRST_PROMPT'
-    players: PlayerMap
 }
 
-export type WaitingForPromptGame = {
+export type WaitingForPromptGame = WithPlayers & {
     state: 'WAITING_FOR_PROMPT'
-    players: PlayerMap
 }
 
-export type RespondToPromptGame =  {
+export type RespondToPromptGame = WithPlayers & {
     state: 'RESPOND_TO_PROMPT'
-    players: PlayerMap
     prompt: Submission
 }
 
-export type FinishedGame =  {
+export type FinishedGame = WithPlayers & {
     state: 'GAME_OVER'
-    players: PlayerMap
     series: Series[]
 }
 
@@ -58,7 +60,6 @@ export type PlayerGame = (
     | FinishedGame
 )
 
-
 export type Submission = {
     kind: 'word'
     word: string
@@ -67,5 +68,5 @@ export type Submission = {
     drawingId: string
 }
 
-export type Export1_0_0 = Base&PlayerGame
-export default Export1_0_0
+export type Export = Base & PlayerGame
+export default Export

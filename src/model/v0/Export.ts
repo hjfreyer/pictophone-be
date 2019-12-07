@@ -58,5 +58,5 @@ export type Submission = {
     drawingId: string
 }
 
-export type Export0 = (Base & PlayerGame)
-export default Export0
+export type Export = (Base & PlayerGame)
+export default Export

@@ -1,5 +1,5 @@
 
-export type Action0 = JoinGame | StartGame | MakeMove
+export type Action = JoinGame | StartGame | MakeMove
 
 export type JoinGame = {
     version: 0
@@ -31,4 +31,4 @@ export type Submission = {
     drawingId: string
 }
 
-export default Action0
+export default Action

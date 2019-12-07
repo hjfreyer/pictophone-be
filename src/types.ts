@@ -1,5 +1,5 @@
 
-import State from './model/State'
+import State from './model/AnyState'
 
 export type ExportState = 'NOT_EXPORTED' | 'EXPORTED' | 'DIRTY'
 

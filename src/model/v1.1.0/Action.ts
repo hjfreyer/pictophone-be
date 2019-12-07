@@ -1,6 +1,6 @@
 
 type Base = {
-    version: 'v1.2.0'
+    version: 'v1.1.0'
     playerId: string
     gameId: string
 }
@@ -31,6 +31,6 @@ export type Submission = {
     drawingId: string
 }
 
-export type Action1_2_0 = JoinGame | StartGame | MakeMove
+export type Action = JoinGame | StartGame | MakeMove
 
-export default Action1_2_0
+export default Action

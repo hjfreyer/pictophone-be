@@ -30,6 +30,6 @@ export type Submission = {
     drawingId: string
 }
 
-export type State0 = GameState & { version: 0, kind: 'game_state' }
+export type State = GameState & { version: 0, kind: 'game_state' }
 
-export default State0
+export default State

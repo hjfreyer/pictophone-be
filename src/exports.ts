@@ -1,6 +1,6 @@
 import { Firestore, Transaction } from '@google-cloud/firestore'
 import { getExportPath } from './logic'
-import Export from './model/Export'
+import Export from './model/AnyExport'
 import {strict as assert} from 'assert'
 
 export function applyExportDiff(db: Firestore, tx: Transaction,
