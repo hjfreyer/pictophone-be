@@ -15,7 +15,7 @@ steps:
     '--image', 'gcr.io/$PROJECT_ID/pictophone-be', 
     '--platform', 'managed',
     '--allow-unauthenticated',
-    '--service-account', 'pictophone-api-prod@pictophone-app.iam.gserviceaccount.com'
+    '--service-account', 'backend@$_ENV_PROJECT.iam.gserviceaccount.com'
   ]
 images:
 - gcr.io/$PROJECT_ID/pictophone-be
