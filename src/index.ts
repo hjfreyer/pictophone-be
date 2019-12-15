@@ -17,6 +17,7 @@ import { validate as validateRpc } from './model/rpc.validator'
 import State from './model/AnyState'
 import { ExportStateMap } from './types'
 import * as types from './types.validator'
+import { VERSIONS } from './model'
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -94,7 +95,7 @@ function firstAction(action: Action): ActionOutput {
     // 5 + 7
     const exportMap: ExportStateMap = {}
     const exports: Export[] = []
-    for (const version of logic.STATE_VERSIONS) {
+    for (const version of VERSIONS) {
         exportMap[version] = 'EXPORTED'
         const migrated = logic.migrateState(action.gameId, nextState, version)
         exports.push(...logic.exportState(action.gameId, migrated))
@@ -123,7 +124,7 @@ function act({ prevState, prevExportMap, action }: ActionInput): ActionOutput {
     const exportMap = upgradeExportMap(prevExportMap)
     const prevExports: Export[] = []
     const nextExports: Export[] = []
-    for (const version of logic.STATE_VERSIONS) {
+    for (const version of VERSIONS) {
         if (exportMap[version] !== 'EXPORTED') {
             continue
         }

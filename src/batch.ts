@@ -3,14 +3,15 @@ import produce from 'immer'
 import { applyExportDiff, checkExport } from './exports'
 import { Version as ExportVersion } from './model/AnyExport'
 import { StateEntry, validate } from './types.validator'
-import { migrateState, exportState, STATE_VERSIONS } from './logic'
+import { migrateState, exportState } from './logic'
 import State from './model/AnyState'
+import { VERSIONS } from './model'
 
 const GENERATION = 5
 
 function updateGenerationForState(state: StateEntry): void {
     state.generation = GENERATION
-    for (const version of STATE_VERSIONS) {
+    for (const version of VERSIONS) {
         if (!(version in state.exports)) {
             state.exports[version] = 'NOT_EXPORTED'
         }
@@ -116,7 +117,7 @@ async function backfillExportsForVersion(db: Firestore, version: State['version'
 
 export async function backfillExports(db: Firestore): Promise<BackfillStatusMap> {
     const res: BackfillStatusMap = {}
-    for (const version of STATE_VERSIONS) {
+    for (const version of VERSIONS) {
         res[version] = await backfillExportsForVersion(db, version)
     }
     return res
@@ -132,7 +133,7 @@ async function checkExportsForDoc(db: Firestore, tx: Transaction, doc: DocumentR
     // Hack.
     const gameId = doc.id.replace('game:', '')
 
-    for (const version of STATE_VERSIONS) {
+    for (const version of VERSIONS) {
         if (version !== 'v1.1.0' && stateEntry.exports[version] === 'EXPORTED') {
             console.log('..', version)
             const migrated = migrateState(gameId, stateEntry.state, version)
