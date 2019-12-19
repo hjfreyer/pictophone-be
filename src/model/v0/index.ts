@@ -8,4 +8,4 @@ export type Index = {
     Export: Export
 }
 
-export const VERSION: Action['version'] = 0
+export const VERSION: Action['version'] = '0'

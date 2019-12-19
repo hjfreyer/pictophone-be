@@ -17,7 +17,7 @@ import * as v1_1_0 from './v1.1.0'
 import * as v1_2_0 from './v1.2.0'
 
 const MODULES = {
-    0: v0,
+    '0': v0,
     'v1.1.0': v1_1_0,
     'v1.2.0': v1_2_0,
 }
