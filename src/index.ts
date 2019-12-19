@@ -6,18 +6,18 @@ import { Dictionary, Request } from 'express-serve-static-core'
 import admin from 'firebase-admin'
 import produce from 'immer'
 import uuid from 'uuid/v1'
-import { backfillExports, checkExports, updateGeneration } from './batch'
+import batch from './batch'
 import GetConfig from './config'
 import { applyExportDiff } from './exports'
 import * as logic from './logic'
+import { VERSIONS } from './model'
 import validateAction, { AnyAction as Action } from './model/AnyAction.validator'
 import Export, { VERSIONS as EXPORT_VERSIONS } from './model/AnyExport'
+import State from './model/AnyState'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
-import State from './model/AnyState'
 import { ExportStateMap } from './types'
 import * as types from './types.validator'
-import { VERSIONS } from './model'
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -254,23 +254,4 @@ app.post('/upload', cors(), function(req: Request<Dictionary<string>>, res, next
     }).catch(next)
 })
 
-app.post('/batch/update-generation', function(req: Request<Dictionary<string>>, res, next) {
-    updateGeneration(db).then(finished => {
-        res.status(200)
-        res.json({ finished })
-    }).catch(next)
-})
-
-app.post('/batch/backfill-exports', function(req: Request<Dictionary<string>>, res, next) {
-    backfillExports(db).then(result => {
-        res.status(200)
-        res.json(result)
-    }).catch(next)
-})
-
-app.post('/batch/check-exports', function(req: Request<Dictionary<string>>, res, next) {
-    checkExports(db).then(result => {
-        res.status(200)
-        res.json(result)
-    }).catch(next)
-})
+app.use('/batch', batch(db))

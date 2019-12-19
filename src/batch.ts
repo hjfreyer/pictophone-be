@@ -1,13 +1,27 @@
 import { DocumentReference, FieldPath, Firestore, Transaction } from '@google-cloud/firestore'
+import { Request, Router } from 'express'
+import { Dictionary } from 'express-serve-static-core'
+import admin from 'firebase-admin'
 import produce from 'immer'
 import { applyExportDiff, checkExport } from './exports'
-import { Version as ExportVersion } from './model/AnyExport'
-import { StateEntry, validate } from './types.validator'
-import { migrateState, exportState } from './logic'
-import State from './model/AnyState'
+import { exportState, migrateState, upgradeState } from './logic'
 import { VERSIONS } from './model'
+import State from './model/AnyState'
+import { StateEntry, validate } from './types.validator'
 
-const GENERATION = 5
+const UPDATES = [
+    'UNKNOWN 1',
+    'UNKNOWN 2',
+    'UNKNOWN 3',
+    'UNKNOWN 4',
+    'UNKNOWN 5',
+    '2019-12-17: Upgrade all states to v1.1.0',
+    '2019-12-17: CHECK',
+    '2019-12-19: Upgrade all states to v1.2.0',
+    '2019-12-17: CHECK',
+]
+
+const GENERATION = UPDATES.length
 
 function updateGenerationForState(state: StateEntry): void {
     state.generation = GENERATION
@@ -156,12 +170,91 @@ export async function checkExports(db: Firestore): Promise<CheckExportsResult> {
         .limit(10)
         .get()
     if (uncheckedRefs.empty) {
-        return {state: 'FINISHED'}
+        return { state: 'FINISHED' }
     }
 
     for (const doc of uncheckedRefs.docs) {
         console.log('checking', doc.ref.path)
         await db.runTransaction(tx => checkExportsForDoc(db, tx, doc.ref))
     }
-    return {state: 'NOT_FINISHED'}
+    return { state: 'NOT_FINISHED' }
 }
+
+async function upgradeDoc(db: Firestore, tx: Transaction, ref: DocumentReference): Promise<void> {
+    const doc = await tx.get(ref)
+    if (!doc.exists) {
+        return  // Race. Got deleted.
+    }
+    const stateEntry = validate('StateEntry')(doc.data())
+    if (GENERATION <= stateEntry.generation) {
+        return // Race.
+    }
+
+    // Hack.
+    const gameId = doc.id.replace('game:', '')
+
+    const newState = upgradeState(gameId, stateEntry.state, 'v1.1.0')
+    const newStateEntry: StateEntry = {
+        generation: GENERATION,
+        iteration: stateEntry.iteration,
+        exports: stateEntry.exports,
+        lastModified: admin.firestore.FieldValue.serverTimestamp(),
+        state: newState,
+    }
+    tx.set(ref, newStateEntry)
+}
+
+async function upgrade(db: Firestore): Promise<any> {
+    const refs = await db.collection('state')
+        .where('generation', '<', GENERATION)
+        .select()
+        .limit(10)
+        .get()
+
+    if (refs.empty) {
+        return { state: 'FINISHED' }
+    }
+
+    for (const doc of refs.docs) {
+        console.log('upgrading', doc.ref.path)
+        await db.runTransaction(async tx => await upgradeDoc(db, tx, doc.ref))
+        await db.runTransaction(async tx => { await checkExportsForDoc(db, tx, doc.ref) })
+    }
+    return { state: 'NOT_FINISHED' }
+}
+
+async function upgradeOne(db: Firestore, stateId: string): Promise<any> {
+    const ref = db.collection('state').doc(stateId)
+    console.log('upgrading', ref.path)
+    await db.runTransaction(async tx => { await upgradeDoc(db, tx, ref) })
+    await db.runTransaction(async tx => { await checkExportsForDoc(db, tx, ref) })
+}
+
+function batch(db: Firestore): Router {
+    const res = Router()
+
+    res.post('/check', function(req: Request<Dictionary<string>>, res, next) {
+        checkExports(db).then(result => {
+            res.status(200)
+            res.json(result)
+        }).catch(next)
+    })
+
+    res.post('/upgrade', function(req: Request<Dictionary<string>>, res, next) {
+        upgrade(db).then(result => {
+            res.status(200)
+            res.json(result)
+        }).catch(next)
+    })
+
+    res.post('/upgrade-one/:state', function(req: Request<{ state: string }>, res, next) {
+        upgradeOne(db, req.params.state).then(result => {
+            res.status(200)
+            res.json(result)
+        }).catch(next)
+    })
+
+    return res
+}
+
+export default batch
