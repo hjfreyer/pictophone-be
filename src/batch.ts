@@ -19,6 +19,8 @@ const UPDATES = [
     '2019-12-17: CHECK',
     '2019-12-19: Upgrade all states to v1.2.0',
     '2019-12-17: CHECK',
+    '2019-12-19: ACTUALLY upgrade all states to v1.2.0',
+    '2019-12-17: CHECK',
 ]
 
 const GENERATION = UPDATES.length
@@ -193,7 +195,7 @@ async function upgradeDoc(db: Firestore, tx: Transaction, ref: DocumentReference
     // Hack.
     const gameId = doc.id.replace('game:', '')
 
-    const newState = upgradeState(gameId, stateEntry.state, 'v1.1.0')
+    const newState = upgradeState(gameId, stateEntry.state, 'v1.2.0')
     const newStateEntry: StateEntry = {
         generation: GENERATION,
         iteration: stateEntry.iteration,
