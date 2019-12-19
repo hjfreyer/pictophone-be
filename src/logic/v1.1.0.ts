@@ -199,7 +199,7 @@ export function downgradeState(state: State): PreviousState {
             players[id] = { id }
         }
         return {
-            version: 0,
+            version: '0',
             kind: 'game_state',
             state: 'UNSTARTED',
             playerOrder: state.playerOrder,
@@ -214,7 +214,7 @@ export function downgradeState(state: State): PreviousState {
             }
         }
         return {
-            version: 0,
+            version: '0',
             kind: 'game_state',
             state: 'STARTED',
             playerOrder: state.playerOrder,

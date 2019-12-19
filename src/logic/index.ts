@@ -24,7 +24,7 @@ const MODULES = {
 
 function upgradeActionOnce(action: Types[UpgradeableVersion]['Action']): Action {
     switch (action.version) {
-        case 0:
+        case '0':
             return MODULES[NextVersion[action.version]].upgradeAction(action)
         case 'v1.1.0':
             return MODULES[NextVersion[action.version]].upgradeAction(action)
@@ -46,7 +46,7 @@ export function upgradeAction(action: Action, version: Version): Action {
 
 function upgradeStateOnce(gameId: string, state: Types[UpgradeableVersion]['State']): State {
     switch (state.version) {
-        case 0:
+        case '0':
             return MODULES[NextVersion[state.version]].upgradeState(gameId, state)
         case 'v1.1.0':
             return MODULES[NextVersion[state.version]].upgradeState(gameId, state)
@@ -94,7 +94,7 @@ export function migrateState(gameId: string, state: State, version: State['versi
 
 export function initState(version: State['version'], gameId: string): State {
     switch (version) {
-        case 0:
+        case '0':
             return MODULES[version].initState()
         default:
             return MODULES[version].initState(gameId)
@@ -105,7 +105,7 @@ export function integrate(state: State, action: Action): State {
     // TODO: Static checks to ensure state and action are the same version, 
     // and type assertions on the output to match.
     switch (state.version) {
-        case 0:
+        case '0':
             if (state.version !== action.version) {
                 throw new Error('versions must agree')
             }
@@ -132,7 +132,7 @@ export function getExportPath(e: Export): string {
 
 export function exportState(gameId: string, state: State): Export[] {
     switch (state.version) {
-        case 0: return MODULES[state.version].exportState(gameId, state)
+        case '0': return MODULES[state.version].exportState(gameId, state)
         case 'v1.1.0': return MODULES[state.version].exportState(state)
         case 'v1.2.0': return MODULES[state.version].exportState(state)
     }

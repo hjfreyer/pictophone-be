@@ -8,7 +8,7 @@ import { mapValues } from '../util'
 // ===========
 export function initState(): State {
     return {
-        version: 0,
+        version: '0',
         kind: 'game_state',
         state: 'UNSTARTED',
         players: {},
