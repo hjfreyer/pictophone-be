@@ -29,9 +29,9 @@ export const AnyActionSchema = {
         },
         "version": {
           "enum": [
-            0
+            "0"
           ],
-          "type": "number"
+          "type": "string"
         }
       },
       "required": [
@@ -60,9 +60,9 @@ export const AnyActionSchema = {
         },
         "version": {
           "enum": [
-            0
+            "0"
           ],
-          "type": "number"
+          "type": "string"
         }
       },
       "required": [
@@ -135,9 +135,9 @@ export const AnyActionSchema = {
         },
         "version": {
           "enum": [
-            0
+            "0"
           ],
-          "type": "number"
+          "type": "string"
         }
       },
       "required": [

@@ -132,9 +132,9 @@ export const Schema = {
                     },
                     "version": {
                       "enum": [
-                        0
+                        "0"
                       ],
-                      "type": "number"
+                      "type": "string"
                     }
                   },
                   "required": [
@@ -249,9 +249,9 @@ export const Schema = {
                     },
                     "version": {
                       "enum": [
-                        0
+                        "0"
                       ],
-                      "type": "number"
+                      "type": "string"
                     }
                   },
                   "required": [

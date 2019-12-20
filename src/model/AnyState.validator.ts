@@ -67,9 +67,9 @@ export const AnyStateSchema = {
             },
             "version": {
               "enum": [
-                0
+                "0"
               ],
-              "type": "number"
+              "type": "string"
             }
           },
           "required": [
@@ -184,9 +184,9 @@ export const AnyStateSchema = {
             },
             "version": {
               "enum": [
-                0
+                "0"
               ],
-              "type": "number"
+              "type": "string"
             }
           },
           "required": [
