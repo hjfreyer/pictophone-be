@@ -2,6 +2,8 @@ import { Firestore, Transaction } from '@google-cloud/firestore'
 import { getExportPath } from './logic'
 import Export from './model/AnyExport'
 import {strict as assert} from 'assert'
+import { ExportStateMap } from './types'
+import { EXPORT_STATE } from './model'
 
 export function applyExportDiff(db: Firestore, tx: Transaction,
     prev: Export[], next: Export[]): void {
@@ -25,4 +27,17 @@ export async function checkExport(db: Firestore, tx: Transaction, exp: Export): 
     }
 
     assert.deepEqual(expDoc.data(), exp)
+}
+
+export function upgradeExportMap(esm: ExportStateMap): ExportStateMap {
+    const res = { ...EXPORT_STATE }
+
+    for (const version in esm) {
+        if ((esm[version] === 'EXPORTED' && !(version in res))
+            || esm[version] === 'DIRTY') {
+            res[version] = 'DIRTY'
+        }
+    }
+
+    return res
 }

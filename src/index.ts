@@ -8,9 +8,9 @@ import produce from 'immer'
 import uuid from 'uuid/v1'
 import batch from './batch'
 import GetConfig from './config'
-import { applyExportDiff } from './exports'
+import { applyExportDiff, upgradeExportMap } from './exports'
 import * as logic from './logic'
-import { VERSIONS } from './model'
+import { VERSIONS, EXPORT_STATE } from './model'
 import validateAction, { AnyAction as Action } from './model/AnyAction.validator'
 import Export, { VERSIONS as EXPORT_VERSIONS } from './model/AnyExport'
 import State from './model/AnyState'
@@ -35,26 +35,6 @@ const port = process.env.PORT || 3000
 app.listen(port, function() {
     console.log(`Example app listening on port ${port}!`)
 })
-
-function upgradeExportMap(esm: ExportStateMap): ExportStateMap {
-    const known = new Set<string>(EXPORT_VERSIONS)
-
-    return produce(esm, esm => {
-        // Fill in any missing gaps in esm.
-        for (const version of EXPORT_VERSIONS) {
-            if (!(version in esm)) {
-                esm[version] = 'NOT_EXPORTED'
-            }
-        }
-
-        // Mark any unknown exported as dirty.
-        for (const version in esm) {
-            if (!known.has(version) && esm[version] === 'EXPORTED') {
-                esm[version] = 'DIRTY'
-            }
-        }
-    })
-}
 
 // Algorithm for applying an action:
 //
@@ -93,7 +73,7 @@ function firstAction(action: Action): ActionOutput {
     // 4 and 6 are unnecessary, as initial states can't have export.
 
     // 5 + 7
-    const exportMap: ExportStateMap = {}
+    const exportMap: ExportStateMap = { ...EXPORT_STATE }
     const exports: Export[] = []
     for (const version of VERSIONS) {
         exportMap[version] = 'EXPORTED'

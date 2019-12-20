@@ -2,6 +2,7 @@
 import * as v0 from './v0'
 import * as v1_1_0 from './v1.1.0'
 import * as v1_2_0 from './v1.2.0'
+import { ExportStateMap } from '../types'
 
 export type Types = {
     '0': import('./v0').Index,
@@ -33,6 +34,12 @@ export type DowngradeableVersion = keyof typeof PreviousVersion
 export const VERSIONS: Version[] = ['0', 'v1.1.0', 'v1.2.0']
 export const FIRST_VERSION = v0.VERSION
 export const LAST_VERSION = v1_2_0.VERSION
+
+export const EXPORT_STATE : ExportStateMap = {
+    '0': 'EXPORTED',
+    'v1.1.0': 'EXPORTED',
+    'v1.2.0': 'EXPORTED',
+}
 
 export type AnyAction = Types[Version]['Action']
 export type AnyState = Types[Version]['State']

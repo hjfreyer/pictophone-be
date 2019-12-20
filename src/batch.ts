@@ -3,11 +3,12 @@ import { Request, Router } from 'express'
 import { Dictionary } from 'express-serve-static-core'
 import admin from 'firebase-admin'
 import produce from 'immer'
-import { applyExportDiff, checkExport } from './exports'
+import { applyExportDiff, checkExport, upgradeExportMap } from './exports'
 import { exportState, migrateState, upgradeState } from './logic'
-import { VERSIONS } from './model'
+import { VERSIONS, Version } from './model'
 import State from './model/AnyState'
 import { StateEntry, validate } from './types.validator'
+import AnyExport from './model/AnyExport'
 
 const UPDATES = [
     'UNKNOWN 1',
@@ -20,123 +21,79 @@ const UPDATES = [
     '2019-12-19: Upgrade all states to v1.2.0',
     '2019-12-17: CHECK',
     '2019-12-19: ACTUALLY upgrade all states to v1.2.0',
-    '2019-12-17: CHECK',
+    '2019-12-19: CHECK',
+    '2019-12-19: Turn off old exports',
+    '2019-12-19: Turn old exports back on',
+    '2019-12-19: Turn back off again',
+    '2019-12-19: Finally, back on',
+    '2019-12-19: CHECK',
+    '2019-12-19: CHECK',
 ]
 
 const GENERATION = UPDATES.length
 
-function updateGenerationForState(state: StateEntry): void {
-    state.generation = GENERATION
-    for (const version of VERSIONS) {
-        if (!(version in state.exports)) {
-            state.exports[version] = 'NOT_EXPORTED'
-        }
-    }
-}
-
-async function updateGenerationTx(tx: Transaction, doc: DocumentReference): Promise<void> {
-    const stateDoc = await tx.get(doc)
-    if (!stateDoc.exists) {
-        return  // Race. Got deleted.
-    }
-    const state = validate('StateEntry')(stateDoc.data())
-    if (GENERATION <= state.generation) {
-        return  // Race. Already got updated.
-    }
-    tx.set(doc, produce(state, updateGenerationForState))
-}
-
-export async function updateGeneration(db: Firestore): Promise<boolean> {
-    const oldRefs = await db.collection('state')
-        .where('generation', '<', GENERATION)
-        .select()
-        .limit(10)
-        .get()
-    if (oldRefs.empty) {
-        return true
-    }
-    // TODO: This can be parallelized.
-    for (const doc of oldRefs.docs) {
-        console.log('Updating generation:', doc.ref.path)
-        await db.runTransaction(tx => updateGenerationTx(tx, doc.ref))
-    }
-    return false
-}
-
-async function updateExportTx(
+async function backfillDoc(
     db: Firestore, tx: Transaction,
-    doc: DocumentReference, version: State['version']): Promise<void> {
+    doc: DocumentReference): Promise<void> {
     const stateEntryDoc = await tx.get(doc)
     if (!stateEntryDoc.exists) {
         return  // Race. Got deleted.
     }
     const stateEntry = validate('StateEntry')(stateEntryDoc.data())
-    if (stateEntry.exports[version] !== 'NOT_EXPORTED') {
-        return  // Race. Something else either exported or dirtied it.
+
+    const prevExportMap = stateEntry.exports
+    const nextExportMap = upgradeExportMap(prevExportMap)
+
+    for (const version in nextExportMap) {
+        if (nextExportMap[version] === 'DIRTY') {
+            throw new Error(`dirty version: ${version} in doc ${doc.path}`)
+        }
     }
-    const newStateEntry = produce(stateEntry, stateEntry => {
-        stateEntry.exports[version] = 'EXPORTED'
-    })
-    tx.set(doc, newStateEntry)
 
     // Hack.
     const gameId = doc.id.replace('game:', '')
 
-    const migrated = migrateState(gameId, stateEntry.state, version)
-
-    const newExports = exportState(gameId, migrated)
-    applyExportDiff(db, tx, [], newExports)
-}
-
-export type BackfillStatus = {
-    state: 'FINISHED' | 'NOT_FINISHED'
-} | {
-    state: 'DIRTY'
-    examples: string[]
-}
-
-export type BackfillStatusMap = {
-    [version: string]: BackfillStatus
-}
-
-async function backfillExportsForVersion(db: Firestore, version: State['version']): Promise<BackfillStatus> {
-    const dirtyRefs = await db.collection('state')
-        .where(new FieldPath('exports', '' + version), '==', 'DIRTY')
-        .select()
-        .limit(10)
-        .get()
-
-    if (!dirtyRefs.empty) {
-        return {
-            state: 'DIRTY',
-            examples: dirtyRefs.docs.map(doc => doc.ref.path)
+    const prevExports: AnyExport[] = []
+    for (const version in prevExportMap) {
+        if (prevExportMap[version] === 'EXPORTED') {
+            const m = migrateState(gameId, stateEntry.state, version as Version)
+            prevExports.push(...exportState(gameId, m))
         }
     }
 
-    const unExportedRefs = await db.collection('state')
-        .where(new FieldPath('exports', '' + version), '==', 'NOT_EXPORTED')
+    const nextExports: AnyExport[] = []
+    for (const version in nextExportMap) {
+        if (nextExportMap[version] === 'EXPORTED') {
+            const m = migrateState(gameId, stateEntry.state, version as Version)
+            nextExports.push(...exportState(gameId, m))
+        }
+    }
+
+    applyExportDiff(db, tx, prevExports, nextExports)
+    tx.set(doc, { generation: GENERATION, exports:nextExportMap  }, 
+    { mergeFields: ['generation', 'exports'] })
+}
+
+export type BackfillStatus = {
+    state: 'FINISHED' | 'NOT_FINISHED' | 'DIRTY'
+}
+
+export async function backfillExports(db: Firestore): Promise<BackfillStatus> {
+    const todo = await db.collection('state')
+        .where('generation', '<', GENERATION)
         .select()
         .limit(10)
         .get()
-    if (unExportedRefs.empty) {
+
+    if (todo.empty) {
         return { state: 'FINISHED' }
     }
 
-    // TODO: This can be parallelized.
-    for (const doc of unExportedRefs.docs) {
-        console.log('Updating export:', doc.ref.path, version)
-        await db.runTransaction(tx => updateExportTx(db, tx, doc.ref, version))
+    for (const doc of todo.docs) {
+        console.log('backfilling', doc.ref.path)
+        await db.runTransaction(async tx => await backfillDoc(db, tx, doc.ref))
     }
-
     return { state: 'NOT_FINISHED' }
-}
-
-export async function backfillExports(db: Firestore): Promise<BackfillStatusMap> {
-    const res: BackfillStatusMap = {}
-    for (const version of VERSIONS) {
-        res[version] = await backfillExportsForVersion(db, version)
-    }
-    return res
 }
 
 async function checkExportsForDoc(db: Firestore, tx: Transaction, doc: DocumentReference): Promise<void> {
@@ -150,7 +107,7 @@ async function checkExportsForDoc(db: Firestore, tx: Transaction, doc: DocumentR
     const gameId = doc.id.replace('game:', '')
 
     for (const version of VERSIONS) {
-        if (version !== 'v1.1.0' && stateEntry.exports[version] === 'EXPORTED') {
+        if (stateEntry.exports[version] === 'EXPORTED') {
             console.log('..', version)
             const migrated = migrateState(gameId, stateEntry.state, version)
             for (const exp of exportState(gameId, migrated)) {
@@ -237,6 +194,13 @@ function batch(db: Firestore): Router {
 
     res.post('/check', function(req: Request<Dictionary<string>>, res, next) {
         checkExports(db).then(result => {
+            res.status(200)
+            res.json(result)
+        }).catch(next)
+    })
+
+    res.post('/backfill', function(req: Request<{}>, res, next) {
+        backfillExports(db).then(result => {
             res.status(200)
             res.json(result)
         }).catch(next)
