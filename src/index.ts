@@ -4,19 +4,16 @@ import cors from 'cors'
 import express from 'express'
 import { Dictionary, Request } from 'express-serve-static-core'
 import admin from 'firebase-admin'
-import produce from 'immer'
 import uuid from 'uuid/v1'
 import batch from './batch'
 import GetConfig from './config'
 import { applyExportDiff, upgradeExportMap } from './exports'
 import * as logic from './logic'
-import { VERSIONS, EXPORT_STATE } from './model'
-import validateAction, { AnyAction as Action } from './model/AnyAction.validator'
-import Export, { VERSIONS as EXPORT_VERSIONS } from './model/AnyExport'
-import State from './model/AnyState'
+import { AnyAction, AnyExport, AnyState, ExportStateMap, EXPORT_STATE, VERSIONS } from './model'
+import { validate as validateModel } from './model/index.validator'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
-import { ExportStateMap } from './types'
+import { } from './types'
 import * as types from './types.validator'
 
 admin.initializeApp({
@@ -51,19 +48,19 @@ app.listen(port, function() {
 //
 // TODO: Monitor whether redundant upgrade/downgrade paths all agree with each other.
 type ActionInput = {
-    prevState: State
+    prevState: AnyState
     prevExportMap: ExportStateMap
-    action: Action
+    action: AnyAction
 }
 
 type ActionOutput = {
-    nextState: State
+    nextState: AnyState
     exportMap: ExportStateMap
-    prevExports: Export[]
-    nextExports: Export[]
+    prevExports: AnyExport[]
+    nextExports: AnyExport[]
 }
 
-function firstAction(action: Action): ActionOutput {
+function firstAction(action: AnyAction): ActionOutput {
     // Steps 1+2 are trivial in this case.
     const prevState = logic.initState(action.version, action.gameId)
 
@@ -74,7 +71,7 @@ function firstAction(action: Action): ActionOutput {
 
     // 5 + 7
     const exportMap: ExportStateMap = { ...EXPORT_STATE }
-    const exports: Export[] = []
+    const exports: AnyExport[] = []
     for (const version of VERSIONS) {
         exportMap[version] = 'EXPORTED'
         const migrated = logic.migrateState(action.gameId, nextState, version)
@@ -102,8 +99,8 @@ function act({ prevState, prevExportMap, action }: ActionInput): ActionOutput {
 
     // 4, 5, 6, 7
     const exportMap = upgradeExportMap(prevExportMap)
-    const prevExports: Export[] = []
-    const nextExports: Export[] = []
+    const prevExports: AnyExport[] = []
+    const nextExports: AnyExport[] = []
     for (const version of VERSIONS) {
         if (exportMap[version] !== 'EXPORTED') {
             continue
@@ -124,7 +121,7 @@ function act({ prevState, prevExportMap, action }: ActionInput): ActionOutput {
 }
 
 async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise<void> {
-    const action = validateAction(body)
+    const action = validateModel('AnyAction')(body)
     console.log(action)
 
     const gameId = action.gameId

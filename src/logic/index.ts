@@ -1,17 +1,5 @@
 import { strict as assert } from 'assert'
-import {
-    DowngradeableVersion,
-    FIRST_VERSION,
-    LAST_VERSION,
-    NextVersion,
-    Types,
-    UpgradeableVersion,
-    Version,
-    VERSIONS,
-} from '../model'
-import Action from '../model/AnyAction'
-import Export from '../model/AnyExport'
-import State from '../model/AnyState'
+import { AnyAction, AnyExport, AnyState, DowngradeableVersion, FIRST_VERSION, LAST_VERSION, NextVersion, Types, UpgradeableVersion, Version, VERSIONS } from '../model'
 import * as v0 from './0'
 import * as v1_1_0 from './v1.1.0'
 import * as v1_2_0 from './v1.2.0'
@@ -22,7 +10,7 @@ const MODULES = {
     'v1.2.0': v1_2_0,
 }
 
-function upgradeActionOnce(action: Types[UpgradeableVersion]['Action']): Action {
+function upgradeActionOnce(action: Types[UpgradeableVersion]['Action']): AnyAction {
     switch (action.version) {
         case '0':
             return MODULES[NextVersion[action.version]].upgradeAction(action)
@@ -31,7 +19,7 @@ function upgradeActionOnce(action: Types[UpgradeableVersion]['Action']): Action 
     }
 }
 
-export function upgradeAction(action: Action, version: Version): Action {
+export function upgradeAction(action: AnyAction, version: Version): AnyAction {
     while (true) {
         const srcIdx = VERSIONS.indexOf(action.version)
         const dstIdx = VERSIONS.indexOf(version)
@@ -44,7 +32,7 @@ export function upgradeAction(action: Action, version: Version): Action {
     }
 }
 
-function upgradeStateOnce(gameId: string, state: Types[UpgradeableVersion]['State']): State {
+function upgradeStateOnce(gameId: string, state: Types[UpgradeableVersion]['State']): AnyState {
     switch (state.version) {
         case '0':
             return MODULES[NextVersion[state.version]].upgradeState(gameId, state)
@@ -53,7 +41,7 @@ function upgradeStateOnce(gameId: string, state: Types[UpgradeableVersion]['Stat
     }
 }
 
-export function upgradeState(gameId: string, state: State, version: Version): State {
+export function upgradeState(gameId: string, state: AnyState, version: Version): AnyState {
     while (true) {
         const srcIdx = VERSIONS.indexOf(state.version)
         const dstIdx = VERSIONS.indexOf(version)
@@ -66,7 +54,7 @@ export function upgradeState(gameId: string, state: State, version: Version): St
     }
 }
 
-function downgradeStateOnce(state: Types[DowngradeableVersion]['State']): State {
+function downgradeStateOnce(state: Types[DowngradeableVersion]['State']): AnyState {
     switch (state.version) {
         case 'v1.1.0':
             return MODULES[state.version].downgradeState(state)
@@ -75,7 +63,7 @@ function downgradeStateOnce(state: Types[DowngradeableVersion]['State']): State 
     }
 }
 
-export function downgradeState(state: State, version: State['version']): State {
+export function downgradeState(state: AnyState, version: AnyState['version']): AnyState {
     while (true) {
         const srcIdx = VERSIONS.indexOf(state.version)
         const dstIdx = VERSIONS.indexOf(version)
@@ -88,11 +76,11 @@ export function downgradeState(state: State, version: State['version']): State {
     }
 }
 
-export function migrateState(gameId: string, state: State, version: State['version']): State {
+export function migrateState(gameId: string, state: AnyState, version: AnyState['version']): AnyState {
     return upgradeState(gameId, downgradeState(state, version), version)
 }
 
-export function initState(version: State['version'], gameId: string): State {
+export function initState(version: AnyState['version'], gameId: string): AnyState {
     switch (version) {
         case '0':
             return MODULES[version].initState()
@@ -101,7 +89,7 @@ export function initState(version: State['version'], gameId: string): State {
     }
 }
 
-export function integrate(state: State, action: Action): State {
+export function integrate(state: AnyState, action: AnyAction): AnyState {
     // TODO: Static checks to ensure state and action are the same version, 
     // and type assertions on the output to match.
     switch (state.version) {
@@ -123,14 +111,14 @@ export function integrate(state: State, action: Action): State {
     }
 }
 
-export function getExportPath(e: Export): string {
+export function getExportPath(e: AnyExport): string {
     switch (e.kind) {
         case 'player_game':
             return `versions/${e.version}/players/${e.playerId}/games/${e.gameId}`
     }
 }
 
-export function exportState(gameId: string, state: State): Export[] {
+export function exportState(gameId: string, state: AnyState): AnyExport[] {
     switch (state.version) {
         case '0': return MODULES[state.version].exportState(gameId, state)
         case 'v1.1.0': return MODULES[state.version].exportState(state)

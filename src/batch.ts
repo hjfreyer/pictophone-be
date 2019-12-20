@@ -1,14 +1,11 @@
-import { DocumentReference, FieldPath, Firestore, Transaction } from '@google-cloud/firestore'
+import { DocumentReference, Firestore, Transaction } from '@google-cloud/firestore'
 import { Request, Router } from 'express'
 import { Dictionary } from 'express-serve-static-core'
 import admin from 'firebase-admin'
-import produce from 'immer'
 import { applyExportDiff, checkExport, upgradeExportMap } from './exports'
 import { exportState, migrateState, upgradeState } from './logic'
-import { VERSIONS, Version } from './model'
-import State from './model/AnyState'
+import { AnyExport, Version, VERSIONS } from './model'
 import { StateEntry, validate } from './types.validator'
-import AnyExport from './model/AnyExport'
 
 const UPDATES = [
     'UNKNOWN 1',
@@ -70,8 +67,8 @@ async function backfillDoc(
     }
 
     applyExportDiff(db, tx, prevExports, nextExports)
-    tx.set(doc, { generation: GENERATION, exports:nextExportMap  }, 
-    { mergeFields: ['generation', 'exports'] })
+    tx.set(doc, { generation: GENERATION, exports: nextExportMap },
+        { mergeFields: ['generation', 'exports'] })
 }
 
 export type BackfillStatus = {
