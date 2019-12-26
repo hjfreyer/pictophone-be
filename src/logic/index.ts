@@ -3,11 +3,13 @@ import { AnyAction, AnyExport, AnyState, DowngradeableVersion, FIRST_VERSION, LA
 import * as v0 from './0'
 import * as v1_1_0 from './v1.1.0'
 import * as v1_2_0 from './v1.2.0'
+import * as v1_3_0 from './v1.3.0'
 
 const MODULES = {
     '0': v0,
     'v1.1.0': v1_1_0,
     'v1.2.0': v1_2_0,
+    'v1.3.0': v1_3_0,
 }
 
 function upgradeActionOnce(action: Types[UpgradeableVersion]['Action']): AnyAction {
@@ -15,6 +17,8 @@ function upgradeActionOnce(action: Types[UpgradeableVersion]['Action']): AnyActi
         case '0':
             return MODULES[NextVersion[action.version]].upgradeAction(action)
         case 'v1.1.0':
+            return MODULES[NextVersion[action.version]].upgradeAction(action)
+        case 'v1.2.0':
             return MODULES[NextVersion[action.version]].upgradeAction(action)
     }
 }
@@ -38,6 +42,8 @@ function upgradeStateOnce(gameId: string, state: Types[UpgradeableVersion]['Stat
             return MODULES[NextVersion[state.version]].upgradeState(gameId, state)
         case 'v1.1.0':
             return MODULES[NextVersion[state.version]].upgradeState(gameId, state)
+        case 'v1.2.0':
+            return MODULES[NextVersion[state.version]].upgradeState(gameId, state)
     }
 }
 
@@ -59,6 +65,8 @@ function downgradeStateOnce(state: Types[DowngradeableVersion]['State']): AnySta
         case 'v1.1.0':
             return MODULES[state.version].downgradeState(state)
         case 'v1.2.0':
+            return MODULES[state.version].downgradeState(state)
+        case 'v1.3.0':
             return MODULES[state.version].downgradeState(state)
     }
 }
@@ -108,6 +116,11 @@ export function integrate(state: AnyState, action: AnyAction): AnyState {
                 throw new Error('versions must agree')
             }
             return MODULES[state.version].integrate(state, action)
+        case 'v1.3.0':
+            if (state.version !== action.version) {
+                throw new Error('versions must agree')
+            }
+            return MODULES[state.version].integrate(state, action)
     }
 }
 
@@ -123,5 +136,6 @@ export function exportState(gameId: string, state: AnyState): AnyExport[] {
         case '0': return MODULES[state.version].exportState(gameId, state)
         case 'v1.1.0': return MODULES[state.version].exportState(state)
         case 'v1.2.0': return MODULES[state.version].exportState(state)
+        case 'v1.3.0': return MODULES[state.version].exportState(state)
     }
 }
