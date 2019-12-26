@@ -1,15 +1,17 @@
 import { strict as assert } from 'assert'
-import { AnyAction, AnyExport, AnyState, DowngradeableVersion, FIRST_VERSION, CURRENT_VERSION, NextVersion, Types, UpgradeableVersion, Version, VERSIONS, AnyRecord, CurrentAction, CurrentState } from '../model'
+import { AnyAction, AnyExport, AnyState, DowngradeableVersion, FIRST_VERSION, PRIMARY_VERSION, NextVersion, Types, UpgradeableVersion, Version, VERSIONS, AnyRecord, LATEST_VERSION, PHASE, PrimaryAction, PrimaryState } from '../model'
 import * as v0 from './0'
 import * as v1_1_0 from './v1.1.0'
 import * as v1_2_0 from './v1.2.0'
+import * as v1_3_0 from './v1.3.0'
 
 const MODULES = {
     '0': v0,
     'v1.1.0': v1_1_0,
     'v1.2.0': v1_2_0,
+    'v1.3.0': v1_3_0,
 }
-const CURRENT_MODULE = MODULES[CURRENT_VERSION]
+const PRIMARY_MODULE = MODULES[PRIMARY_VERSION]
 
 function upgradeActionOnce(action: Types[UpgradeableVersion]['Action']): AnyAction {
     switch (action.version) {
@@ -17,11 +19,16 @@ function upgradeActionOnce(action: Types[UpgradeableVersion]['Action']): AnyActi
             return MODULES[NextVersion[action.version]].upgradeAction(action)
         case 'v1.1.0':
             return MODULES[NextVersion[action.version]].upgradeAction(action)
+        case 'v1.2.0':
+            return MODULES[NextVersion[action.version]].upgradeAction(action)
     }
 }
 
-export function upgradeAction(action: AnyAction): CurrentAction {
-    while (action.version !== CURRENT_VERSION) {
+export function upgradeAction(action: AnyAction): PrimaryAction {
+    while (action.version !== PRIMARY_VERSION) {
+        if (action.version === LATEST_VERSION) {
+            throw new Error('version not yet active: ' + action.version)
+        }
         action = upgradeActionOnce(action)
     }
     return action
@@ -33,11 +40,16 @@ function upgradeStateOnce(state: Types[UpgradeableVersion]['State']): AnyState {
             return MODULES[NextVersion[state.version]].upgradeState(state)
         case 'v1.1.0':
             return MODULES[NextVersion[state.version]].upgradeState(state)
+        case 'v1.2.0':
+            return MODULES[NextVersion[state.version]].upgradeState(state)
     }
 }
 
-export function upgradeState(state: AnyState): CurrentState {
-    while (state.version !== CURRENT_VERSION) {
+export function upgradeState(state: AnyState): PrimaryState {
+    while (state.version !== PRIMARY_VERSION) {
+        if (state.version === LATEST_VERSION) {
+            throw new Error('version not yet active: ' + state.version)
+        }
         state = upgradeStateOnce(state)
     }
     return state
@@ -49,26 +61,28 @@ function downgradeStateOnce(state: Types[DowngradeableVersion]['State']): AnySta
             return MODULES[state.version].downgradeState(state)
         case 'v1.2.0':
             return MODULES[state.version].downgradeState(state)
+        case 'v1.3.0':
+            return MODULES[state.version].downgradeState(state)
     }
 }
 
-export function downgradeState(state: CurrentState): AnyState[] {
-    let s: AnyState =state
-    const res = []
+export function activeStates(state: PrimaryState): AnyState[] {
+    let s: AnyState = state
+    const res : AnyState[] = [s]
     while (s.version !== FIRST_VERSION) {
         s = downgradeStateOnce(s)
         res.push(s)
     }
+
+    if ((PRIMARY_VERSION as unknown) !== LATEST_VERSION) {
+        res.push(upgradeStateOnce(state))
+    }
+
     return res
 }
 
-export function initState(gameId: string): CurrentState {
-    return CURRENT_MODULE.initState(gameId)
-}
-
-export function integrate(state: CurrentState, action: CurrentAction): CurrentState {
-    return CURRENT_MODULE.integrate(state, action)
-}
+export const initState=PRIMARY_MODULE.initState
+export const integrate = PRIMARY_MODULE.integrate
 
 export function getPath(r: AnyRecord): string {
     switch (r.kind) {
@@ -84,5 +98,6 @@ export function exportState(state: AnyState): AnyExport[] {
         case '0': return MODULES[state.version].exportState(state)
         case 'v1.1.0': return MODULES[state.version].exportState(state)
         case 'v1.2.0': return MODULES[state.version].exportState(state)
+        case 'v1.3.0': return MODULES[state.version].exportState(state)
     }
 }

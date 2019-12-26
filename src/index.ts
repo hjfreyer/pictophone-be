@@ -9,7 +9,7 @@ import batch from './batch'
 import GetConfig from './config'
 import { applyDiff } from './exports'
 import * as logic from './logic'
-import { AnyAction, AnyExport, AnyState, VERSIONS, CURRENT_VERSION, CurrentState, AnyRecord } from './model'
+import { AnyAction, AnyExport, AnyState, VERSIONS, AnyRecord, PrimaryState } from './model'
 import { validate as validateModel } from './model/index.validator'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
@@ -123,12 +123,12 @@ function interest(a: AnyAction): string[] {
     return [`states/${a.version}/games/${a.gameId}`]
 }
 
-function allRecords(s: CurrentState): AnyRecord[] {
-    const downgrades = logic.downgradeState(s)
-    const res: AnyRecord[] = [s, ...logic.exportState(s)]
+function allRecords(s: PrimaryState): AnyRecord[] {
+    const actives = logic.activeStates(s)
+    const res: AnyRecord[] = []
 
-    for (const dg of downgrades) {
-        res.push(dg, ...logic.exportState(dg))
+    for (const a of actives) {
+        res.push(a, ...logic.exportState(a))
     }
 
     return res
@@ -147,7 +147,7 @@ async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise
 
         const prevStateDoc = await tx.get(db.doc(gamePath))
         if (prevStateDoc.exists) {
-            const prevState = validateModel('CurrentState')(prevStateDoc.data())
+            const prevState = validateModel('PrimaryState')(prevStateDoc.data())
             prevRecords = allRecords(prevState)
             const nextState = logic.integrate(prevState, action)
             nextRecords = allRecords(nextState)
