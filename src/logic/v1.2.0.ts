@@ -171,7 +171,7 @@ function exportStateForPlayer(state: State, playerId: string): PlayerGame {
 
 // Transform
 // =========
-export function upgradeState(gameId: string, state: PreviousState): State {
+export function upgradeState(state: PreviousState): State {
     return {
         ...state,
         version: VERSION

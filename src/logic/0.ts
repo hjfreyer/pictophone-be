@@ -6,10 +6,11 @@ import { mapValues } from '../util'
 
 // Integration
 // ===========
-export function initState(): State {
+export function initState(gameId: string): State {
     return {
         version: '0',
-        kind: 'game_state',
+        kind: 'game',
+        gameId,
         state: 'UNSTARTED',
         players: {},
         playerOrder: [],
@@ -88,11 +89,11 @@ function makeMove(game: State, action: MakeMove) {
 
 // Exports
 // =======
-export function exportState(gameId: string, state: State): Export[] {
+export function exportState(state: State): Export[] {
     return state.playerOrder.map(playerId => ({
         version: '0',
         kind: 'player_game',
-        gameId,
+        gameId: state.gameId,
         playerId,
         ...exportStateForPlayer(state, playerId)
     }))

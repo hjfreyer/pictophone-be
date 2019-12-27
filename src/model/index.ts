@@ -30,22 +30,20 @@ export const PreviousVersion = {
 export type UpgradeableVersion = keyof typeof NextVersion
 export type DowngradeableVersion = keyof typeof PreviousVersion
 
+export type Phase = 'PREVIOUS_PRIMARY' | 'CURRENT_PRIMARY' | 'CURRENT'
+
+export const PHASE : Phase = 'CURRENT'
+
 export const VERSIONS: Version[] = ['0', 'v1.1.0', 'v1.2.0']
 export const FIRST_VERSION = v0.VERSION
-export const LAST_VERSION = v1_2_0.VERSION
+export const CURRENT_VERSION = v1_2_0.VERSION
 
-export type ExportState = 'NOT_EXPORTED' | 'EXPORTED' | 'DIRTY'
-
-export type ExportStateMap = {
-    [version: string]: ExportState
-}
-
-export const EXPORT_STATE : ExportStateMap = {
-    '0': 'EXPORTED',
-    'v1.1.0': 'EXPORTED',
-    'v1.2.0': 'EXPORTED',
-}
+export type CurrentAction = Types[typeof CURRENT_VERSION]['Action']
+export type CurrentState = Types[typeof CURRENT_VERSION]['State']
+export type CurrentExport = Types[typeof CURRENT_VERSION]['Export']
 
 export type AnyAction = Types[Version]['Action']
 export type AnyState = Types[Version]['State']
 export type AnyExport = Types[Version]['Export']
+
+export type AnyRecord = AnyState | AnyExport

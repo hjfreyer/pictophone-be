@@ -12,7 +12,6 @@
     "prod": "tsc && node ./dist/index.js",
     "gen": "npm-run-all gen:*",
     "gen:model": "typescript-json-validator --collection  src/model/index.ts ",
-    "gen:types": "typescript-json-validator --collection src/types.ts ",
     "gen:rpc": "typescript-json-validator --collection src/model/rpc.ts ",
     "start": "node ./dist/index.js",
     "firestore": "gcloud config set project pictophone-app && gcloud beta emulators firestore start --host-port localhost:8181",

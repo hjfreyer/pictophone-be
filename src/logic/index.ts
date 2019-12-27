@@ -1,5 +1,5 @@
 import { strict as assert } from 'assert'
-import { AnyAction, AnyExport, AnyState, DowngradeableVersion, FIRST_VERSION, LAST_VERSION, NextVersion, Types, UpgradeableVersion, Version, VERSIONS } from '../model'
+import { AnyAction, AnyExport, AnyState, DowngradeableVersion, FIRST_VERSION, CURRENT_VERSION, NextVersion, Types, UpgradeableVersion, Version, VERSIONS, AnyRecord, CurrentAction, CurrentState } from '../model'
 import * as v0 from './0'
 import * as v1_1_0 from './v1.1.0'
 import * as v1_2_0 from './v1.2.0'
@@ -9,6 +9,7 @@ const MODULES = {
     'v1.1.0': v1_1_0,
     'v1.2.0': v1_2_0,
 }
+const CURRENT_MODULE = MODULES[CURRENT_VERSION]
 
 function upgradeActionOnce(action: Types[UpgradeableVersion]['Action']): AnyAction {
     switch (action.version) {
@@ -19,39 +20,27 @@ function upgradeActionOnce(action: Types[UpgradeableVersion]['Action']): AnyActi
     }
 }
 
-export function upgradeAction(action: AnyAction, version: Version): AnyAction {
-    while (true) {
-        const srcIdx = VERSIONS.indexOf(action.version)
-        const dstIdx = VERSIONS.indexOf(version)
-        assert.notEqual(srcIdx, -1)
-        assert.notEqual(dstIdx, -1)
-        if (action.version === LAST_VERSION || dstIdx <= srcIdx) {
-            return action
-        }
+export function upgradeAction(action: AnyAction): CurrentAction {
+    while (action.version !== CURRENT_VERSION) {
         action = upgradeActionOnce(action)
     }
+    return action
 }
 
-function upgradeStateOnce(gameId: string, state: Types[UpgradeableVersion]['State']): AnyState {
+function upgradeStateOnce(state: Types[UpgradeableVersion]['State']): AnyState {
     switch (state.version) {
         case '0':
-            return MODULES[NextVersion[state.version]].upgradeState(gameId, state)
+            return MODULES[NextVersion[state.version]].upgradeState(state)
         case 'v1.1.0':
-            return MODULES[NextVersion[state.version]].upgradeState(gameId, state)
+            return MODULES[NextVersion[state.version]].upgradeState(state)
     }
 }
 
-export function upgradeState(gameId: string, state: AnyState, version: Version): AnyState {
-    while (true) {
-        const srcIdx = VERSIONS.indexOf(state.version)
-        const dstIdx = VERSIONS.indexOf(version)
-        assert.notEqual(srcIdx, -1)
-        assert.notEqual(dstIdx, -1)
-        if (state.version === LAST_VERSION || dstIdx <= srcIdx) {
-            return state
-        }
-        state = upgradeStateOnce(gameId, state)
+export function upgradeState(state: AnyState): CurrentState {
+    while (state.version !== CURRENT_VERSION) {
+        state = upgradeStateOnce(state)
     }
+    return state
 }
 
 function downgradeStateOnce(state: Types[DowngradeableVersion]['State']): AnyState {
@@ -63,64 +52,36 @@ function downgradeStateOnce(state: Types[DowngradeableVersion]['State']): AnySta
     }
 }
 
-export function downgradeState(state: AnyState, version: AnyState['version']): AnyState {
-    while (true) {
-        const srcIdx = VERSIONS.indexOf(state.version)
-        const dstIdx = VERSIONS.indexOf(version)
-        assert.notEqual(srcIdx, -1)
-        assert.notEqual(dstIdx, -1)
-        if (state.version === FIRST_VERSION || srcIdx <= dstIdx) {
-            return state
-        }
-        state = downgradeStateOnce(state)
+export function downgradeState(state: CurrentState): AnyState[] {
+    let s: AnyState =state
+    const res = []
+    while (s.version !== FIRST_VERSION) {
+        s = downgradeStateOnce(s)
+        res.push(s)
     }
+    return res
 }
 
-export function migrateState(gameId: string, state: AnyState, version: AnyState['version']): AnyState {
-    return upgradeState(gameId, downgradeState(state, version), version)
+export function initState(gameId: string): CurrentState {
+    return CURRENT_MODULE.initState(gameId)
 }
 
-export function initState(version: AnyState['version'], gameId: string): AnyState {
-    switch (version) {
-        case '0':
-            return MODULES[version].initState()
-        default:
-            return MODULES[version].initState(gameId)
-    }
+export function integrate(state: CurrentState, action: CurrentAction): CurrentState {
+    return CURRENT_MODULE.integrate(state, action)
 }
 
-export function integrate(state: AnyState, action: AnyAction): AnyState {
-    // TODO: Static checks to ensure state and action are the same version, 
-    // and type assertions on the output to match.
-    switch (state.version) {
-        case '0':
-            if (state.version !== action.version) {
-                throw new Error('versions must agree')
-            }
-            return MODULES[state.version].integrate(state, action)
-        case 'v1.1.0':
-            if (state.version !== action.version) {
-                throw new Error('versions must agree')
-            }
-            return MODULES[state.version].integrate(state, action)
-        case 'v1.2.0':
-            if (state.version !== action.version) {
-                throw new Error('versions must agree')
-            }
-            return MODULES[state.version].integrate(state, action)
-    }
-}
-
-export function getExportPath(e: AnyExport): string {
-    switch (e.kind) {
+export function getPath(r: AnyRecord): string {
+    switch (r.kind) {
+        case 'game':
+            return `states/${r.version}/games/${r.gameId}`
         case 'player_game':
-            return `versions/${e.version}/players/${e.playerId}/games/${e.gameId}`
+            return `versions/${r.version}/players/${r.playerId}/games/${r.gameId}`
     }
 }
 
-export function exportState(gameId: string, state: AnyState): AnyExport[] {
+export function exportState(state: AnyState): AnyExport[] {
     switch (state.version) {
-        case '0': return MODULES[state.version].exportState(gameId, state)
+        case '0': return MODULES[state.version].exportState(state)
         case 'v1.1.0': return MODULES[state.version].exportState(state)
         case 'v1.2.0': return MODULES[state.version].exportState(state)
     }

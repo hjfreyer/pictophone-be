@@ -168,13 +168,13 @@ function exportStateForPlayer(state: State, playerId: string): PlayerGame {
 
 // Transform
 // =========
-export function upgradeState(gameId: string, state: PreviousState): State {
+export function upgradeState(state: PreviousState): State {
     const displayNames = mapValues(state.players, (pid, _) => pid)
     if (state.state === 'UNSTARTED') {
         return {
             version: 'v1.1.0',
             kind: 'game',
-            gameId,
+            gameId: state.gameId,
             state: state.state,
             playerOrder: state.playerOrder,
             displayNames,
@@ -183,7 +183,7 @@ export function upgradeState(gameId: string, state: PreviousState): State {
         return {
             version: 'v1.1.0',
             kind: 'game',
-            gameId,
+            gameId: state.gameId,
             state: state.state,
             playerOrder: state.playerOrder,
             displayNames,
@@ -200,7 +200,8 @@ export function downgradeState(state: State): PreviousState {
         }
         return {
             version: '0',
-            kind: 'game_state',
+            kind: 'game',
+            gameId: state.gameId,
             state: 'UNSTARTED',
             playerOrder: state.playerOrder,
             players,
@@ -215,7 +216,8 @@ export function downgradeState(state: State): PreviousState {
         }
         return {
             version: '0',
-            kind: 'game_state',
+            kind: 'game',
+            gameId: state.gameId,
             state: 'STARTED',
             playerOrder: state.playerOrder,
             players,
