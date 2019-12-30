@@ -3,6 +3,9 @@ const VERSION = 'v1.3.0'
 
 type Base = {
     version: typeof VERSION
+}
+
+type PlayerGameBase = Base & {
     kind: 'player_game'
     playerId: string
     gameId: string
@@ -68,5 +71,11 @@ export type Submission = {
     drawingId: string
 }
 
-export type Export = Base & PlayerGame
+export type ShortCode = Base & {
+    kind: 'short_code'
+    gameId: string
+    shortCode: string
+}
+
+export type Export = (PlayerGameBase & PlayerGame) | ShortCode
 export default Export

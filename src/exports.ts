@@ -1,11 +1,11 @@
 import { Firestore, Transaction, FieldPath } from '@google-cloud/firestore'
 import { getPath } from './logic'
-import {AnyExport, AnyRecord} from './model'
+import {AnyExport, AnyDBRecord} from './model'
 import {strict as assert} from 'assert'
 import admin = require('firebase-admin')
 
 export function applyDiff(db: Firestore, tx: Transaction,
-    prev: AnyRecord[], next: AnyRecord[]): void {
+    prev: AnyDBRecord[], next: AnyDBRecord[]): void {
     const nextPaths = new Set(next.map(getPath))
 
     for (const e of prev) {

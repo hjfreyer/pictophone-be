@@ -11,6 +11,7 @@ export type CreateGame = Base& {
     kind: 'create_game'
     shortCode: string
 }
+
 export type JoinGame = Base& {
     kind: 'join_game'
 

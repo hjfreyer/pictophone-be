@@ -37,18 +37,18 @@ export type DowngradeableVersion = keyof typeof PreviousVersion
 
 export type Phase = 'PREVIOUS_PRIMARY' | 'CURRENT_PRIMARY' | 'CURRENT'
 
-export const PHASE : Phase = 'PREVIOUS_PRIMARY'
+export const PHASE: Phase = 'CURRENT_PRIMARY'
 export const VERSIONS: Version[] = ['0', 'v1.1.0', 'v1.2.0', 'v1.3.0']
 export const FIRST_VERSION = v0.VERSION
 export const PREVIOUS_VERSION = v1_2_0.VERSION
 export const LATEST_VERSION = v1_3_0.VERSION
 
-export type PrimaryVersionType = 
+export type PrimaryVersionType =
     (typeof PHASE) extends 'PREVIOUS_PRIMARY' ? typeof PREVIOUS_VERSION
     : (typeof PHASE) extends 'CURRENT_PRIMARY' ? typeof LATEST_VERSION
     : (typeof PHASE) extends 'CURRENT' ? typeof LATEST_VERSION
     : never
-export const PRIMARY_VERSION : PrimaryVersionType = PREVIOUS_VERSION
+export const PRIMARY_VERSION: PrimaryVersionType = LATEST_VERSION
 
 export type PrimaryAction = Types[typeof PRIMARY_VERSION]['Action']
 export type PrimaryState = Types[typeof PRIMARY_VERSION]['State']
@@ -58,4 +58,4 @@ export type AnyAction = Types[Version]['Action']
 export type AnyState = Types[Version]['State']
 export type AnyExport = Types[Version]['Export']
 
-export type AnyRecord = AnyState | AnyExport
+export type AnyDBRecord = AnyState | AnyExport

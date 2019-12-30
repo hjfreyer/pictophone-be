@@ -1,5 +1,5 @@
 import { strict as assert } from 'assert'
-import { AnyAction, AnyExport, AnyState, DowngradeableVersion, FIRST_VERSION, PRIMARY_VERSION, NextVersion, Types, UpgradeableVersion, Version, VERSIONS, AnyRecord, LATEST_VERSION, PHASE, PrimaryAction, PrimaryState } from '../model'
+import { AnyAction, AnyExport, AnyState, DowngradeableVersion, FIRST_VERSION, PRIMARY_VERSION, NextVersion, Types, UpgradeableVersion, Version, VERSIONS, AnyDBRecord, LATEST_VERSION, PHASE, PrimaryAction, PrimaryState } from '../model'
 import * as v0 from './0'
 import * as v1_1_0 from './v1.1.0'
 import * as v1_2_0 from './v1.2.0'
@@ -25,10 +25,10 @@ function upgradeActionOnce(action: Types[UpgradeableVersion]['Action']): AnyActi
 }
 
 export function upgradeAction(action: AnyAction): PrimaryAction {
+    if (PHASE !== 'CURRENT' && action.version === LATEST_VERSION) {
+        throw new Error('version not yet active: ' + action.version)
+    }
     while (action.version !== PRIMARY_VERSION) {
-        if (action.version === LATEST_VERSION) {
-            throw new Error('version not yet active: ' + action.version)
-        }
         action = upgradeActionOnce(action)
     }
     return action
@@ -47,7 +47,7 @@ function upgradeStateOnce(state: Types[UpgradeableVersion]['State']): AnyState {
 
 export function upgradeState(state: AnyState): PrimaryState {
     while (state.version !== PRIMARY_VERSION) {
-        if (state.version === LATEST_VERSION) {
+        if ((state.version as any) === LATEST_VERSION) {
             throw new Error('version not yet active: ' + state.version)
         }
         state = upgradeStateOnce(state)
@@ -66,30 +66,43 @@ function downgradeStateOnce(state: Types[DowngradeableVersion]['State']): AnySta
     }
 }
 
-export function activeStates(state: PrimaryState): AnyState[] {
+export const activeStates = activeStatesCurrentOrCurrentPrimary
+
+function activeStatesCurrentOrCurrentPrimary(state: PrimaryState): AnyState[] {
     let s: AnyState = state
-    const res : AnyState[] = [s]
+    const res: AnyState[] = [s]
     while (s.version !== FIRST_VERSION) {
         s = downgradeStateOnce(s)
         res.push(s)
     }
 
-    if ((PRIMARY_VERSION as unknown) !== LATEST_VERSION) {
-        res.push(upgradeStateOnce(state))
-    }
-
     return res
 }
 
-export const initState=PRIMARY_MODULE.initState
+// function activeStatesPreviousPrimary(state: PrimaryState): AnyState[] {
+//     let s: AnyState = state
+//     const res: AnyState[] = [s]
+//     while (s.version !== FIRST_VERSION) {
+//         s = downgradeStateOnce(s)
+//         res.push(s)
+//     }
+
+//     res.push(upgradeStateOnce(state))
+
+//     return res
+// }
+
+export const initState = PRIMARY_MODULE.initState
 export const integrate = PRIMARY_MODULE.integrate
 
-export function getPath(r: AnyRecord): string {
+export function getPath(r: AnyDBRecord): string {
     switch (r.kind) {
         case 'game':
             return `states/${r.version}/games/${r.gameId}`
         case 'player_game':
             return `versions/${r.version}/players/${r.playerId}/games/${r.gameId}`
+        case 'short_code':
+            return `derived/${r.version}/shortCodes/${r.shortCode}/games/${r.gameId}`
     }
 }
 

@@ -9,7 +9,7 @@ import batch from './batch'
 import GetConfig from './config'
 import { applyDiff } from './exports'
 import * as logic from './logic'
-import { AnyAction, AnyExport, AnyState, VERSIONS, AnyRecord, PrimaryState } from './model'
+import { AnyAction, AnyExport, AnyState, VERSIONS, AnyDBRecord, PrimaryState, PRIMARY_VERSION } from './model'
 import { validate as validateModel } from './model/index.validator'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
@@ -120,12 +120,18 @@ app.listen(port, function() {
 // }
 
 function interest(a: AnyAction): string[] {
-    return [`states/${a.version}/games/${a.gameId}`]
+    const res = [`states/${a.version}/games/${a.gameId}`]
+
+    if (a.kind === 'create_game' && a.shortCode !== '') {
+        res.push(`derived/${a.version}/shortCodes/${a.shortCode}/games`)
+    }
+
+    return res
 }
 
-function allRecords(s: PrimaryState): AnyRecord[] {
+function allRecords(s: PrimaryState): AnyDBRecord[] {
     const actives = logic.activeStates(s)
-    const res: AnyRecord[] = []
+    const res: AnyDBRecord[] = []
 
     for (const a of actives) {
         res.push(a, ...logic.exportState(a))
@@ -134,29 +140,48 @@ function allRecords(s: PrimaryState): AnyRecord[] {
     return res
 }
 
+async function fetchPath(tx: Transaction, path: string): Promise<AnyDBRecord[]> {
+    if ((path.match(/\//g) || []).length % 2 === 0) {
+        // Collection.
+        const docs = await tx.get(db.collection(path))
+        return docs.docs.map(d => validateModel('AnyDBRecord')(d.data()))
+    } else {
+        const doc = await tx.get(db.doc(path))
+        if (!doc.exists) {
+            return []
+        }
+        return [validateModel('AnyDBRecord')(doc.data())]
+    }
+}
+
 async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise<void> {
     const originalAction = validateModel('AnyAction')(body)
     const action = logic.upgradeAction(originalAction)
     console.log(action)
 
-    const gamePath = interest(action)[0]
-    const gameId = path.basename(gamePath)
+    const paths = interest(action)
     await db.runTransaction(async (tx: Transaction): Promise<void> => {
-        let prevRecords: AnyRecord[]
-        let nextRecords: AnyRecord[]
+        const prevStateDocPromises = paths.map(
+            (p) : [string, Promise<AnyDBRecord[]>] => [p, fetchPath(tx, p)])
+        const prevStateDocs : {[path: string]: AnyDBRecord[]}= {}
+        for (const [path, promise] of prevStateDocPromises) {
+             prevStateDocs[path] = await promise
+        }
 
-        const prevStateDoc = await tx.get(db.doc(gamePath))
+        const nextState = logic.integrate(prevStateDocs, action)
+
+        const prevStateDoc = await tx.get(
+            db.doc(`states/${PRIMARY_VERSION}/games/${action.gameId}`))
+
+        let prevRecords: AnyDBRecord[]
+        let nextRecords: AnyDBRecord[]
+
         if (prevStateDoc.exists) {
             const prevState = validateModel('PrimaryState')(prevStateDoc.data())
-            prevRecords = allRecords(prevState)
-            const nextState = logic.integrate(prevState, action)
-            nextRecords = allRecords(nextState)
+            applyDiff(db, tx, allRecords(prevState), allRecords(nextState))
         } else {
-            prevRecords = []
-            const nextState = logic.integrate(logic.initState(gameId), action)
-            nextRecords = allRecords(nextState)
+            applyDiff(db, tx, [], allRecords(nextState))
         }
-        applyDiff(db, tx, prevRecords, nextRecords)
     })
 }
 

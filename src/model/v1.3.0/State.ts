@@ -18,6 +18,7 @@ type CreatedBase = Base & {
 
 export type UnstartedGameState = CreatedBase & {
     state: 'UNSTARTED'
+    shortCode: string
 }
 
 export type StartedGameState = CreatedBase & {

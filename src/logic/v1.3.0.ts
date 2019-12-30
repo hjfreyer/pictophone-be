@@ -2,8 +2,9 @@ import produce from 'immer'
 import { Index as PreviousIndex, VERSION as PREVIOUS_VERSION } from '../model/v1.2.0'
 import { Index, VERSION } from '../model/v1.3.0'
 import { JoinGame, MakeMove, StartGame, CreateGame } from '../model/v1.3.0/Action'
-import { PlayerGame, PlayerMap, Series } from '../model/v1.3.0/Export'
+import { PlayerGame, PlayerMap, Series, ShortCode } from '../model/v1.3.0/Export'
 import { mapValues } from '../util'
+import { AnyDBRecord } from '../model'
 
 type PreviousAction = PreviousIndex['Action']
 type PreviousState = PreviousIndex['State']
@@ -19,27 +20,42 @@ export function initState(gameId: string): State {
         version: VERSION,
         kind: 'game',
         gameId,
-        state: 'UNSTARTED',
-        playerOrder: [],
-        displayNames: {},
+        state: 'UNCREATED',
     }
 }
 
-export function integrate(state: State, action: Action): State {
+export function integrate(states: { [path: string]: AnyDBRecord[] }, action: Action): State {
+    const statePath = `states/${action.version}/games/${action.gameId}`
+
+    let state: State
+    if (states[statePath].length === 0) {
+        state = initState(action.gameId)
+    } else {
+        const rec = states[statePath][0]
+        if (rec.version !== VERSION || rec.kind !== 'game') {
+            throw new Error('bad state')
+        }
+        state = rec
+    }
+
     switch (action.kind) {
         case 'create_game':
-            return produce(createGame)(state, action)
+            const scPath = `derived/${action.version}/shortCodes/${action.shortCode}/games`
+            return createGame(state, action, states[scPath].length > 0)
         case 'join_game':
             return joinGame(state, action)
         case 'start_game':
-            return produce(startGame)(state, action)
+            return startGame(state, action)
         case 'make_move':
-            return produce(makeMove)(state, action)
+            return makeMove(state, action)
     }
 }
 
-function createGame(game: State, action: CreateGame): State {
+function createGame(game: State, action: CreateGame, scUsed: boolean): State {
     if (game.state !== 'UNCREATED') {
+        return game
+    }
+    if (scUsed) {
         return game
     }
 
@@ -48,6 +64,7 @@ function createGame(game: State, action: CreateGame): State {
         kind: "game",
         state: 'UNSTARTED',
         gameId: game.gameId,
+        shortCode: action.shortCode,
         playerOrder: [],
         displayNames: {},
     }
@@ -63,6 +80,7 @@ function joinGame(game: State, action: JoinGame): State {
             kind: "game",
             state: 'UNSTARTED',
             gameId: game.gameId,
+            shortCode: '',
             playerOrder: [action.playerId],
             displayNames: {
                 [action.playerId]: action.displayName,
@@ -93,55 +111,83 @@ function startGame(game: State, action: StartGame): State {
     }
 
     return {
-        ...game,
+        version: VERSION,
+        kind: 'game',
+        gameId: game.gameId,
         state: 'STARTED',
+        playerOrder: game.playerOrder,
+        displayNames: game.displayNames,
         submissions: mapValues(game.displayNames, () => []),
     }
 }
 
-function makeMove(game: State, action: MakeMove) {
+function makeMove(game: State, action: MakeMove): State {
     if (game.state !== 'STARTED') {
-        return
+        return game
     }
     const playerId = action.playerId
     if (game.playerOrder.indexOf(playerId) === -1) {
-        return
+        return game
     }
 
     const roundNum = Math.min(...Object.values(game.submissions).map(s => s.length))
     if (game.submissions[playerId].length !== roundNum) {
-        return
+        return game
     }
 
     // Game is over.
     if (roundNum === game.playerOrder.length) {
-        return
+        return game
     }
 
     if (roundNum % 2 === 0 && action.submission.kind === 'drawing') {
-        return
+        return game
     }
     if (roundNum % 2 === 1 && action.submission.kind === 'word') {
-        return
+        return game
     }
 
-    game.submissions[playerId].push(action.submission)
+    return produce(game, game => {
+        game.submissions[playerId].push(action.submission)
+    })
 }
 
 // Export
 // ======
 export function exportState(state: State): Export[] {
-    if (state.state === 'UNCREATED') {
-        return []
-    }
+    switch (state.state) {
+        case 'UNCREATED':
+            return []
+        case 'UNSTARTED':
+            const exports: Export[] = []
+            if (state.shortCode.length > 0) {
+                exports.push({
+                    version: VERSION,
+                    kind: 'short_code',
+                    gameId: state.gameId,
+                    shortCode: state.shortCode,
+                })
+            }
 
-    return state.playerOrder.map(playerId => ({
-        version: VERSION,
-        kind: 'player_game',
-        playerId,
-        gameId: state.gameId,
-        ...exportStateForPlayer(state, playerId)
-    }))
+            // TODO: DRY
+            exports.push(...state.playerOrder.map((playerId): Export => ({
+                version: VERSION,
+                kind: 'player_game',
+                playerId,
+                gameId: state.gameId,
+                ...exportStateForPlayer(state, playerId)
+            })))
+
+            return exports
+        case 'STARTED':
+            return state.playerOrder.map((playerId): Export => ({
+                version: VERSION,
+                kind: 'player_game',
+                playerId,
+                gameId: state.gameId,
+                ...exportStateForPlayer(state, playerId)
+            }))
+    }
 }
 
 function exportStateForPlayer(state: State, playerId: string): PlayerGame {
@@ -217,10 +263,20 @@ function exportStateForPlayer(state: State, playerId: string): PlayerGame {
 // Transform
 // =========
 export function upgradeState(state: PreviousState): State {
-    return {
-        ...state,
-        version: VERSION
+    switch (state.state) {
+        case 'UNSTARTED':
+            return {
+                ...state,
+                version: VERSION,
+                shortCode: '',
+            }
+        case 'STARTED':
+            return {
+                ...state,
+                version: VERSION
+            }
     }
+
 }
 
 export function downgradeState(state: State): PreviousState {
