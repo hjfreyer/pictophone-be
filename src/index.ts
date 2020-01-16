@@ -1,4 +1,4 @@
-import { DocumentReference, Firestore, Transaction } from '@google-cloud/firestore'
+import { DocumentReference, Firestore, Transaction, DocumentData } from '@google-cloud/firestore'
 import { Storage } from '@google-cloud/storage'
 import cors from 'cors'
 import express from 'express'
@@ -8,12 +8,13 @@ import uuid from 'uuid/v1'
 import batch from './batch'
 import GetConfig from './config'
 import { applyDiff } from './exports'
-import * as logic from './logic'
-import { AnyAction, AnyExport, AnyState, VERSIONS, AnyDBRecord, PrimaryState, PRIMARY_VERSION } from './model'
+import { AnyAction, AnyExport, AnyState } from './model'
 import { validate as validateModel } from './model/index.validator'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
 import path from 'path'
+import { DBCollection, Diff, makeIndexingDiffer, makeMappingDiffer, pathToDocumentReference } from './framework/incremental'
+import { initState, integrate } from './model/v1.0'
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -119,69 +120,155 @@ app.listen(port, function() {
 //     }
 // }
 
-function interest(a: AnyAction): string[] {
-    const res = [`states/${a.version}/games/${a.gameId}`]
+// function interest(a: AnyAction): string[] {
+//     const res = [`states/${a.version}/games/${a.gameId}`]
 
-    if (a.kind === 'create_game' && a.shortCode !== '') {
-        res.push(`derived/${a.version}/shortCodes/${a.shortCode}/games`)
-    }
+//     if (a.kind === 'create_game' && a.shortCode !== '') {
+//         res.push(`derived/${a.version}/shortCodes/${a.shortCode}/games`)
+//     }
 
-    return res
-}
+//     return res
+// }
 
-function allRecords(s: PrimaryState): AnyDBRecord[] {
-    const actives = logic.activeStates(s)
-    const res: AnyDBRecord[] = []
+// function allRecords(s: PrimaryState): AnyDBRecord[] {
+//     const actives = logic.activeStates(s)
+//     const res: AnyDBRecord[] = []
 
-    for (const a of actives) {
-        res.push(a, ...logic.exportState(a))
-    }
+//     for (const a of actives) {
+//         res.push(a, ...logic.exportState(a))
+//     }
 
-    return res
-}
+//     return res
+// }
 
-async function fetchPath(tx: Transaction, path: string): Promise<AnyDBRecord[]> {
-    if ((path.match(/\//g) || []).length % 2 === 0) {
-        // Collection.
-        const docs = await tx.get(db.collection(path))
-        return docs.docs.map(d => validateModel('AnyDBRecord')(d.data()))
-    } else {
-        const doc = await tx.get(db.doc(path))
-        if (!doc.exists) {
-            return []
+// async function fetchPath(tx: Transaction, path: string): Promise<AnyDBRecord[]> {
+//     if ((path.match(/\//g) || []).length % 2 === 0) {
+//         // Collection.
+//         const docs = await tx.get(db.collection(path))
+//         return docs.docs.map(d => validateModel('AnyDBRecord')(d.data()))
+//     } else {
+//         const doc = await tx.get(db.doc(path))
+//         if (!doc.exists) {
+//             return []
+//         }
+//         return [validateModel('AnyDBRecord')(doc.data())]
+//     }
+// }
+
+// async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise<void> {
+//     const originalAction = validateModel('AnyAction')(body)
+//     const action = logic.upgradeAction(originalAction)
+//     console.log(action)
+
+//     const paths = interest(action)
+//     await db.runTransaction(async (tx: Transaction): Promise<void> => {
+//         const prevStateDocPromises = paths.map(
+//             (p) : [string, Promise<AnyDBRecord[]>] => [p, fetchPath(tx, p)])
+//         const prevStateDocs : {[path: string]: AnyDBRecord[]}= {}
+//         for (const [path, promise] of prevStateDocPromises) {
+//              prevStateDocs[path] = await promise
+//         }
+
+//         const nextState = logic.integrate(prevStateDocs, action)
+
+//         const prevStateDoc = await tx.get(
+//             db.doc(`states/${PRIMARY_VERSION}/games/${action.gameId}`))
+
+//         let prevRecords: AnyDBRecord[]
+//         let nextRecords: AnyDBRecord[]
+
+//         if (prevStateDoc.exists) {
+//             const prevState = validateModel('PrimaryState')(prevStateDoc.data())
+//             applyDiff(db, tx, allRecords(prevState), allRecords(nextState))
+//         } else {
+//             applyDiff(db, tx, [], allRecords(nextState))
+//         }
+//     })
+// }
+
+function indexByPlayer(path: string[], value: unknown) {
+    const res: string[] = []
+    const state = value as AnyState
+    for (const gameId in state.players) {
+        for (const player of state.players[gameId]) {
+            if (res.indexOf(player) === -1) {
+                res.push(player)
+            }
         }
-        return [validateModel('AnyDBRecord')(doc.data())]
+    }
+    return res
+}
+
+function indexByGame(path: string[], value: unknown) {
+    const res: string[] = []
+    const [_, playerId] = path
+    const state = value as AnyState
+    for (const gameId in state.players) {
+        if (state.players[gameId].indexOf(playerId) !== -1) {
+            res.push(gameId)
+        }
+    }
+    return res
+}
+
+function makePlayerGame(path: string[], value: unknown): AnyExport {
+    const state = value as AnyState
+    const [_, playerId, gameId] = path
+    return {
+        version: "v1.0",
+        kind: 'player_game',
+        playerId,
+        gameId,
+        players: state.players[gameId]
+    }
+}
+
+function inputCollections(db: Firestore, tx: Transaction) {
+    return {
+        'v1.0-universe': new DBCollection(db, tx, ['v1.0-universe'])
+    }
+}
+
+function applyDiffs(db: Firestore, tx: Transaction, schema: string[], diffs: Diff[]): void {
+    for (const diff of diffs) {
+        const docRef = pathToDocumentReference(db, schema, diff.path)
+        switch (diff.kind) {
+            case 'delete':
+                tx.delete(docRef)
+                break
+            case 'add':
+                tx.set(docRef, diff.value as DocumentData)
+                break
+            case 'replace':
+                tx.set(docRef, diff.newValue as DocumentData)
+                break
+        }
     }
 }
 
 async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise<void> {
-    const originalAction = validateModel('AnyAction')(body)
-    const action = logic.upgradeAction(originalAction)
-    console.log(action)
+    const action = validateModel('AnyAction')(body)
 
-    const paths = interest(action)
     await db.runTransaction(async (tx: Transaction): Promise<void> => {
-        const prevStateDocPromises = paths.map(
-            (p) : [string, Promise<AnyDBRecord[]>] => [p, fetchPath(tx, p)])
-        const prevStateDocs : {[path: string]: AnyDBRecord[]}= {}
-        for (const [path, promise] of prevStateDocPromises) {
-             prevStateDocs[path] = await promise
-        }
+        const inputs = inputCollections(db, tx)
 
-        const nextState = logic.integrate(prevStateDocs, action)
+        const maybeState = await inputs['v1.0-universe'].get(['root'])
+        const state = maybeState.result === 'some'
+            ? validateModel('AnyState')(maybeState.value)
+            : initState()
 
-        const prevStateDoc = await tx.get(
-            db.doc(`states/${PRIMARY_VERSION}/games/${action.gameId}`))
+        const newState = integrate(state, action)
 
-        let prevRecords: AnyDBRecord[]
-        let nextRecords: AnyDBRecord[]
+        const stateDiffs: Diff[] = [maybeState.result === 'some'
+            ? { path: ['root'], kind: 'replace', oldValue: state, newValue: newState }
+            : { path: ['root'], kind: 'add', value: newState }]
 
-        if (prevStateDoc.exists) {
-            const prevState = validateModel('PrimaryState')(prevStateDoc.data())
-            applyDiff(db, tx, allRecords(prevState), allRecords(nextState))
-        } else {
-            applyDiff(db, tx, [], allRecords(nextState))
-        }
+        const statesByPlayerDiffs = makeIndexingDiffer(indexByPlayer)(stateDiffs)
+        const statesByPlayersAndGamesDiffs = makeIndexingDiffer(indexByGame)(statesByPlayerDiffs)
+        const playerGamesDiffs = makeMappingDiffer(makePlayerGame)(statesByPlayersAndGamesDiffs)
+
+        applyDiffs(db, tx, ['v1.0-universe'], stateDiffs)
+        applyDiffs(db, tx, ['v1.0-exports', 'players', 'games'], playerGamesDiffs)
     })
 }
 

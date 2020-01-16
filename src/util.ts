@@ -5,3 +5,4 @@ export function mapValues<V1, V2>(obj: { [k: string]: V1 },
         return { [k]: fn(k, v) }
     }))
 }
+export type Maybe<V> = { result: 'some', value: V } | { result: 'none' }
