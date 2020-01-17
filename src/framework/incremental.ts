@@ -6,22 +6,25 @@ import { dirname, basename } from "path"
 import { Maybe } from "../util"
 import deepEqual = require("deep-equal")
 
-export type Item = [string[], unknown]
+export type Item2<V> = [string[], V]
+export type Item = Item2<unknown>
 
-export type Diff = {
+export type Diff2<V> = {
     kind: 'add' | 'delete'
     path: string[]
-    value: unknown
+    value: V
 } | {
     kind: 'replace'
     path: string[]
-    oldValue: unknown
-    newValue: unknown
+    oldValue: V
+    newValue: V
 }
+export type Diff = Diff2<unknown>
 
 export type Indexer = (path: string[], value: unknown) => string[]
 
-export type Mapper = (path: string[], value: unknown) => unknown
+export type Mapper<I, O> = (path: string[], value: I) => Item2<O>[]
+// export type Mapper = (path: string[], value: unknown) => unknown
 
 export type Collection = {
     schema: string[]
@@ -142,36 +145,114 @@ export function makeIndexingDiffer(indexer: Indexer) {
     }
 }
 
-export function makeMappingDiffer(mapper: Mapper) {
-    return (inputs: Diff[]): Diff[] => {
-        const res: Diff[] = []
+export function makeMappingDiffer<I, O>(mapper: Mapper<I, O>) {
+    return (inputs: Diff2<I>[]): Diff2<O>[] => {
+        const res: Diff2<O>[] = []
 
         for (const diff of inputs) {
-            switch (diff.kind) {
-                case 'add':
-                case 'delete':
-                    res.push({
-                        kind: diff.kind,
-                        path: diff.path,
-                        value: mapper(diff.path, diff.value)
-                    })
-                    break
-                case 'replace':
-                    const oldMapped = mapper(diff.path, diff.oldValue)
-                    const newMapped = mapper(diff.path, diff.newValue)
-                    if (!deepEqual(oldMapped, newMapped)) {
-                        res.push({
-                            kind: 'replace',
-                            path: diff.path,
-                            oldValue: oldMapped,
-                            newValue: newMapped
-                        })
-                    }
-            }
+            res.push(...mapDiff(mapper, diff))
         }
         return res
     }
 }
+
+function mapDiff<I, O>(mapper: Mapper<I, O>, diff: Diff2<I>): Diff2<O>[] {
+    switch (diff.kind) {
+        case 'add':
+        case 'delete': {
+            const res: Diff2<O>[] = []
+            const mapped = mapper(diff.path, diff.value)
+            for (const [extraPath, value] of mapped) {
+                res.push({
+                    kind: diff.kind,
+                    path: [...diff.path, ...extraPath],
+                    value
+                })
+            }
+
+            return res
+        }
+        case 'replace': {
+            const res: Diff2<O>[] = []
+
+            const oldMapped = mapper(diff.path, diff.oldValue)
+            const newMapped = mapper(diff.path, diff.newValue)
+
+            const oldByKey: Record<string, O> = {}
+            const newByKey: Record<string, O> = {}
+
+            for (const [oldExtraPath, value] of oldMapped) {
+                oldByKey[oldExtraPath.toString()] = value
+            }
+            for (const [newExtraPath, value] of newMapped) {
+                newByKey[newExtraPath.toString()] = value
+            }
+
+            for (const [oldExtraPath, oldValue] of oldMapped) {
+                if (oldExtraPath.toString() in newByKey) {
+                    const newValue = newByKey[oldExtraPath.toString()]
+                    if (!deepEqual(oldValue, newValue)) {
+                        res.push({
+                            kind: 'replace',
+                            path: [...diff.path, ...oldExtraPath],
+                            oldValue,
+                            newValue
+                        })
+                    }
+                } else {
+                    res.push({
+                        kind: 'delete',
+                        path: [...diff.path, ...oldExtraPath],
+                        value: oldValue,
+                    })
+                }
+            }
+            for (const [newExtraPath, newValue] of newMapped) {
+                if (!(newExtraPath.toString() in oldByKey)) {
+                    res.push({
+                        kind: 'add',
+                        path: [...diff.path, ...newExtraPath],
+                        value: newValue,
+                    })
+                }
+            }
+            return res
+        }
+    }
+}
+
+
+// export function makeMappingDiffer(mapper: Mapper) {
+//     return (inputs: Diff[]): Diff[] => {
+//         const res: Diff[] = []
+
+//         for (const diff of inputs) {
+//             switch (diff.kind) {
+//                 case 'add':
+//                 case 'delete':
+//                     res.push({
+//                         kind: diff.kind,
+//                         path: diff.path,
+//                         value: mapper(diff.path, diff.value)
+//                     })
+//                     break
+//                 case 'replace':
+//                     const oldMapped = mapper(diff.path, diff.oldValue)
+//                     const newMapped = mapper(diff.path, diff.newValue)
+//                     if (!deepEqual(oldMapped, newMapped)) {
+//                         res.push({
+//                             kind: 'replace',
+//                             path: diff.path,
+//                             oldValue: oldMapped,
+//                             newValue: newMapped
+//                         })
+//                     }
+//             }
+//         }
+//         return res
+//     }
+// }
+
 // class IndexingDynamicCollection<B, I, O> implements DynamicCollection<B, O> {
 //     constructor(
 //         private input: DynamicCollection<B, I>,
