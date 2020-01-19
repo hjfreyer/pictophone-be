@@ -296,82 +296,85 @@ export class DBCollection<V> implements SortedCollection<V> {
 //     }
 // }
 
-export function makeMappingDiffer<I, O>(mapper: Mapper<I, O>) {
-    return (inputs: PathedDiff<I>[]): PathedDiff<O>[] => {
-        const res: PathedDiff<O>[] = []
+// export function makeMappingDiffer<I, O>(mapper: Mapper<I, O>) {
+//     return (inputs: PathedDiff<I>[]): PathedDiff<O>[] => {
+//         const res: PathedDiff<O>[] = []
 
-        for (const diff of inputs) {
-            res.push(...mapDiff(mapper, diff))
-        }
-        return res
-    }
+//         for (const diff of inputs) {
+//             res.push(...mapDiff(mapper, diff))
+//         }
+//         return res
+//     }
+// }
+
+// function mapDiff<I, O>(mapper: Mapper<I, O>, diff: PathedDiff<I>): PathedDiff<O>[] {
+//     switch (diff.kind) {
+//         case 'add':
+//         case 'delete': {
+//             const res: PathedDiff<O>[] = []
+//             const mapped = mapper(diff.path, diff.value)
+//             for (const [extraPath, value] of mapped) {
+//                 res.push({
+//                     kind: diff.kind,
+//                     path: [...diff.path, ...extraPath],
+//                     value
+//                 })
+//             }
+
+//             return res
+//         }
+//         case 'replace': {
+//             const res: PathedDiff<O>[] = []
+
+//             const oldMapped = mapper(diff.path, diff.oldValue)
+//             const newMapped = mapper(diff.path, diff.newValue)
+
+//             const oldByKey: Record<string, O> = {}
+//             const newByKey: Record<string, O> = {}
+
+//             for (const [oldExtraPath, value] of oldMapped) {
+//                 oldByKey[oldExtraPath.toString()] = value
+//             }
+//             for (const [newExtraPath, value] of newMapped) {
+//                 newByKey[newExtraPath.toString()] = value
+//             }
+
+//             for (const [oldExtraPath, oldValue] of oldMapped) {
+//                 if (oldExtraPath.toString() in newByKey) {
+//                     const newValue = newByKey[oldExtraPath.toString()]
+//                     if (!deepEqual(oldValue, newValue)) {
+//                         res.push({
+//                             kind: 'replace',
+//                             path: [...diff.path, ...oldExtraPath],
+//                             oldValue,
+//                             newValue
+//                         })
+//                     }
+//                 } else {
+//                     res.push({
+//                         kind: 'delete',
+//                         path: [...diff.path, ...oldExtraPath],
+//                         value: oldValue,
+//                     })
+//                 }
+//             }
+//             for (const [newExtraPath, newValue] of newMapped) {
+//                 if (!(newExtraPath.toString() in oldByKey)) {
+//                     res.push({
+//                         kind: 'add',
+//                         path: [...diff.path, ...newExtraPath],
+//                         value: newValue,
+//                     })
+//                 }
+//             }
+//             return res
+//         }
+//     }
+// }
+
+export function makeMappingDiffer<AI, AO>(mapper: ActionMapper<AI, AO>) {
+    return makeActionMappingDiffer(makeDiffMapper(mapper))
 }
-
-function mapDiff<I, O>(mapper: Mapper<I, O>, diff: PathedDiff<I>): PathedDiff<O>[] {
-    switch (diff.kind) {
-        case 'add':
-        case 'delete': {
-            const res: PathedDiff<O>[] = []
-            const mapped = mapper(diff.path, diff.value)
-            for (const [extraPath, value] of mapped) {
-                res.push({
-                    kind: diff.kind,
-                    path: [...diff.path, ...extraPath],
-                    value
-                })
-            }
-
-            return res
-        }
-        case 'replace': {
-            const res: PathedDiff<O>[] = []
-
-            const oldMapped = mapper(diff.path, diff.oldValue)
-            const newMapped = mapper(diff.path, diff.newValue)
-
-            const oldByKey: Record<string, O> = {}
-            const newByKey: Record<string, O> = {}
-
-            for (const [oldExtraPath, value] of oldMapped) {
-                oldByKey[oldExtraPath.toString()] = value
-            }
-            for (const [newExtraPath, value] of newMapped) {
-                newByKey[newExtraPath.toString()] = value
-            }
-
-            for (const [oldExtraPath, oldValue] of oldMapped) {
-                if (oldExtraPath.toString() in newByKey) {
-                    const newValue = newByKey[oldExtraPath.toString()]
-                    if (!deepEqual(oldValue, newValue)) {
-                        res.push({
-                            kind: 'replace',
-                            path: [...diff.path, ...oldExtraPath],
-                            oldValue,
-                            newValue
-                        })
-                    }
-                } else {
-                    res.push({
-                        kind: 'delete',
-                        path: [...diff.path, ...oldExtraPath],
-                        value: oldValue,
-                    })
-                }
-            }
-            for (const [newExtraPath, newValue] of newMapped) {
-                if (!(newExtraPath.toString() in oldByKey)) {
-                    res.push({
-                        kind: 'add',
-                        path: [...diff.path, ...newExtraPath],
-                        value: newValue,
-                    })
-                }
-            }
-            return res
-        }
-    }
-}
-
 
 export function makeActionMappingDiffer<AI, AO>(mapper: ActionMapper<AI, AO>) {
     return (actions: Item<AI>[]): Item<AO>[] => {

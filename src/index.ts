@@ -14,7 +14,8 @@ import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
 import path from 'path'
 import { DBCollection, UnknownDiff, makeMappingDiffer, pathToDocumentReference, Item, PathedDiff, Diff, makeDiffMapper, makeActionMappingDiffer, Mapper } from './framework/incremental'
-import { initState, integrate } from './model/v1.0'
+import * as v1_0 from './model/v1.0'
+import * as v1_1 from './model/v1.1'
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -186,51 +187,86 @@ app.listen(port, function() {
 //     })
 // }
 
-function indexByPlayer(path: string[], value: unknown) {
-    const res: string[] = []
-    const state = value as AnyState
-    for (const gameId in state.players) {
-        for (const player of state.players[gameId]) {
-            if (res.indexOf(player) === -1) {
-                res.push(player)
+// function indexByPlayer(path: string[], value: unknown) {
+//     const res: string[] = []
+//     const state = value as AnyState
+//     for (const gameId in state.players) {
+//         for (const player of state.players[gameId]) {
+//             if (res.indexOf(player) === -1) {
+//                 res.push(player)
+//             }
+//         }
+//     }
+//     return res
+// }
+
+// function indexByGame(path: string[], value: unknown) {
+//     const res: string[] = []
+//     const [_, playerId] = path
+//     const state = value as AnyState
+//     for (const gameId in state.players) {
+//         if (state.players[gameId].indexOf(playerId) !== -1) {
+//             res.push(gameId)
+//         }
+//     }
+//     return res
+// }
+
+const MODULES = {
+    'v1.0': v1_0,
+    'v1.1': v1_1,
+}
+
+type Indexes = {
+    'v1.0': import('./model/v1.0').Index
+    'v1.1': import('./model/v1.1').Index
+}
+
+type AnyVersion = keyof Indexes
+type AnyKind = keyof Indexes[AnyVersion]
+
+const checkState = {
+    'v1.0': (s: Indexes[AnyVersion]['State']): Indexes['v1.0']['State'] => {
+        if (s.version !== 'v1.0') { throw new Error('bad version') }
+        return s
+    },
+    'v1.1': (s: Indexes[AnyVersion]['State']): Indexes['v1.1']['State'] => {
+        if (s.version !== 'v1.1') { throw new Error('bad version') }
+        return s
+    },
+}
+
+function validator(v: 'v1.0', k: 'Action'): (u: unknown) => Indexes['v1.0']['Action'];
+function validator(v: 'v1.0', k: 'State'): (u: unknown) => Indexes['v1.0']['State'];
+function validator(v: 'v1.0', k: 'Export'): (u: unknown) => Indexes['v1.0']['Export'];
+function validator(v: 'v1.1', k: 'Action'): (u: unknown) => Indexes['v1.1']['Action'];
+function validator(v: 'v1.1', k: 'State'): (u: unknown) => Indexes['v1.1']['State'];
+function validator(v: 'v1.1', k: 'Export'): (u: unknown) => Indexes['v1.1']['Export'];
+function validator(v: AnyVersion, k: AnyKind): (u: unknown) => Indexes[AnyVersion][AnyKind] {
+    return (u: unknown) => {
+        switch (k) {
+            case 'Action': {
+                const s = validateModel('AnyAction')(u)
+                if (s.version !== v) { throw new Error('bad version') }
+                return s
+            }
+            case 'State': {
+                const s = validateModel('AnyState')(u)
+                if (s.version !== v) { throw new Error('bad version') }
+                return s
+            }
+            case 'Export': {
+                const s = validateModel('AnyExport')(u)
+                if (s.version !== v) { throw new Error('bad version') }
+                return s
             }
         }
     }
-    return res
-}
-
-function indexByGame(path: string[], value: unknown) {
-    const res: string[] = []
-    const [_, playerId] = path
-    const state = value as AnyState
-    for (const gameId in state.players) {
-        if (state.players[gameId].indexOf(playerId) !== -1) {
-            res.push(gameId)
-        }
-    }
-    return res
-}
-
-function makePlayerGame(path: string[], value: unknown): Item<AnyExport>[] {
-    const state = value as AnyState
-    const res: Item<AnyExport>[] = []
-    for (const gameId in state.players) {
-        for (const playerId of state.players[gameId]) {
-            res.push([[playerId, gameId], {
-                version: "v1.0",
-                kind: 'player_game',
-                playerId,
-                gameId,
-                players: state.players[gameId]
-            }])
-        }
-    }
-    return res
 }
 
 function inputCollections(db: Firestore, tx: Transaction) {
     return {
-        'v1.0-universe': new DBCollection(db, tx, ['v1.0-universe'], validateModel('AnyState'))
+        'v1.0-universe': new DBCollection(db, tx, ['v1.0-universe'], validator('v1.0', 'State'))
     }
 }
 
@@ -251,15 +287,15 @@ function applyDiffs<V>(db: Firestore, tx: Transaction, schema: string[], diffs: 
     }
 }
 
-const doTheRootThing: Mapper<AnyState, AnyState> = (path, value): Item<AnyState>[] => {
-    return [[['singleton'], value]]
-}
+// const doTheRootThing: Mapper<AnyState, AnyState> = (path, value): Item<AnyState>[] => {
+//     return [[['singleton'], value]]
+// }
 
-async function applyAction(stateDb: DBCollection<AnyState>, action: AnyAction): Promise<Item<Diff<AnyState>>[]> {
+async function applyAction(stateDb: DBCollection<v1_0.State>, action: v1_0.Action): Promise<Item<Diff<v1_0.State>>[]> {
     const maybeState = await stateDb.get(['root'])
-    const state = maybeState.result === 'some' ? maybeState.value : initState()
+    const state = maybeState.result === 'some' ? maybeState.value : v1_0.initState()
 
-    const newState = integrate(state, action)
+    const newState = v1_0.integrate(state, action)
 
     return [[['root'], maybeState.result === 'some'
         ? { kind: 'replace', oldValue: state, newValue: newState }
@@ -267,16 +303,18 @@ async function applyAction(stateDb: DBCollection<AnyState>, action: AnyAction): 
 }
 
 async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise<void> {
-    const action = validateModel('AnyAction')(body)
+    const action = validator('v1.0', 'Action')(body)
 
     await db.runTransaction(async (tx: Transaction): Promise<void> => {
         const inputs = inputCollections(db, tx)
 
-        const stateDiffs = await applyAction(inputs['v1.0-universe'], action)
+        const state1_0Diffs = await applyAction(inputs['v1.0-universe'], action)
+        const state1_1Diffs = v1_1.upgradeStateDiff(state1_0Diffs)
 
-        const playerGamesDiffs = makeActionMappingDiffer(makeDiffMapper(makePlayerGame))(stateDiffs)
+        const playerGamesDiffs = v1_0.exportDiff(state1_0Diffs)
 
-        applyDiffs(db, tx, ['v1.0-universe'], stateDiffs)
+        applyDiffs(db, tx, ['v1.0-universe'], state1_0Diffs)
+        applyDiffs(db, tx, ['v1.1-universe', 'games'], state1_1Diffs)
         applyDiffs(db, tx, ['v1.0-exports', 'players', 'games'], playerGamesDiffs)
     })
 }
