@@ -13,7 +13,7 @@ import { validate as validateModel } from './model/index.validator'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
 import path from 'path'
-import { DBCollection, Diff, makeIndexingDiffer, makeMappingDiffer, pathToDocumentReference, Item2 } from './framework/incremental'
+import { DBCollection, UnknownDiff, makeMappingDiffer, pathToDocumentReference, Item, PathedDiff, Diff, makeDiffMapper, makeActionMappingDiffer, Mapper } from './framework/incremental'
 import { initState, integrate } from './model/v1.0'
 
 admin.initializeApp({
@@ -211,9 +211,9 @@ function indexByGame(path: string[], value: unknown) {
     return res
 }
 
-function makePlayerGame(path: string[], value: unknown): Item2<AnyExport>[] {
+function makePlayerGame(path: string[], value: unknown): Item<AnyExport>[] {
     const state = value as AnyState
-    const res: Item2<AnyExport>[] = []
+    const res: Item<AnyExport>[] = []
     for (const gameId in state.players) {
         for (const playerId of state.players[gameId]) {
             res.push([[playerId, gameId], {
@@ -230,13 +230,13 @@ function makePlayerGame(path: string[], value: unknown): Item2<AnyExport>[] {
 
 function inputCollections(db: Firestore, tx: Transaction) {
     return {
-        'v1.0-universe': new DBCollection(db, tx, ['v1.0-universe'])
+        'v1.0-universe': new DBCollection(db, tx, ['v1.0-universe'], validateModel('AnyState'))
     }
 }
 
-function applyDiffs(db: Firestore, tx: Transaction, schema: string[], diffs: Diff[]): void {
-    for (const diff of diffs) {
-        const docRef = pathToDocumentReference(db, schema, diff.path)
+function applyDiffs<V>(db: Firestore, tx: Transaction, schema: string[], diffs: Item<Diff<V>>[]): void {
+    for (const [path, diff] of diffs) {
+        const docRef = pathToDocumentReference(db, schema, path)
         switch (diff.kind) {
             case 'delete':
                 tx.delete(docRef)
@@ -251,24 +251,30 @@ function applyDiffs(db: Firestore, tx: Transaction, schema: string[], diffs: Dif
     }
 }
 
+const doTheRootThing: Mapper<AnyState, AnyState> = (path, value): Item<AnyState>[] => {
+    return [[['singleton'], value]]
+}
+
+async function applyAction(stateDb: DBCollection<AnyState>, action: AnyAction): Promise<Item<Diff<AnyState>>[]> {
+    const maybeState = await stateDb.get(['root'])
+    const state = maybeState.result === 'some' ? maybeState.value : initState()
+
+    const newState = integrate(state, action)
+
+    return [[['root'], maybeState.result === 'some'
+        ? { kind: 'replace', oldValue: state, newValue: newState }
+        : { kind: 'add', value: newState }]]
+}
+
 async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise<void> {
     const action = validateModel('AnyAction')(body)
 
     await db.runTransaction(async (tx: Transaction): Promise<void> => {
         const inputs = inputCollections(db, tx)
 
-        const maybeState = await inputs['v1.0-universe'].get(['root'])
-        const state = maybeState.result === 'some'
-            ? validateModel('AnyState')(maybeState.value)
-            : initState()
+        const stateDiffs = await applyAction(inputs['v1.0-universe'], action)
 
-        const newState = integrate(state, action)
-
-        const stateDiffs: Diff[] = [maybeState.result === 'some'
-            ? { path: ['root'], kind: 'replace', oldValue: state, newValue: newState }
-            : { path: ['root'], kind: 'add', value: newState }]
-
-        const playerGamesDiffs = makeMappingDiffer(makePlayerGame)(stateDiffs)
+        const playerGamesDiffs = makeActionMappingDiffer(makeDiffMapper(makePlayerGame))(stateDiffs)
 
         applyDiffs(db, tx, ['v1.0-universe'], stateDiffs)
         applyDiffs(db, tx, ['v1.0-exports', 'players', 'games'], playerGamesDiffs)
