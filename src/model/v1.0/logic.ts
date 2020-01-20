@@ -43,23 +43,23 @@ export function getKey(x: State | Export): string[] {
 
 // Exports
 // =======
-export function exportState(state: State): Export[] {
-    const res: Export[] = []
-    for (const gameId in state.players) {
-        for (const playerId of state.players[gameId]) {
-            res.push({
-                version: "v1.0",
-                kind: "player_game",
-                gameId: gameId,
-                playerId,
-                players: state.players['gameId'],
-            })
-        }
-    }
-    return res
-}
+// export function exportState(state: State): Export[] {
+//     const res: Export[] = []
+//     for (const gameId in state.players) {
+//         for (const playerId of state.players[gameId]) {
+//             res.push({
+//                 version: "v1.0",
+//                 kind: "player_game",
+//                 gameId: gameId,
+//                 playerId,
+//                 players: state.players['gameId'],
+//             })
+//         }
+//     }
+//     return res
+// }
 
-function makePlayerGame(path: string[], state: State): Item<Export>[] {
+export function exportMapper(path: string[], state: State): Item<Export>[] {
     const res: Item<Export>[] = []
     for (const gameId in state.players) {
         for (const playerId of state.players[gameId]) {
@@ -74,5 +74,3 @@ function makePlayerGame(path: string[], state: State): Item<Export>[] {
     }
     return res
 }
-
-export const exportDiff = makeMappingDiffer(makePlayerGame)

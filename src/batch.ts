@@ -1,7 +1,8 @@
-import { DocumentReference, Firestore, Transaction } from '@google-cloud/firestore'
+import { DocumentReference, Firestore, Transaction, DocumentData } from '@google-cloud/firestore'
 import { Request, Router } from 'express'
-import { Collection, documentReferenceToPath, pathToCollectionReference } from './framework/incremental'
-import { makeBaseCollections, derivedCollections } from './collections'
+import { Collection, documentReferenceToPath, pathToCollectionReference, pathToDocumentReference } from './framework/incremental'
+import { derivedCollections, makeSavedCollections } from './collections'
+import { diff } from 'deep-diff'
 // import { Dictionary } from 'express-serve-static-core'
 // import admin from 'firebase-admin'
 // import { applyExportDiff, checkExport, upgradeExportMap } from './exports'
@@ -223,45 +224,100 @@ type BackwardsCheckCursor = {}
 
 export async function backwardsCheck(db: Firestore, cursor: BackwardsCheckCursor): Promise<BackwardsCheckCursor> {
     await db.runTransaction(async (tx) => {
-        const base = makeBaseCollections(db, tx)
-        const derived = derivedCollections(base)
+        const saved = makeSavedCollections(db, tx)
+        const derived = derivedCollections(saved)
 
         for (const collectionId in derived) {
-            console.log('backwards checking:', collectionId)
-            const collection = (derived as any)[collectionId] as Collection<unknown>
-
-            for await (const key of listKeys2(db, tx, collection.schema)) {
-                const res = await collection.get(key)
-                if (res === null) {
-                    throw new Error(`unexpected key: ${key}`)
-                }
+            if (!(collectionId in saved)) {
+                console.log('cant backwards check:', collectionId)
+                continue
             }
+
+            console.log('backwards checking:', collectionId)
+            const expected = (derived as any)[collectionId] as Collection<unknown>
+            const actual = (saved as any)[collectionId] as Collection<unknown>
+
+            await backwardsCheckCollections(expected, actual, cursor)
         }
     })
 
     return {}
 }
 
+export async function backwardsCheckCollections(
+    expected: Collection<unknown>, actual: Collection<unknown>, cursor: BackwardsCheckCursor): Promise<void> {
+    for await (const [key,] of actual.unsortedList()) {
+        const res = await expected.get(key)
+        if (res === null) {
+            throw new Error(`unexpected key: ${key}`)
+        }
+    }
+}
 
 export async function forwardsCheck(db: Firestore, cursor: BackwardsCheckCursor): Promise<BackwardsCheckCursor> {
     await db.runTransaction(async (tx) => {
-        const base = makeBaseCollections(db, tx)
-        const derived = derivedCollections(base)
+        const saved = makeSavedCollections(db, tx)
+        const derived = derivedCollections(saved)
 
         for (const collectionId in derived) {
             console.log('forwards checking:', collectionId)
-            const collection = (derived as any)[collectionId] as Collection<unknown>
+            const expected = (derived as any)[collectionId] as Collection<unknown>
+            const actual = (saved as any)[collectionId] as Collection<unknown>
 
-            for await (const key of listKeys2(db, tx, collection.schema)) {
-                const res = await collection.get(key)
-                if (res === null) {
-                    throw new Error(`unexpected key: ${key}`)
-                }
-            }
+            await forwardsCheckCollections(expected, actual, cursor)
         }
     })
 
     return {}
+}
+
+export async function forwardsCheckCollections(
+    expected: Collection<unknown>, actual: Collection<unknown>, cursor: BackwardsCheckCursor): Promise<void> {
+    for await (const [key, expectedValue] of expected.unsortedList()) {
+        const actualValue = await actual.get(key)
+        const d = diff(expectedValue, actualValue)
+
+        if (d) {
+            throw new Error(`for key ${key}, expected ${JSON.stringify(expectedValue)}; got ${JSON.stringify(actualValue)}.
+Diff: ${JSON.stringify(d)}`)
+        }
+    }
+}
+
+export async function backfill(db: Firestore, cursor: BackwardsCheckCursor): Promise<BackwardsCheckCursor> {
+    await db.runTransaction(async (tx) => {
+        const saved = makeSavedCollections(db, tx)
+        const derived = derivedCollections(saved)
+
+        const changes: [string[], string[], unknown][] = []
+        for (const collectionId in derived) {
+            console.log('backfilling:', collectionId)
+            const expected = (derived as any)[collectionId] as Collection<unknown>
+            const actual = (saved as any)[collectionId] as Collection<unknown>
+
+            for await (const change of backfillCollection(expected, actual, cursor)) {
+                changes.push(change)
+            }
+        }
+
+        for (const [schema, path, value] of changes) {
+            tx.set(pathToDocumentReference(db, schema, path), value as DocumentData)
+        }
+    })
+
+    return {}
+}
+
+export async function* backfillCollection(
+    expected: Collection<unknown>, actual: Collection<unknown>,
+    cursor: BackwardsCheckCursor): AsyncIterable<[string[], string[], unknown]> {
+    for await (const [path, expectedValue] of expected.unsortedList()) {
+        const actualValue = await actual.get(path)
+
+        if (actualValue === null) {
+            yield [expected.schema, path, expectedValue]
+        }
+    }
 }
 
 function batch(db: Firestore): Router {
@@ -278,6 +334,14 @@ function batch(db: Firestore): Router {
     res.post('/forwards-check', function(_req: Request<{}>, res, next) {
         const cursor = _req.body as BackwardsCheckCursor
         forwardsCheck(db, cursor).then(result => {
+            res.status(200)
+            res.json(result)
+        }).catch(next)
+    })
+
+    res.post('/backfill', function(_req: Request<{}>, res, next) {
+        const cursor = _req.body as BackwardsCheckCursor
+        backfill(db, cursor).then(result => {
             res.status(200)
             res.json(result)
         }).catch(next)

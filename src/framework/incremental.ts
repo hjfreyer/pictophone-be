@@ -33,6 +33,7 @@ export type Diff<V> = {
 export type Collection<V> = {
     schema: string[]
 
+    unsortedList(): AsyncIterable<Item<V>>
     get(path: string[]): Promise<V | null>
 }
 
@@ -73,6 +74,15 @@ export class MappedSortedCollection<I, O> implements SortedCollection<O> {
             }
         }
         return null
+    }
+
+    async *unsortedList(): AsyncIterable<Item<O>> {
+        for await (const [path, value] of this.input.unsortedList()) {
+            const mapped = this.mapper(path, value)
+            for (const [extraPath, mappedValue] of mapped) {
+                yield [[...path, ...extraPath], mappedValue]
+            }
+        }
     }
 
     async *list(basePath: string[]): AsyncGenerator<Item<O>, any, unknown> {
@@ -219,6 +229,13 @@ export class DBCollection<V> implements SortedCollection<V> {
             return null
         }
         return this.validator(doc.data())
+    }
+
+    async *unsortedList(): AsyncIterable<Item<V>> {
+        const subDocs = await this.tx.get(this.db.collectionGroup(this.schema[this.schema.length - 1]))
+        for (const doc of subDocs.docs) {
+            yield [documentReferenceToPath(this.schema, doc.ref), this.validator(doc.data())]
+        }
     }
 
     async *list(basePath: string[]): AsyncGenerator<Item<V>, any, undefined> {

@@ -284,7 +284,7 @@ async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise
         const state1_0Diffs = await applyAction(inputs['v1.0-universe'], action)
         const state1_1Diffs = makeMappingDiffer(v1_1.upgradeStateMapper)(state1_0Diffs)
 
-        const playerGamesDiffs = v1_0.exportDiff(state1_0Diffs)
+        const playerGamesDiffs = makeMappingDiffer(v1_0.exportMapper)(state1_0Diffs)
 
         applyDiffs(db, tx, ['v1.0-universe'], state1_0Diffs)
         applyDiffs(db, tx, ['v1.1-state-universe', 'v1.1-state-games'], state1_1Diffs)
