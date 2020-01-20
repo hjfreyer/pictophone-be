@@ -1,21 +1,22 @@
-import { DocumentReference, Firestore, Transaction, DocumentData } from '@google-cloud/firestore'
+import { DocumentData, Firestore, Transaction } from '@google-cloud/firestore'
 import { Storage } from '@google-cloud/storage'
+import { strict as assert } from 'assert'
 import cors from 'cors'
 import express from 'express'
 import { Dictionary, Request } from 'express-serve-static-core'
 import admin from 'firebase-admin'
 import uuid from 'uuid/v1'
 import batch from './batch'
+import { derivedDynamicCollections, makeSavedCollections } from './collections'
 import GetConfig from './config'
-import { applyDiff } from './exports'
-import { AnyAction, AnyExport, AnyState } from './model'
-import validator from './model/validator'
+import { DBCollection, pathToDocumentReference } from './framework/db'
+import { Diff, Item, SortedCollection, SortedDynamicCollection } from './framework/incremental'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
-import path from 'path'
-import { DBCollection, UnknownDiff, makeMappingDiffer, pathToDocumentReference, Item, PathedDiff, Diff, makeDiffMapper, makeActionMappingDiffer, Mapper } from './framework/incremental'
 import * as v1_0 from './model/v1.0'
 import * as v1_1 from './model/v1.1'
+import validator from './model/validator'
+
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -264,31 +265,57 @@ function applyDiffs<V>(db: Firestore, tx: Transaction, schema: string[], diffs: 
 //     return [[['singleton'], value]]
 // }
 
-async function applyAction(stateDb: DBCollection<v1_0.State>, action: v1_0.Action): Promise<Item<Diff<v1_0.State>>[]> {
-    const maybeState = await stateDb.get(['root'])
-    const state = maybeState || v1_0.initState()
+class ActingCollection implements SortedDynamicCollection<v1_0.State, v1_0.Action, Diff<v1_0.State>> {
+    constructor(private base: SortedCollection<v1_0.State>) { }
 
-    const newState = v1_0.integrate(state, action)
+    get schema() { return this.base.schema }
 
-    return [[['root'], maybeState !== null
-        ? { kind: 'replace', oldValue: state, newValue: newState }
-        : { kind: 'add', value: newState }]]
+    get(path: string[]): Promise<v1_0.State | null> {
+        return this.base.get(path)
+    }
+
+    list(basePath: string[]): AsyncIterable<Item<v1_0.State>> {
+        return this.base.list(basePath)
+    }
+
+    unsortedList(): AsyncIterable<Item<v1_0.State>> {
+        return this.base.unsortedList()
+    }
+
+    async respondTo(actions: Item<v1_0.Action>[]): Promise<Item<Diff<v1_0.State>>[]> {
+        assert.equal(actions.length, 1)
+        const [, action] = actions[0]
+
+        const maybeState = await this.base.get(['root'])
+        const state = maybeState || v1_0.initState()
+
+        const newState = v1_0.integrate(state, action)
+
+        return [[['root'], maybeState !== null
+            ? { kind: 'replace', oldValue: state, newValue: newState }
+            : { kind: 'add', value: newState }]]
+    }
 }
 
 async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise<void> {
     const action = validator('v1.0', 'Action')(body)
 
     await db.runTransaction(async (tx: Transaction): Promise<void> => {
-        const inputs = inputCollections(db, tx)
+        const inputs = makeSavedCollections(db, tx)
 
-        const state1_0Diffs = await applyAction(inputs['v1.0-universe'], action)
-        const state1_1Diffs = makeMappingDiffer(v1_1.upgradeStateMapper)(state1_0Diffs)
+        const responsiveInput = new ActingCollection(inputs['v1.0-state'])
 
-        const playerGamesDiffs = makeMappingDiffer(v1_0.exportMapper)(state1_0Diffs)
+        const derived = derivedDynamicCollections(responsiveInput)
 
-        applyDiffs(db, tx, ['v1.0-universe'], state1_0Diffs)
-        applyDiffs(db, tx, ['v1.1-state-universe', 'v1.1-state-games'], state1_1Diffs)
-        applyDiffs(db, tx, ['v1.0-exports', 'players', 'games'], playerGamesDiffs)
+        const actions: Item<v1_0.Action>[] = [[['root'], action]]
+
+        const state1_0Diffs = await responsiveInput.respondTo(actions)
+        const state1_1Diffs = await derived['v1.1-state'].respondTo(actions)
+        const playerGamesDiffs = await derived['v1.0-exports'].respondTo(actions)
+
+        applyDiffs(db, tx, responsiveInput.schema, state1_0Diffs)
+        applyDiffs(db, tx, derived['v1.1-state'].schema, state1_1Diffs)
+        applyDiffs(db, tx, derived['v1.0-exports'].schema, playerGamesDiffs)
     })
 }
 

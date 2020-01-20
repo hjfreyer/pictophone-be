@@ -1,8 +1,9 @@
-import { DocumentReference, Firestore, Transaction, DocumentData } from '@google-cloud/firestore'
-import { Request, Router } from 'express'
-import { Collection, documentReferenceToPath, pathToCollectionReference, pathToDocumentReference } from './framework/incremental'
-import { derivedCollections, makeSavedCollections } from './collections'
+import { DocumentData, Firestore, Transaction } from '@google-cloud/firestore'
 import { diff } from 'deep-diff'
+import { Request, Router } from 'express'
+import { derivedCollections, makeSavedCollections } from './collections'
+import { documentReferenceToPath, pathToCollectionReference, pathToDocumentReference } from './framework/db'
+import { Collection } from './framework/incremental'
 // import { Dictionary } from 'express-serve-static-core'
 // import admin from 'firebase-admin'
 // import { applyExportDiff, checkExport, upgradeExportMap } from './exports'
@@ -225,7 +226,7 @@ type BackwardsCheckCursor = {}
 export async function backwardsCheck(db: Firestore, cursor: BackwardsCheckCursor): Promise<BackwardsCheckCursor> {
     await db.runTransaction(async (tx) => {
         const saved = makeSavedCollections(db, tx)
-        const derived = derivedCollections(saved)
+        const derived = derivedCollections(saved['v1.0-state'])
 
         for (const collectionId in derived) {
             if (!(collectionId in saved)) {
@@ -257,7 +258,7 @@ export async function backwardsCheckCollections(
 export async function forwardsCheck(db: Firestore, cursor: BackwardsCheckCursor): Promise<BackwardsCheckCursor> {
     await db.runTransaction(async (tx) => {
         const saved = makeSavedCollections(db, tx)
-        const derived = derivedCollections(saved)
+        const derived = derivedCollections(saved['v1.0-state'])
 
         for (const collectionId in derived) {
             console.log('forwards checking:', collectionId)
@@ -287,7 +288,7 @@ Diff: ${JSON.stringify(d)}`)
 export async function backfill(db: Firestore, cursor: BackwardsCheckCursor): Promise<BackwardsCheckCursor> {
     await db.runTransaction(async (tx) => {
         const saved = makeSavedCollections(db, tx)
-        const derived = derivedCollections(saved)
+        const derived = derivedCollections(saved['v1.0-state'])
 
         const changes: [string[], string[], unknown][] = []
         for (const collectionId in derived) {
