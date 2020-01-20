@@ -5,7 +5,7 @@ import Export from './Export'
 export {Action} from './Action'
 export {State} from './State'
 export {Export} from './Export'
-export { upgradeStateDiff } from './logic'
+export { upgradeStateMapper } from './logic'
 
 export type Index = {
     Action: Action,

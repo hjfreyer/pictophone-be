@@ -1,5 +1,7 @@
 import { DocumentReference, Firestore, Transaction } from '@google-cloud/firestore'
 import { Request, Router } from 'express'
+import { Collection, documentReferenceToPath, pathToCollectionReference } from './framework/incremental'
+import { makeBaseCollections, derivedCollections } from './collections'
 // import { Dictionary } from 'express-serve-static-core'
 // import admin from 'firebase-admin'
 // import { applyExportDiff, checkExport, upgradeExportMap } from './exports'
@@ -186,15 +188,100 @@ import { Request, Router } from 'express'
 //     await db.runTransaction(async tx => { await checkExportsForDoc(db, tx, ref) })
 // }
 
+async function* listKeysHelper(
+    db: Firestore, tx: Transaction,
+    baseSchema: string[],
+    basePath: string[],
+    schemaLeft: string[]): AsyncIterable<string[]> {
+    if (schemaLeft.length === 0) {
+        yield basePath
+        return
+    }
+
+    const nextBaseSchema = [...baseSchema, schemaLeft[0]]
+    const nextSchemaLeft = schemaLeft.slice(1)
+
+    const subDocs = await tx.get(pathToCollectionReference(db, nextBaseSchema, basePath))
+    for (const doc of subDocs.docs) {
+        yield* listKeysHelper(db, tx, nextBaseSchema, [...basePath, doc.id], nextSchemaLeft)
+    }
+}
+
+async function* listKeys(db: Firestore, tx: Transaction, schema: string[]): AsyncIterable<string[]> {
+    yield* listKeysHelper(db, tx, [], [], schema)
+}
+
+async function* listKeys2(db: Firestore, tx: Transaction, schema: string[]): AsyncIterable<string[]> {
+    const subDocs = await tx.get(db.collectionGroup(schema[schema.length - 1]))
+    for (const doc of subDocs.docs) {
+        yield documentReferenceToPath(schema, doc.ref)
+    }
+}
+
+
+type BackwardsCheckCursor = {}
+
+export async function backwardsCheck(db: Firestore, cursor: BackwardsCheckCursor): Promise<BackwardsCheckCursor> {
+    await db.runTransaction(async (tx) => {
+        const base = makeBaseCollections(db, tx)
+        const derived = derivedCollections(base)
+
+        for (const collectionId in derived) {
+            console.log('backwards checking:', collectionId)
+            const collection = (derived as any)[collectionId] as Collection<unknown>
+
+            for await (const key of listKeys2(db, tx, collection.schema)) {
+                const res = await collection.get(key)
+                if (res === null) {
+                    throw new Error(`unexpected key: ${key}`)
+                }
+            }
+        }
+    })
+
+    return {}
+}
+
+
+export async function forwardsCheck(db: Firestore, cursor: BackwardsCheckCursor): Promise<BackwardsCheckCursor> {
+    await db.runTransaction(async (tx) => {
+        const base = makeBaseCollections(db, tx)
+        const derived = derivedCollections(base)
+
+        for (const collectionId in derived) {
+            console.log('forwards checking:', collectionId)
+            const collection = (derived as any)[collectionId] as Collection<unknown>
+
+            for await (const key of listKeys2(db, tx, collection.schema)) {
+                const res = await collection.get(key)
+                if (res === null) {
+                    throw new Error(`unexpected key: ${key}`)
+                }
+            }
+        }
+    })
+
+    return {}
+}
+
 function batch(db: Firestore): Router {
     const res = Router()
 
-    // res.post('/check', function(req: Request<Dictionary<string>>, res, next) {
-    //     checkExports(db).then(result => {
-    //         res.status(200)
-    //         res.json(result)
-    //     }).catch(next)
-    // })
+    res.post('/backwards-check', function(_req: Request<{}>, res, next) {
+        const cursor = _req.body as BackwardsCheckCursor
+        backwardsCheck(db, cursor).then(result => {
+            res.status(200)
+            res.json(result)
+        }).catch(next)
+    })
+
+    res.post('/forwards-check', function(_req: Request<{}>, res, next) {
+        const cursor = _req.body as BackwardsCheckCursor
+        forwardsCheck(db, cursor).then(result => {
+            res.status(200)
+            res.json(result)
+        }).catch(next)
+    })
 
     // res.post('/backfill', function(req: Request<{}>, res, next) {
     //     backfillExports(db).then(result => {

@@ -9,7 +9,7 @@ import batch from './batch'
 import GetConfig from './config'
 import { applyDiff } from './exports'
 import { AnyAction, AnyExport, AnyState } from './model'
-import { validate as validateModel } from './model/index.validator'
+import validator from './model/validator'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
 import path from 'path'
@@ -236,33 +236,6 @@ const checkState = {
     },
 }
 
-function validator(v: 'v1.0', k: 'Action'): (u: unknown) => Indexes['v1.0']['Action'];
-function validator(v: 'v1.0', k: 'State'): (u: unknown) => Indexes['v1.0']['State'];
-function validator(v: 'v1.0', k: 'Export'): (u: unknown) => Indexes['v1.0']['Export'];
-function validator(v: 'v1.1', k: 'Action'): (u: unknown) => Indexes['v1.1']['Action'];
-function validator(v: 'v1.1', k: 'State'): (u: unknown) => Indexes['v1.1']['State'];
-function validator(v: 'v1.1', k: 'Export'): (u: unknown) => Indexes['v1.1']['Export'];
-function validator(v: AnyVersion, k: AnyKind): (u: unknown) => Indexes[AnyVersion][AnyKind] {
-    return (u: unknown) => {
-        switch (k) {
-            case 'Action': {
-                const s = validateModel('AnyAction')(u)
-                if (s.version !== v) { throw new Error('bad version') }
-                return s
-            }
-            case 'State': {
-                const s = validateModel('AnyState')(u)
-                if (s.version !== v) { throw new Error('bad version') }
-                return s
-            }
-            case 'Export': {
-                const s = validateModel('AnyExport')(u)
-                if (s.version !== v) { throw new Error('bad version') }
-                return s
-            }
-        }
-    }
-}
 
 function inputCollections(db: Firestore, tx: Transaction) {
     return {
@@ -293,11 +266,11 @@ function applyDiffs<V>(db: Firestore, tx: Transaction, schema: string[], diffs: 
 
 async function applyAction(stateDb: DBCollection<v1_0.State>, action: v1_0.Action): Promise<Item<Diff<v1_0.State>>[]> {
     const maybeState = await stateDb.get(['root'])
-    const state = maybeState.result === 'some' ? maybeState.value : v1_0.initState()
+    const state = maybeState || v1_0.initState()
 
     const newState = v1_0.integrate(state, action)
 
-    return [[['root'], maybeState.result === 'some'
+    return [[['root'], maybeState !== null
         ? { kind: 'replace', oldValue: state, newValue: newState }
         : { kind: 'add', value: newState }]]
 }
@@ -309,12 +282,12 @@ async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise
         const inputs = inputCollections(db, tx)
 
         const state1_0Diffs = await applyAction(inputs['v1.0-universe'], action)
-        const state1_1Diffs = v1_1.upgradeStateDiff(state1_0Diffs)
+        const state1_1Diffs = makeMappingDiffer(v1_1.upgradeStateMapper)(state1_0Diffs)
 
         const playerGamesDiffs = v1_0.exportDiff(state1_0Diffs)
 
         applyDiffs(db, tx, ['v1.0-universe'], state1_0Diffs)
-        applyDiffs(db, tx, ['v1.1-universe', 'games'], state1_1Diffs)
+        applyDiffs(db, tx, ['v1.1-state-universe', 'v1.1-state-games'], state1_1Diffs)
         applyDiffs(db, tx, ['v1.0-exports', 'players', 'games'], playerGamesDiffs)
     })
 }

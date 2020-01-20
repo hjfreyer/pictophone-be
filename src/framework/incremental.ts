@@ -1,10 +1,9 @@
 import { strict as assert } from "assert"
 import { Observable, Subject, of } from 'rxjs'
 import { map } from 'rxjs/operators'
-import { DocumentReference, Firestore, Transaction } from '@google-cloud/firestore'
+import { DocumentReference, Firestore, Transaction, CollectionReference } from '@google-cloud/firestore'
 import { dirname, basename } from "path"
-import { Maybe } from "../util"
-import deepEqual = require("deep-equal")
+import deepEqual from "deep-equal"
 
 export type Item<V> = [string[], V]
 export type UnknownItem = Item<unknown>
@@ -34,7 +33,7 @@ export type Diff<V> = {
 export type Collection<V> = {
     schema: string[]
 
-    get(path: string[]): Promise<Maybe<V>>
+    get(path: string[]): Promise<V | null>
 }
 
 export type SortedCollection<V> = Collection<V> & {
@@ -56,24 +55,24 @@ export type Mapper<I, O> = (path: string[], value: I) => Item<O>[]
 export class MappedSortedCollection<I, O> implements SortedCollection<O> {
     constructor(public schema: string[],
         private mapper: Mapper<I, O>,
-        private input: SortedCollection<I>) {    }
+        private input: SortedCollection<I>) { }
 
-    async get(path: string[]): Promise<Maybe<O>> {
+    async get(path: string[]): Promise<O | null> {
         const basePath = path.slice(0, this.input.schema.length)
         const base = await this.input.get(basePath)
 
-        if (base.result === "none") {
-            return { result: 'none' }
+        if (base === null) {
+            return null
         }
 
-        const mapped = this.mapper(basePath, base.value)
+        const mapped = this.mapper(basePath, base)
 
         for (const [extraPath, value] of mapped) {
             if (deepEqual(path, [...basePath, ...extraPath])) {
-                return { result: 'some', value }
+                return value
             }
         }
-        return { result: 'none' }
+        return null
     }
 
     async *list(basePath: string[]): AsyncGenerator<Item<O>, any, unknown> {
@@ -181,24 +180,52 @@ export function pathToDocumentReference(db: Firestore, schema: string[], path: s
     return db.doc(([] as string[]).concat(...pathlets).join('/'))
 }
 
+
+export function pathToCollectionReference(db: Firestore, schema: string[], path: string[]): CollectionReference {
+    assert.equal(path.length + 1, schema.length)
+    if (path.length === 0) {
+        return db.collection(schema[0])
+    }
+    const baseDoc = pathToDocumentReference(db, schema.slice(0, schema.length - 1), path)
+    return baseDoc.collection(schema[schema.length - 1])
+}
+
+
+export function documentReferenceToPath(schema: string[], docRef: DocumentReference): string[] {
+    const res: string[] = []
+    const extractedSchema: string[] = []
+    let docPath = docRef.path
+    while (docPath !== '.') {
+        res.push(basename(docPath))
+        docPath = dirname(docPath)
+
+        extractedSchema.push(basename(docPath))
+        docPath = dirname(docPath)
+    }
+    res.reverse()
+    extractedSchema.reverse()
+    assert.deepEqual(schema, extractedSchema)
+    return res
+}
+
 export class DBCollection<V> implements SortedCollection<V> {
     constructor(private db: Firestore, private tx: Transaction, public schema: string[],
         private validator: (v: unknown) => V) { }
 
-    async get(path: string[]): Promise<Maybe<V>> {
+    async get(path: string[]): Promise<V | null> {
         const docRef = pathToDocumentReference(this.db, this.schema, path)
         const doc = await this.tx.get(docRef)
         if (!doc.exists) {
-            return { result: 'none' }
+            return null
         }
-        return { result: 'some', value: this.validator(doc.data()) }
+        return this.validator(doc.data())
     }
 
     async *list(basePath: string[]): AsyncGenerator<Item<V>, any, undefined> {
         if (basePath.length === this.schema.length) {
             const gotten = await this.get(basePath)
-            if (gotten.result === 'some') {
-                yield [basePath, gotten.value]
+            if (gotten !== null) {
+                yield [basePath, gotten]
             }
         } else if (basePath.length === this.schema.length - 1) {
             const docRef = pathToDocumentReference(

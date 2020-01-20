@@ -79,7 +79,7 @@ export function upgradeAction(action: PreviousAction): Action {
     }
 }
 
-const upgradeStateMapper: Mapper<PreviousState, State> = (
+export const upgradeStateMapper: Mapper<PreviousState, State> = (
     _path: string[], root: PreviousState): Item<State>[] => {
 
     const res: Item<State>[] = []
@@ -94,4 +94,3 @@ const upgradeStateMapper: Mapper<PreviousState, State> = (
     return res
 }
 
-export const upgradeStateDiff = makeMappingDiffer(upgradeStateMapper)
