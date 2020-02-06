@@ -6,7 +6,7 @@ import Export from './Export'
 export {Action} from './Action'
 export {State} from './State'
 export {Export} from './Export'
-export { integrate, getKey, initState, exportMapper } from './logic'
+export { integrate, getKey, initState, ExportMapper } from './logic'
 
 export  type Index = {
     Action: Action,

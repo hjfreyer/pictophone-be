@@ -1,7 +1,7 @@
 import { CollectionReference, DocumentReference, Firestore, Transaction } from '@google-cloud/firestore'
 import { strict as assert } from "assert"
 import { basename, dirname } from "path"
-import { Item, SortedCollection } from "./incremental"
+import { Item, SortedCollection, ReadableCollection } from "./incremental"
 
 export function pathToDocumentReference(db: Firestore, schema: string[], path: string[]): DocumentReference {
     assert.equal(path.length, schema.length)
@@ -35,7 +35,7 @@ export function documentReferenceToPath(schema: string[], docRef: DocumentRefere
     return res
 }
 
-export class DBCollection<V> implements SortedCollection<V> {
+export class DBCollection<V> implements ReadableCollection<V> {
     constructor(private db: Firestore, private tx: Transaction, public schema: string[],
         private validator: (v: unknown) => V) { }
 
@@ -48,14 +48,14 @@ export class DBCollection<V> implements SortedCollection<V> {
         return this.validator(doc.data())
     }
 
-    async *unsortedList(): AsyncIterable<Item<V>> {
+    async *enumerate(): AsyncIterable<Item<V>> {
         const subDocs = await this.tx.get(this.db.collectionGroup(this.schema[this.schema.length - 1]))
         for (const doc of subDocs.docs) {
             yield [documentReferenceToPath(this.schema, doc.ref), this.validator(doc.data())]
         }
     }
 
-    async *list(basePath: string[]): AsyncGenerator<Item<V>, any, undefined> {
+    async *query(basePath: string[]): AsyncGenerator<Item<V>, any, undefined> {
         if (basePath.length === this.schema.length) {
             const gotten = await this.get(basePath)
             if (gotten !== null) {

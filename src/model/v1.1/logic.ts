@@ -6,7 +6,7 @@ import { mapValues } from '../../util'
 
 import { Index as PreviousModel } from '../v1.0'
 
-import { Diff, Item, Mapper, makeMappingDiffer } from '../../framework/incremental'
+import { Diff, Item, Mapper } from '../../framework/incremental'
 import { VERSION } from '.'
 
 
@@ -64,6 +64,22 @@ import { VERSION } from '.'
 //     }
 //     return res
 // }
+
+
+export function exportMapper(path: string[], state: State): Item<Export>[] {
+    const [, gameId] = path
+    const res: Item<Export>[] = []
+    for (const playerId of state.players) {
+        res.push([[playerId], {
+            version: "v1.1",
+            kind: 'player_game',
+            playerId,
+            gameId,
+            players: state.players
+        }])
+    }
+    return res
+}
 
 
 // Compatability

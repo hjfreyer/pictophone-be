@@ -10,7 +10,7 @@ import batch from './batch'
 import { derivedDynamicCollections, makeSavedCollections } from './collections'
 import GetConfig from './config'
 import { DBCollection, pathToDocumentReference } from './framework/db'
-import { Diff, Item, SortedCollection, SortedDynamicCollection } from './framework/incremental'
+import { Diff, Item, ReadableCollection, WriteableCollection, MappedEnumerable, MappedReactive, CombinedWriteable, EchoReactive } from './framework/incremental'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
 import * as v1_0 from './model/v1.0'
@@ -213,6 +213,30 @@ app.listen(port, function() {
 //     return res
 // }
 
+const SCHEMAS = {
+    'v1.0-state': ['v1.0-universe'],
+    'v1.0-exports': ['universe', 'players', 'v1.0-exports-games'],
+}
+
+interface InputCollections {
+    ['v1.0-state']: ReadableCollection<Indexes['v1.0']['State']>
+}
+
+interface OutputCollectons {
+    ['v1.0-exports']: WriteableCollection<Indexes['v1.0']['State'], Indexes['v1.0']['Export']>
+}
+
+type Pipeline = (i: InputCollections) => OutputCollectons
+
+function pipeline(i: InputCollections): OutputCollectons {
+    const v1ExportsEnumerable = new MappedEnumerable(new v1_0.ExportMapper(), i['v1.0-state'])
+    const v1ExportsReactive = new MappedReactive(new v1_0.ExportMapper(), new EchoReactive())
+
+    return {
+        "v1.0-exports": new CombinedWriteable(v1ExportsEnumerable, v1ExportsReactive)
+    }
+}
+
 const MODULES = {
     'v1.0': v1_0,
     'v1.1': v1_1,
@@ -238,9 +262,9 @@ const checkState = {
 }
 
 
-function inputCollections(db: Firestore, tx: Transaction) {
+function inputCollections(db: Firestore, tx: Transaction): InputCollections {
     return {
-        'v1.0-universe': new DBCollection(db, tx, ['v1.0-universe'], validator('v1.0', 'State'))
+        "v1.0-state": new DBCollection(db, tx, SCHEMAS['v1.0-state'], validator('v1.0', 'State'))
     }
 }
 
@@ -265,57 +289,64 @@ function applyDiffs<V>(db: Firestore, tx: Transaction, schema: string[], diffs: 
 //     return [[['singleton'], value]]
 // }
 
-class ActingCollection implements SortedDynamicCollection<v1_0.State, v1_0.Action, Diff<v1_0.State>> {
-    constructor(private base: SortedCollection<v1_0.State>) { }
+// class ActingCollection implements SortedDynamicCollection<v1_0.State, v1_0.Action, Diff<v1_0.State>> {
+//     constructor(private base: SortedCollection<v1_0.State>) { }
 
-    get schema() { return this.base.schema }
+//     get schema() { return this.base.schema }
 
-    get(path: string[]): Promise<v1_0.State | null> {
-        return this.base.get(path)
-    }
+//     get(path: string[]): Promise<v1_0.State | null> {
+//         return this.base.get(path)
+//     }
 
-    list(basePath: string[]): AsyncIterable<Item<v1_0.State>> {
-        return this.base.list(basePath)
-    }
+//     list(basePath: string[]): AsyncIterable<Item<v1_0.State>> {
+//         return this.base.list(basePath)
+//     }
 
-    unsortedList(): AsyncIterable<Item<v1_0.State>> {
-        return this.base.unsortedList()
-    }
+//     unsortedList(): AsyncIterable<Item<v1_0.State>> {
+//         return this.base.unsortedList()
+//     }
 
-    async respondTo(actions: Item<v1_0.Action>[]): Promise<Item<Diff<v1_0.State>>[]> {
-        assert.equal(actions.length, 1)
-        const [, action] = actions[0]
+//     async respondTo(actions: Item<v1_0.Action>[]): Promise<Item<Diff<v1_0.State>>[]> {
+//         assert.equal(actions.length, 1)
+//         const [, action] = actions[0]
 
-        const maybeState = await this.base.get(['root'])
-        const state = maybeState || v1_0.initState()
+//         const maybeState = await this.base.get(['root'])
+//         const state = maybeState || v1_0.initState()
 
-        const newState = v1_0.integrate(state, action)
+//         const newState = v1_0.integrate(state, action)
 
-        return [[['root'], maybeState !== null
-            ? { kind: 'replace', oldValue: state, newValue: newState }
-            : { kind: 'add', value: newState }]]
-    }
+//         return [[['root'], maybeState !== null
+//             ? { kind: 'replace', oldValue: state, newValue: newState }
+//             : { kind: 'add', value: newState }]]
+//     }
+// }
+
+async function reactTo(action: v1_0.Action, inputs: InputCollections): Promise<Item<Diff<v1_0.State>>[]> {
+    const maybeState = await inputs['v1.0-state'].get(['root'])
+    const state = maybeState || v1_0.initState()
+
+    const newState = v1_0.integrate(state, action)
+
+    return [[['root'], maybeState !== null
+        ? { kind: 'replace', oldValue: state, newValue: newState }
+        : { kind: 'add', value: newState }]]
 }
 
 async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise<void> {
     const action = validator('v1.0', 'Action')(body)
 
     await db.runTransaction(async (tx: Transaction): Promise<void> => {
-        const inputs = makeSavedCollections(db, tx)
+        const inputs = inputCollections(db, tx)
+        const outputs = pipeline(inputs)
 
-        const responsiveInput = new ActingCollection(inputs['v1.0-state'])
+        const state1_0Diffs = await reactTo(action, inputs)
 
-        const derived = derivedDynamicCollections(responsiveInput)
+        applyDiffs(db, tx, SCHEMAS['v1.0-state'], state1_0Diffs)
+        for (const collectionId in outputs) {
+            applyDiffs(db, tx, SCHEMAS[collectionId as keyof typeof SCHEMAS],
+                await outputs['v1.0-exports'].reactTo(state1_0Diffs))
+        }
 
-        const actions: Item<v1_0.Action>[] = [[['root'], action]]
-
-        const state1_0Diffs = await responsiveInput.respondTo(actions)
-        const state1_1Diffs = await derived['v1.1-state'].respondTo(actions)
-        const playerGamesDiffs = await derived['v1.0-exports'].respondTo(actions)
-
-        applyDiffs(db, tx, responsiveInput.schema, state1_0Diffs)
-        applyDiffs(db, tx, derived['v1.1-state'].schema, state1_1Diffs)
-        applyDiffs(db, tx, derived['v1.0-exports'].schema, playerGamesDiffs)
     })
 }
 

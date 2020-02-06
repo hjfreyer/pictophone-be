@@ -3,7 +3,7 @@ import Action, { JoinGame } from './Action'
 import Export, { PlayerGame } from './Export'
 import State from './State'
 import { mapValues } from '../../util'
-import { Item, makeMappingDiffer } from '../../framework/incremental'
+import { Item } from '../../framework/incremental'
 
 // Integration
 // ===========
@@ -59,18 +59,22 @@ export function getKey(x: State | Export): string[] {
 //     return res
 // }
 
-export function exportMapper(path: string[], state: State): Item<Export>[] {
-    const res: Item<Export>[] = []
-    for (const gameId in state.players) {
-        for (const playerId of state.players[gameId]) {
-            res.push([[playerId, gameId], {
-                version: "v1.0",
-                kind: 'player_game',
-                playerId,
-                gameId,
-                players: state.players[gameId]
-            }])
+export class ExportMapper {
+    newDims = 2
+    map(path: string[], state: State): Item<Export>[] {
+        const res: Item<Export>[] = []
+        for (const gameId in state.players) {
+            for (const playerId of state.players[gameId]) {
+                res.push([[playerId, gameId], {
+                    version: "v1.0",
+                    kind: 'player_game',
+                    playerId,
+                    gameId,
+                    players: state.players[gameId]
+                }])
+            }
         }
+        return res
     }
-    return res
 }
+
