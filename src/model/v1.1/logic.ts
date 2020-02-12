@@ -6,7 +6,7 @@ import { mapValues } from '../../util'
 
 import { Index as PreviousModel } from '../v1.0'
 
-import { Diff, Item, Mapper } from '../../framework/incremental'
+import { Diff, Item, Mapper, Enumerable, MappedEnumerable, TransposedEnumerable, Reactive, MappedReactive, TransposedReactive, Reducer, ReducedQueryable, Queryable, DowngradedQueryable } from '../../framework/incremental'
 import { VERSION } from '.'
 
 
@@ -65,22 +65,50 @@ import { VERSION } from '.'
 //     return res
 // }
 
-
-export function exportMapper(path: string[], state: State): Item<Export>[] {
-    const [, gameId] = path
-    const res: Item<Export>[] = []
-    for (const playerId of state.players) {
-        res.push([[playerId], {
-            version: "v1.1",
-            kind: 'player_game',
-            playerId,
-            gameId,
-            players: state.players
-        }])
-    }
-    return res
+export function exportStateEnumerable(input: Enumerable<State>): Enumerable<Export> {
+    return new TransposedEnumerable([0, 2, 1], new MappedEnumerable(new ExportMapper(), input))
 }
 
+export function exportStateReactive<S>(input: Reactive<S, State>): Reactive<S, Export> {
+    return new TransposedReactive([0, 2, 1], new MappedReactive(new ExportMapper(), input))
+}
+
+export function exportState3Enumerable(input: Queryable<Export>): Enumerable<Export> {
+    return new DowngradedQueryable(new ReducedQueryable(new HighlanderReducer(1), input))
+}
+
+export function exportState3Reactive<S>(input: Reactive<S, State>): Reactive<S, Export> {
+    return new TransposedReactive([2, 1, 0], new MappedReactive(new ExportMapper(), input))
+}
+
+class ExportMapper implements Mapper<State, Export> {
+    newDims = 1
+    map(path: string[], state: State): Item<Export>[] {
+        const [, gameId] = path
+        const res: Item<Export>[] = []
+        for (const playerId of state.players) {
+            res.push([[playerId], {
+                version: "v1.1",
+                kind: 'player_game',
+                playerId,
+                gameId,
+                players: state.players
+            }])
+        }
+        return res
+    }
+}
+
+class HighlanderReducer<V> implements Reducer<V, V> {
+    constructor(public reduceDims: number) { }
+
+    reduce(baseKey: string[], items: Item<V>[]): V {
+        if (items.length != 1) {
+            throw new Error(`There can be only one; ${baseKey} had ${items.length}`)
+        }
+        return items[0][1]
+    }
+}
 
 // Compatability
 // =============
@@ -95,18 +123,20 @@ export function upgradeAction(action: PreviousAction): Action {
     }
 }
 
-export const upgradeStateMapper: Mapper<PreviousState, State> = (
-    _path: string[], root: PreviousState): Item<State>[] => {
+export class UpgradeStateMapper implements Mapper<PreviousState, State> {
+    newDims = 1
 
-    const res: Item<State>[] = []
-    for (const gameId in root.players) {
-        res.push([[gameId], {
-            version: VERSION,
-            kind: "game",
-            gameId,
-            players: root.players[gameId],
-        }])
+    map(_path: string[], root: PreviousState): Item<State>[] {
+
+        const res: Item<State>[] = []
+        for (const gameId in root.players) {
+            res.push([[gameId], {
+                version: VERSION,
+                kind: "game",
+                gameId,
+                players: root.players[gameId],
+            }])
+        }
+        return res
     }
-    return res
 }
-

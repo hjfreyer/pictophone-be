@@ -1,5 +1,6 @@
 import deepEqual from "deep-equal"
 import _ from 'lodash'
+import { lexCompare } from "../util"
 
 export type Item<V> = [string[], V]
 
@@ -18,6 +19,7 @@ export interface Enumerable<T> {
 }
 
 export interface Queryable<T> {
+    sortedEnumerate(): AsyncIterable<Item<T>>
     query(basePath: string[]): AsyncIterable<Item<T>>
 }
 
@@ -25,9 +27,13 @@ export interface Reactive<I, O> {
     reactTo(diffs: Item<Diff<I>>[]): Promise<Item<Diff<O>>[]>
 }
 
-export interface ReadableCollection<T> extends Enumerable<T>, Queryable<T> { }
+export interface ReadableCollection<T> extends Enumerable<T>, Queryable<T> {
+    schema: string[]
+}
 
-export interface WriteableCollection<I, O> extends Enumerable<O>, Reactive<I, O> { }
+export interface WriteableCollection<I, O> extends Enumerable<O>, Reactive<I, O> {
+    schema: string[]
+}
 
 
 export class EchoReactive<V> implements Reactive<V, V> {
@@ -35,7 +41,20 @@ export class EchoReactive<V> implements Reactive<V, V> {
         return diffs
     }
 }
+export class DowngradedQueryable<T> implements Enumerable<T> {
+    constructor(private input: Queryable<T>) { }
 
+    enumerate() { return this.input.sortedEnumerate() }
+    async get(key: string[]): Promise<T | null> {
+        let res: T | null = null
+
+        for await (const [, value] of this.input.query(key)) {
+            res = value
+        }
+
+        return res
+    }
+}
 // export type Collection<V> = {
 //     schema: string[]
 
@@ -91,6 +110,11 @@ export interface Mapper<I, O> {
     map(path: string[], value: I): Item<O>[]
 }
 
+
+export interface Reducer<I, O> {
+    reduceDims: number
+    reduce(path: string[], values: Item<I>[]): O
+}
 
 
 
@@ -186,7 +210,9 @@ export class MappedReactive<I, O, S> implements Reactive<S, O> {
 }
 
 export class CombinedWriteable<S, O> implements WriteableCollection<S, O> {
-    constructor(private enumerable: Enumerable<O>,
+    constructor(
+        public schema: string[],
+        private enumerable: Enumerable<O>,
         private reactive: Reactive<S, O>) { }
 
     enumerate() { return this.enumerable.enumerate() }
@@ -210,6 +236,16 @@ export class TransposedEnumerable<V> implements Enumerable<V> {
     }
 }
 
+export class TransposedReactive<S, V> implements Reactive<S, V> {
+    constructor(private permutation: number[],
+        private input: Reactive<S, V>) { }
+
+    async reactTo(sourceDiffs: Item<Diff<S>>[]): Promise<Item<Diff<V>>[]> {
+        const inputDiffs = await this.input.reactTo(sourceDiffs)
+        return inputDiffs.map(([path, diff]) => [permute(this.permutation, path), diff])
+    }
+}
+
 function invertPermutation(permutation: number[]): number[] {
     const res = permutation.map(() => -1)
     for (let i = 0; i < permutation.length; i++) {
@@ -221,6 +257,127 @@ function invertPermutation(permutation: number[]): number[] {
 function permute<T>(permutation: number[], a: T[]): T[] {
     return permutation.map(idx => a[idx])
 }
+
+type Batch<V> = {
+    batchKey: string[]
+    items: Item<V>[]
+}
+
+export class ReducedQueryable<I, O> implements Queryable<O> {
+    constructor(private reducer: Reducer<I, O>,
+        private input: Queryable<I>) { }
+
+    async *query(basePath: string[]): AsyncIterable<Item<O>> {
+        const qualified = this.qualify(basePath, this.input.query(basePath))
+        const batched = this.batchStream(qualified)
+        for await (const batch of batched) {
+            const relativePath = batch.batchKey.slice(basePath.length)
+            yield [relativePath, this.reducer.reduce(batch.batchKey, batch.items)]
+        }
+    }
+
+    async *sortedEnumerate(): AsyncIterable<Item<O>> {
+        const batched = this.batchStream(this.input.sortedEnumerate())
+        for await (const batch of batched) {
+            yield [batch.batchKey, this.reducer.reduce(batch.batchKey, batch.items)]
+        }
+    }
+
+    private async* qualify(baseKey: string[], inputs: AsyncIterable<Item<I>>): AsyncIterable<Item<I>> {
+        for await (const [key, value] of inputs) {
+            yield [[...baseKey, ...key], value]
+        }
+    }
+
+    // inputs must have fully qualified keys.
+    private async* batchStream(inputs: AsyncIterable<Item<I>>): AsyncIterable<Batch<I>> {
+        const iter = inputs[Symbol.asyncIterator]()
+        for (let entry = await iter.next(); !entry.done;) {
+            const [entryKey,] = entry.value
+            const batchKey = entryKey.slice(0, entryKey.length - this.reducer.reduceDims)
+            const items: Item<I>[] = []
+
+            for (; !entry.done; entry = await iter.next()) {
+                const [entryKey, entryValue] = entry.value
+                const baseKey = entryKey.slice(0, entryKey.length - this.reducer.reduceDims)
+                const extraKey = entryKey.slice(entryKey.length - this.reducer.reduceDims)
+
+                if (!deepEqual(batchKey, baseKey)) {
+                    break
+                }
+
+                items.push([extraKey, entryValue])
+            }
+
+            yield { batchKey, items }
+        }
+    }
+}
+
+// export class ReducedReactive<I, O, S> implements Reactive<S, O> {
+//     constructor(private reducer: Reducer<I, O>,
+//         private q: Queryable<I>,
+//         private r: Reactive<S, I>) { }
+
+//    async reactTo(diffs: Item<Diff<S>>[]): Promise<Item<Diff<O>>[]> {
+//         const input = await this.r.reactTo(diffs)
+
+//         const impactedKeys : string[][] = []
+//         for (const [key, ] of input) {
+//             impactedKeys.push(key.slice(0, key.length - this.reducer.reduceDims))
+//         }
+
+//         impactedKeys.sort(lexCompare)
+//         _.uniqWith()
+
+//     }
+
+//     async *query(basePath: string[]): AsyncIterable<Item<O>> {
+//         const qualified = this.qualify(basePath, this.input.query(basePath))
+//         const batched = this.batchStream(qualified)
+//         for await (const batch of batched) {
+//             const relativePath = batch.batchKey.slice(basePath.length)
+//             yield [relativePath, this.reducer.reduce(batch.batchKey, batch.items)]
+//         }
+//     }
+
+//     async *sortedEnumerate(): AsyncIterable<Item<O>> {
+//         const batched = this.batchStream(this.input.sortedEnumerate())
+//         for await (const batch of batched) {
+//             yield [batch.batchKey, this.reducer.reduce(batch.batchKey, batch.items)]
+//         }
+//     }
+
+//     private async* qualify(baseKey: string[], inputs: AsyncIterable<Item<I>>): AsyncIterable<Item<I>> {
+//         for await (const [key, value] of inputs) {
+//             yield [[...baseKey, ...key], value]
+//         }
+//     }
+
+//     // inputs must have fully qualified keys.
+//     private async* batchStream(inputs: AsyncIterable<Item<I>>): AsyncIterable<Batch<I>> {
+//         const iter = inputs[Symbol.asyncIterator]()
+//         for (let entry = await iter.next(); !entry.done;) {
+//             const [entryKey,] = entry.value
+//             const batchKey = entryKey.slice(0, entryKey.length - this.reducer.reduceDims)
+//             const items: Item<I>[] = []
+
+//             for (; !entry.done; entry = await iter.next()) {
+//                 const [entryKey, entryValue] = entry.value
+//                 const baseKey = entryKey.slice(0, entryKey.length - this.reducer.reduceDims)
+//                 const extraKey = entryKey.slice(entryKey.length - this.reducer.reduceDims)
+
+//                 if (!deepEqual(batchKey, baseKey)) {
+//                     break
+//                 }
+
+//                 items.push([extraKey, entryValue])
+//             }
+
+//             yield { batchKey, items }
+//         }
+//     }
+// }
 
 // export class MappedCollection<I, O, S> implements WriteableCollection<O> {
 //     constructor(public schema: string[],

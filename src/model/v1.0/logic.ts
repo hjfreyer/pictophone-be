@@ -4,6 +4,7 @@ import Export, { PlayerGame } from './Export'
 import State from './State'
 import { mapValues } from '../../util'
 import { Item } from '../../framework/incremental'
+import { Op } from '../../framework/graph'
 
 // Integration
 // ===========
@@ -77,4 +78,44 @@ export class ExportMapper {
         return res
     }
 }
+
+export function exportMapper<S>(input: Op<S, State>): Op<S, Export> {
+    return {
+        kind: 'map',
+        input,
+        subSchema: ['game', 'player'],
+        fn(_path: string[], state: State): Item<Export>[] {
+            const res: Item<Export>[] = []
+            for (const gameId in state.players) {
+                for (const playerId of state.players[gameId]) {
+                    res.push([[playerId, gameId], {
+                        version: "v1.0",
+                        kind: 'player_game',
+                        playerId,
+                        gameId,
+                        players: state.players[gameId]
+                    }])
+                }
+            }
+            return res
+        }
+    }
+}
+//     newDims = 2
+//     map(path: string[], state: State): Item<Export>[] {
+//         const res: Item<Export>[] = []
+//         for (const gameId in state.players) {
+//             for (const playerId of state.players[gameId]) {
+//                 res.push([[playerId, gameId], {
+//                     version: "v1.0",
+//                     kind: 'player_game',
+//                     playerId,
+//                     gameId,
+//                     players: state.players[gameId]
+//                 }])
+//             }
+//         }
+//         return res
+//     }
+// }
 

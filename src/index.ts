@@ -7,7 +7,7 @@ import { Dictionary, Request } from 'express-serve-static-core'
 import admin from 'firebase-admin'
 import uuid from 'uuid/v1'
 import batch from './batch'
-import { derivedDynamicCollections, makeSavedCollections } from './collections'
+import { InputCollections, inputCollections, pipeline } from './collections'
 import GetConfig from './config'
 import { DBCollection, pathToDocumentReference } from './framework/db'
 import { Diff, Item, ReadableCollection, WriteableCollection, MappedEnumerable, MappedReactive, CombinedWriteable, EchoReactive } from './framework/incremental'
@@ -213,30 +213,6 @@ app.listen(port, function() {
 //     return res
 // }
 
-const SCHEMAS = {
-    'v1.0-state': ['v1.0-universe'],
-    'v1.0-exports': ['universe', 'players', 'v1.0-exports-games'],
-}
-
-interface InputCollections {
-    ['v1.0-state']: ReadableCollection<Indexes['v1.0']['State']>
-}
-
-interface OutputCollectons {
-    ['v1.0-exports']: WriteableCollection<Indexes['v1.0']['State'], Indexes['v1.0']['Export']>
-}
-
-type Pipeline = (i: InputCollections) => OutputCollectons
-
-function pipeline(i: InputCollections): OutputCollectons {
-    const v1ExportsEnumerable = new MappedEnumerable(new v1_0.ExportMapper(), i['v1.0-state'])
-    const v1ExportsReactive = new MappedReactive(new v1_0.ExportMapper(), new EchoReactive())
-
-    return {
-        "v1.0-exports": new CombinedWriteable(v1ExportsEnumerable, v1ExportsReactive)
-    }
-}
-
 const MODULES = {
     'v1.0': v1_0,
     'v1.1': v1_1,
@@ -262,11 +238,6 @@ const checkState = {
 }
 
 
-function inputCollections(db: Firestore, tx: Transaction): InputCollections {
-    return {
-        "v1.0-state": new DBCollection(db, tx, SCHEMAS['v1.0-state'], validator('v1.0', 'State'))
-    }
-}
 
 function applyDiffs<V>(db: Firestore, tx: Transaction, schema: string[], diffs: Item<Diff<V>>[]): void {
     for (const [path, diff] of diffs) {
@@ -341,12 +312,13 @@ async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise
 
         const state1_0Diffs = await reactTo(action, inputs)
 
-        applyDiffs(db, tx, SCHEMAS['v1.0-state'], state1_0Diffs)
+        applyDiffs(db, tx, inputs['v1.0-state'].schema, state1_0Diffs)
         for (const collectionId in outputs) {
-            applyDiffs(db, tx, SCHEMAS[collectionId as keyof typeof SCHEMAS],
-                await outputs['v1.0-exports'].reactTo(state1_0Diffs))
+            const diffs =
+                await outputs[collectionId as keyof typeof outputs].reactTo(state1_0Diffs)
+            applyDiffs<unknown>(db, tx,
+                outputs[collectionId as keyof typeof outputs].schema, diffs)
         }
-
     })
 }
 

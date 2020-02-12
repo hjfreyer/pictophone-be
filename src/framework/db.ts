@@ -1,7 +1,7 @@
 import { CollectionReference, DocumentReference, Firestore, Transaction } from '@google-cloud/firestore'
 import { strict as assert } from "assert"
 import { basename, dirname } from "path"
-import { Item, SortedCollection, ReadableCollection } from "./incremental"
+import { Item, ReadableCollection } from "./incremental"
 
 export function pathToDocumentReference(db: Firestore, schema: string[], path: string[]): DocumentReference {
     assert.equal(path.length, schema.length)
@@ -48,7 +48,11 @@ export class DBCollection<V> implements ReadableCollection<V> {
         return this.validator(doc.data())
     }
 
-    async *enumerate(): AsyncIterable<Item<V>> {
+    enumerate(): AsyncIterable<Item<V>> {
+        return this.sortedEnumerate()
+    }
+
+    async *sortedEnumerate(): AsyncIterable<Item<V>> {
         const subDocs = await this.tx.get(this.db.collectionGroup(this.schema[this.schema.length - 1]))
         for (const doc of subDocs.docs) {
             yield [documentReferenceToPath(this.schema, doc.ref), this.validator(doc.data())]

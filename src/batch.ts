@@ -1,9 +1,11 @@
 import { DocumentData, Firestore, Transaction } from '@google-cloud/firestore'
 import { diff } from 'deep-diff'
 import { Request, Router } from 'express'
-import { derivedCollections, makeSavedCollections } from './collections'
-import { documentReferenceToPath, pathToCollectionReference, pathToDocumentReference } from './framework/db'
-import { Collection } from './framework/incremental'
+//import { derivedCollections, makeSavedCollections } from './collections'
+import { documentReferenceToPath, pathToCollectionReference, pathToDocumentReference, DBCollection } from './framework/db'
+import { inputCollections, pipeline, OutputCollectons } from './collections'
+import { Enumerable } from './framework/incremental'
+//import { Collection } from './framework/incremental'
 // import { Dictionary } from 'express-serve-static-core'
 // import admin from 'firebase-admin'
 // import { applyExportDiff, checkExport, upgradeExportMap } from './exports'
@@ -223,58 +225,36 @@ async function* listKeys2(db: Firestore, tx: Transaction, schema: string[]): Asy
 
 type BackwardsCheckCursor = {}
 
-export async function backwardsCheck(db: Firestore, cursor: BackwardsCheckCursor): Promise<BackwardsCheckCursor> {
+export async function check(db: Firestore, cursor: BackwardsCheckCursor): Promise<BackwardsCheckCursor> {
     await db.runTransaction(async (tx) => {
-        const saved = makeSavedCollections(db, tx)
-        const derived = derivedCollections(saved['v1.0-state'])
+        const output = pipeline(inputCollections(db, tx))
 
-        for (const collectionId in derived) {
-            if (!(collectionId in saved)) {
-                console.log('cant backwards check:', collectionId)
-                continue
-            }
+        for (const collectionIdStr in output) {
+            const collectionId = collectionIdStr as keyof OutputCollectons
+            console.log('checking:', collectionId)
 
-            console.log('backwards checking:', collectionId)
-            const expected = (derived as any)[collectionId] as Collection<unknown>
-            const actual = (saved as any)[collectionId] as Collection<unknown>
+            const expected = output[collectionId]
+            const actual = new DBCollection(db, tx, expected.schema, (x) => x)
 
-            await backwardsCheckCollections(expected, actual, cursor)
+            await checkCollections(expected, actual)
         }
     })
 
     return {}
 }
 
-export async function backwardsCheckCollections(
-    expected: Collection<unknown>, actual: Collection<unknown>, cursor: BackwardsCheckCursor): Promise<void> {
-    for await (const [key,] of actual.unsortedList()) {
+export async function checkCollections(
+    expected: Enumerable<unknown>, actual: Enumerable<unknown>): Promise<void> {
+    // Check backwards (all keys that do exist are expected).
+    for await (const [key,] of actual.enumerate()) {
         const res = await expected.get(key)
         if (res === null) {
             throw new Error(`unexpected key: ${key}`)
         }
     }
-}
 
-export async function forwardsCheck(db: Firestore, cursor: BackwardsCheckCursor): Promise<BackwardsCheckCursor> {
-    await db.runTransaction(async (tx) => {
-        const saved = makeSavedCollections(db, tx)
-        const derived = derivedCollections(saved['v1.0-state'])
-
-        for (const collectionId in derived) {
-            console.log('forwards checking:', collectionId)
-            const expected = (derived as any)[collectionId] as Collection<unknown>
-            const actual = (saved as any)[collectionId] as Collection<unknown>
-
-            await forwardsCheckCollections(expected, actual, cursor)
-        }
-    })
-
-    return {}
-}
-
-export async function forwardsCheckCollections(
-    expected: Collection<unknown>, actual: Collection<unknown>, cursor: BackwardsCheckCursor): Promise<void> {
-    for await (const [key, expectedValue] of expected.unsortedList()) {
+    // Check forwards (all expected keys exist and match).
+    for await (const [key, expectedValue] of expected.enumerate()) {
         const actualValue = await actual.get(key)
         const d = diff(expectedValue, actualValue)
 
@@ -287,16 +267,17 @@ Diff: ${JSON.stringify(d)}`)
 
 export async function backfill(db: Firestore, cursor: BackwardsCheckCursor): Promise<BackwardsCheckCursor> {
     await db.runTransaction(async (tx) => {
-        const saved = makeSavedCollections(db, tx)
-        const derived = derivedCollections(saved['v1.0-state'])
+        const output = pipeline(inputCollections(db, tx))
 
         const changes: [string[], string[], unknown][] = []
-        for (const collectionId in derived) {
+        for (const collectionIdStr in output) {
+            const collectionId = collectionIdStr as keyof OutputCollectons
             console.log('backfilling:', collectionId)
-            const expected = (derived as any)[collectionId] as Collection<unknown>
-            const actual = (saved as any)[collectionId] as Collection<unknown>
 
-            for await (const change of backfillCollection(expected, actual, cursor)) {
+            const expected = output[collectionId]
+            const actual = new DBCollection(db, tx, expected.schema, (x) => x)
+
+            for await (const change of backfillCollection(expected.schema, expected, actual)) {
                 changes.push(change)
             }
         }
@@ -310,31 +291,39 @@ export async function backfill(db: Firestore, cursor: BackwardsCheckCursor): Pro
 }
 
 export async function* backfillCollection(
-    expected: Collection<unknown>, actual: Collection<unknown>,
-    cursor: BackwardsCheckCursor): AsyncIterable<[string[], string[], unknown]> {
-    for await (const [path, expectedValue] of expected.unsortedList()) {
+    schema: string[],
+    expected: Enumerable<unknown>, actual: Enumerable<unknown>): AsyncIterable<[string[], string[], unknown]> {
+    for await (const [path, expectedValue] of expected.enumerate()) {
         const actualValue = await actual.get(path)
 
         if (actualValue === null) {
-            yield [expected.schema, path, expectedValue]
+            yield [schema, path, expectedValue]
         }
     }
+}
+
+type DeleteRequest = {
+    collectionId: string
+}
+
+async function deleteCollection(db: Firestore, req: DeleteRequest): Promise<{}> {
+    console.log('deleting: ', req.collectionId)
+    await db.runTransaction(async (tx) => {
+        const list = await tx.get(db.collectionGroup(req.collectionId))
+        for (const doc of list.docs) {
+            console.log(doc.ref.path)
+//            tx.delete(doc.ref)
+        }
+    })
+    return {}
 }
 
 function batch(db: Firestore): Router {
     const res = Router()
 
-    res.post('/backwards-check', function(_req: Request<{}>, res, next) {
+    res.post('/check', function(_req: Request<{}>, res, next) {
         const cursor = _req.body as BackwardsCheckCursor
-        backwardsCheck(db, cursor).then(result => {
-            res.status(200)
-            res.json(result)
-        }).catch(next)
-    })
-
-    res.post('/forwards-check', function(_req: Request<{}>, res, next) {
-        const cursor = _req.body as BackwardsCheckCursor
-        forwardsCheck(db, cursor).then(result => {
+        check(db, cursor).then(result => {
             res.status(200)
             res.json(result)
         }).catch(next)
@@ -343,6 +332,13 @@ function batch(db: Firestore): Router {
     res.post('/backfill', function(_req: Request<{}>, res, next) {
         const cursor = _req.body as BackwardsCheckCursor
         backfill(db, cursor).then(result => {
+            res.status(200)
+            res.json(result)
+        }).catch(next)
+    })
+
+    res.post('/delete-collection/:collectionId', function(req: Request<DeleteRequest>, res, next) {
+        deleteCollection(db, req.params).then(result => {
             res.status(200)
             res.json(result)
         }).catch(next)
