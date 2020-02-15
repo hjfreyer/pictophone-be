@@ -40,7 +40,7 @@ export interface ReduceFn<I, O> {
 export type Op<S, T> = InputOp<SingleType<S, T>>
     | MapOp<S, any, T>
     | TransposeOp<S, T>
-    | ReduceOp<S, unknown, T>
+    | ReduceOp<S, any, T>
     | ReschemaOp<S, T>
     | SortOp<S, T>
 
@@ -150,7 +150,11 @@ export class Processor {
             const outputValues = op.fn(inputKey, inputValue)
             outputValues.sort(([a,], [b,]) => lexCompare(a, b))
             for (const [extraPath, mappedValue] of outputValues) {
-                yield [[...inputKey, ...extraPath], mappedValue]
+                const outputKey = [...inputKey, ...extraPath]
+                if (lexCompare(startAt, outputKey) <= 0) {
+                    // startAt <= outputKey
+                    yield [outputKey, mappedValue]
+                }
             }
         }
     }
@@ -266,7 +270,7 @@ export class Processor {
         sortedDiffs.sort((a, b) => lexCompare(a.key, b.key))
 
         const batchedDiffs = batchStreamBy(toStream(sortedDiffs),
-            (d) => d.key.slice(op.newSchema.length),
+            (d) => d.key.slice(0, op.newSchema.length),
             lexCompare)
 
         const res: Diff<O>[] = []
@@ -275,6 +279,11 @@ export class Processor {
             const newBatchInput = await toArray(patch(
                 this.listWithPrefix(op.input, outputKey),
                 batchDiffs))
+
+            // console.log('batch')
+            // console.log(outputKey)
+            // console.log(oldBatchInput)
+            // console.log(newBatchInput)
 
             if (_.isEmpty(oldBatchInput) && _.isEmpty(newBatchInput)) {
                 throw new Error("something went wrong")
@@ -302,7 +311,7 @@ export class Processor {
                 })
             }
         }
-
+    // console.log(res)
         return res
     }
 

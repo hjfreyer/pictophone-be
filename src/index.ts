@@ -7,7 +7,7 @@ import { Dictionary, Request } from 'express-serve-static-core'
 import admin from 'firebase-admin'
 import uuid from 'uuid/v1'
 import batch from './batch'
-import { InputCollections, inputCollections, pipeline, INPUT_OP, COLLECTION_GRAPH, INPUT_ID } from './collections'
+import { InputCollections, inputCollections, pipeline, INPUT_OP, INPUT_ID, getCollections } from './collections'
 import GetConfig from './config'
 import { DBCollection, pathToDocumentReference, DBHelper } from './framework/db'
 import { Diff, Op, Processor, getSchema } from './framework/graph'
@@ -319,11 +319,17 @@ async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise
 
         const state1_0Diffs = await reactTo(p, action, INPUT_OP)
 
-        new DBHelper(db, tx, INPUT_ID, getSchema(INPUT_OP)).applyDiffs(state1_0Diffs)
-        for (const collectionId in COLLECTION_GRAPH) {
-            const op = COLLECTION_GRAPH[collectionId as keyof typeof COLLECTION_GRAPH]
-            const diffs = await p.reactTo(op, state1_0Diffs)
-            new DBHelper(db, tx, collectionId, getSchema(op)).applyDiffs(diffs)
+        const outputDiffs: [string, string[], Diff<DocumentData>[]][] = [
+            [INPUT_ID, getSchema(INPUT_OP), state1_0Diffs]]
+        const output = getCollections()
+
+        for (const collectionId in output) {
+            const op = output[collectionId]
+            outputDiffs.push([collectionId, getSchema(op), await p.reactTo(op, state1_0Diffs)])
+        }
+
+        for (const [collectionId, schema, diffs] of outputDiffs) {
+            new DBHelper(db, tx, collectionId, schema).applyDiffs(diffs)
         }
     })
 }

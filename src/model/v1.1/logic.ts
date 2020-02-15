@@ -8,6 +8,8 @@ import { Index as PreviousModel } from '../v1.0'
 
 import { Diff, Item, Mapper, Enumerable, MappedEnumerable, TransposedEnumerable, Reactive, MappedReactive, TransposedReactive, Reducer, ReducedQueryable, Queryable, DowngradedQueryable } from '../../framework/incremental'
 import { VERSION } from '.'
+import { Op } from '../../framework/graph'
+import validator from '../validator'
 
 
 
@@ -99,6 +101,12 @@ class ExportMapper implements Mapper<State, Export> {
     }
 }
 
+function highlander<V>(baseKey: string[], items: Item<V>[]): V {
+        if (items.length != 1) {
+            throw new Error(`There can be only one; ${baseKey} had ${items.length}`)
+        }
+        return items[0][1]
+    }
 class HighlanderReducer<V> implements Reducer<V, V> {
     constructor(public reduceDims: number) { }
 
@@ -120,6 +128,43 @@ export function upgradeAction(action: PreviousAction): Action {
     return {
         ...action,
         version: 'v1.1',
+    }
+}
+
+export function upgradeState<S>(input: Op<S, PreviousState>): Op<S, State> {
+    const byUniverseGame: Op<S, State> = {
+        kind: 'map',
+        input,
+        subSchema: ['game'],
+        fn(_path: string[], root: PreviousState): Item<State>[] {
+            const res: Item<State>[] = []
+            for (const gameId in root.players) {
+                res.push([[gameId], {
+                    version: VERSION,
+                    kind: "game",
+                    gameId,
+                    players: root.players[gameId],
+                }])
+            }
+            return res
+        }
+    }
+    const byGameUniverse: Op<S, State> = {
+        kind: 'transpose',
+        input: byUniverseGame,
+        permutation: [1, 0],
+    }
+    const sorted : Op<S, State> = {
+        kind: 'sort',
+        input: byGameUniverse,
+        collectionId: 'v1.1-state-sort',
+        validator: validator('v1.1', 'State'),
+    }
+    return {
+        kind: 'reduce',
+        input: sorted,
+        newSchema: ['game'],
+        fn: highlander
     }
 }
 

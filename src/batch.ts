@@ -3,7 +3,7 @@ import { diff } from 'deep-diff'
 import { Request, Router } from 'express'
 //import { derivedCollections, makeSavedCollections } from './collections'
 import { documentReferenceToPath, pathToCollectionReference, pathToDocumentReference, DBCollection, DBHelper } from './framework/db'
-import { inputCollections, pipeline, OutputCollectons, COLLECTION_GRAPH } from './collections'
+import { inputCollections, pipeline, OutputCollectons, getCollections } from './collections'
 import { Enumerable } from './framework/incremental'
 import { Processor, Op, getSchema } from './framework/graph'
 import _ from 'lodash'
@@ -230,10 +230,9 @@ type BackwardsCheckCursor = {}
 export async function check(db: Firestore, cursor: BackwardsCheckCursor): Promise<BackwardsCheckCursor> {
     await db.runTransaction(async (tx) => {
         const p = new Processor(db, tx)
-        const output = COLLECTION_GRAPH
+        const output = getCollections()
 
-        for (const collectionIdStr in output) {
-            const collectionId = collectionIdStr as keyof typeof COLLECTION_GRAPH
+        for (const collectionId in output) {
             console.log('checking:', collectionId)
 
             const expected = output[collectionId]
@@ -256,7 +255,7 @@ export async function checkCollections(
     expected: Op<unknown, unknown>, actual: Op<unknown, unknown>): Promise<void> {
     // Check backwards (all keys that do exist are expected).
     for await (const [key,] of p.list(actual, getSchema(actual).map(() => ''))) {
-        const res = await p.get(expected, key)
+        const res = await p.get(expected, key)    
         if (res === null) {
             throw new Error(`unexpected key: ${key}`)
         }
@@ -268,7 +267,7 @@ export async function checkCollections(
         const d = diff(expectedValue, actualValue)
 
         if (d) {
-            throw new Error(`for key ${key}, expected ${JSON.stringify(expectedValue)}; got ${JSON.stringify(actualValue)}.
+            throw new Error(`for key "${key}": expected ${JSON.stringify(expectedValue)}; got ${JSON.stringify(actualValue)}.
 Diff: ${JSON.stringify(d)}`)
         }
     }
@@ -277,11 +276,10 @@ Diff: ${JSON.stringify(d)}`)
 export async function backfill(db: Firestore, cursor: BackwardsCheckCursor): Promise<BackwardsCheckCursor> {
     await db.runTransaction(async (tx) => {
         const p = new Processor(db, tx)
-        const output = COLLECTION_GRAPH
+        const output = getCollections()
 
         const changes: [string, string[], string[], unknown][] = []
-        for (const collectionIdStr in output) {
-            const collectionId = collectionIdStr as keyof typeof COLLECTION_GRAPH
+        for (const collectionId in output) {
             console.log('backfilling:', collectionId)
 
             const expected = output[collectionId]

@@ -6,6 +6,7 @@ import validator from "./model/validator";
 import { DBCollection } from "./framework/db";
 import { InputOp, Op } from "./framework/graph";
 import { exportMapper } from "./model/v1.0/logic";
+import { upgradeState } from "./model/v1.1/logic";
 
 type Indexes = {
     'v1.0': import('./model/v1.0').Index
@@ -14,20 +15,53 @@ type Indexes = {
 
 // Graph based.
 
-export const S1_0 : InputOp<Indexes['v1.0']['State']> = {
+export const S1_0: InputOp<Indexes['v1.0']['State']> = {
     kind: "input",
     schema: ['universe'],
     collectionId: 'v1.0-state',
     validator: validator('v1.0', 'State')
 }
 
-export const E1_0 : Op<Indexes['v1.0']['State'], Indexes['v1.0']['Export']> = exportMapper(S1_0)
+export const E1_0: Op<Indexes['v1.0']['State'], Indexes['v1.0']['Export']> = exportMapper(S1_0)
 
-export const COLLECTION_GRAPH = {
-    'v1.0-exports': E1_0
+export const S1_1: Op<Indexes['v1.0']['State'], Indexes['v1.1']['State']> = upgradeState(S1_0)
+
+
+const COLLECTION_GRAPH = {
+    'v1.0-exports': E1_0,
+    'v1.1-state': S1_1,
 }
 export const INPUT_ID = 'v1.0-state'
-export const INPUT_OP : Op<Indexes['v1.0']['State'], Indexes['v1.0']['State']> = S1_0 
+export const INPUT_OP: Op<Indexes['v1.0']['State'], Indexes['v1.0']['State']> = S1_0
+
+export function getCollections(): Record<string, Op<Indexes['v1.0']['State'], any>> {
+    let res: Record<string, Op<Indexes['v1.0']['State'], any>> = {
+        ...COLLECTION_GRAPH,
+    }
+
+    for (const cid in COLLECTION_GRAPH) {
+        res = {
+            ...res, 
+            ...findSorts<Indexes['v1.0']['State'], any>(COLLECTION_GRAPH[cid as keyof typeof COLLECTION_GRAPH])
+        }
+    }
+
+    return res
+}
+
+function findSorts<S, T>(op: Op<S, T>): Record<string, Op<S, any>> {
+    switch (op.kind) {
+        case 'input':
+            return {}
+        case 'sort':
+            return { ...findSorts(op.input), [op.collectionId]: op.input }
+        case 'map':
+        case 'reduce':
+        case 'reschema':
+        case 'transpose':
+            return findSorts(op.input)
+    }
+}
 
 // Collection-based below.
 
