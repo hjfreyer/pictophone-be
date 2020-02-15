@@ -2,9 +2,11 @@ import { DocumentData, Firestore, Transaction } from '@google-cloud/firestore'
 import { diff } from 'deep-diff'
 import { Request, Router } from 'express'
 //import { derivedCollections, makeSavedCollections } from './collections'
-import { documentReferenceToPath, pathToCollectionReference, pathToDocumentReference, DBCollection } from './framework/db'
-import { inputCollections, pipeline, OutputCollectons } from './collections'
+import { documentReferenceToPath, pathToCollectionReference, pathToDocumentReference, DBCollection, DBHelper } from './framework/db'
+import { inputCollections, pipeline, OutputCollectons, COLLECTION_GRAPH } from './collections'
 import { Enumerable } from './framework/incremental'
+import { Processor, Op, getSchema } from './framework/graph'
+import _ from 'lodash'
 //import { Collection } from './framework/incremental'
 // import { Dictionary } from 'express-serve-static-core'
 // import admin from 'firebase-admin'
@@ -227,16 +229,22 @@ type BackwardsCheckCursor = {}
 
 export async function check(db: Firestore, cursor: BackwardsCheckCursor): Promise<BackwardsCheckCursor> {
     await db.runTransaction(async (tx) => {
-        const output = pipeline(inputCollections(db, tx))
+        const p = new Processor(db, tx)
+        const output = COLLECTION_GRAPH
 
         for (const collectionIdStr in output) {
-            const collectionId = collectionIdStr as keyof OutputCollectons
+            const collectionId = collectionIdStr as keyof typeof COLLECTION_GRAPH
             console.log('checking:', collectionId)
 
             const expected = output[collectionId]
-            const actual = new DBCollection(db, tx, expected.schema, (x) => x)
+            const actual: Op<unknown, unknown> = {
+                kind: 'input',
+                schema: getSchema(output[collectionId]),
+                collectionId,
+                validator: (x) => x,
+            }// new DBCollection(db, tx, expected.schema, (x) => x)
 
-            await checkCollections(expected, actual)
+            await checkCollections(p, expected, actual)
         }
     })
 
@@ -244,18 +252,19 @@ export async function check(db: Firestore, cursor: BackwardsCheckCursor): Promis
 }
 
 export async function checkCollections(
-    expected: Enumerable<unknown>, actual: Enumerable<unknown>): Promise<void> {
+    p: Processor,
+    expected: Op<unknown, unknown>, actual: Op<unknown, unknown>): Promise<void> {
     // Check backwards (all keys that do exist are expected).
-    for await (const [key,] of actual.enumerate()) {
-        const res = await expected.get(key)
+    for await (const [key,] of p.list(actual, getSchema(actual).map(() => ''))) {
+        const res = await p.get(expected, key)
         if (res === null) {
             throw new Error(`unexpected key: ${key}`)
         }
     }
 
     // Check forwards (all expected keys exist and match).
-    for await (const [key, expectedValue] of expected.enumerate()) {
-        const actualValue = await actual.get(key)
+    for await (const [key, expectedValue] of p.list(expected, getSchema(expected).map(() => ''))) {
+        const actualValue = await p.get(actual, key)
         const d = diff(expectedValue, actualValue)
 
         if (d) {
@@ -267,23 +276,29 @@ Diff: ${JSON.stringify(d)}`)
 
 export async function backfill(db: Firestore, cursor: BackwardsCheckCursor): Promise<BackwardsCheckCursor> {
     await db.runTransaction(async (tx) => {
-        const output = pipeline(inputCollections(db, tx))
+        const p = new Processor(db, tx)
+        const output = COLLECTION_GRAPH
 
-        const changes: [string[], string[], unknown][] = []
+        const changes: [string, string[], string[], unknown][] = []
         for (const collectionIdStr in output) {
-            const collectionId = collectionIdStr as keyof OutputCollectons
+            const collectionId = collectionIdStr as keyof typeof COLLECTION_GRAPH
             console.log('backfilling:', collectionId)
 
             const expected = output[collectionId]
-            const actual = new DBCollection(db, tx, expected.schema, (x) => x)
+            const actual: Op<unknown, unknown> = {
+                kind: 'input',
+                schema: getSchema(output[collectionId]),
+                collectionId,
+                validator: (x) => x,
+            }
 
-            for await (const change of backfillCollection(expected.schema, expected, actual)) {
+            for await (const change of backfillCollection(p, collectionId, expected, actual)) {
                 changes.push(change)
             }
         }
 
-        for (const [schema, path, value] of changes) {
-            tx.set(pathToDocumentReference(db, schema, path), value as DocumentData)
+        for (const [collectionId, schema, path, value] of changes) {
+            new DBHelper(db, tx, collectionId, schema).set(path, value as DocumentData)
         }
     })
 
@@ -291,13 +306,14 @@ export async function backfill(db: Firestore, cursor: BackwardsCheckCursor): Pro
 }
 
 export async function* backfillCollection(
-    schema: string[],
-    expected: Enumerable<unknown>, actual: Enumerable<unknown>): AsyncIterable<[string[], string[], unknown]> {
-    for await (const [path, expectedValue] of expected.enumerate()) {
-        const actualValue = await actual.get(path)
+    p: Processor,
+    collectionId: string,
+    expected: Op<unknown, unknown>, actual: Op<unknown, unknown>): AsyncIterable<[string, string[], string[], unknown]> {
+    for await (const [path, expectedValue] of p.enumerate(expected)) {
+        const actualValue = await p.get(actual, path)
 
         if (actualValue === null) {
-            yield [schema, path, expectedValue]
+            yield [collectionId, getSchema(expected), path, expectedValue]
         }
     }
 }
@@ -312,7 +328,7 @@ async function deleteCollection(db: Firestore, req: DeleteRequest): Promise<{}> 
         const list = await tx.get(db.collectionGroup(req.collectionId))
         for (const doc of list.docs) {
             console.log(doc.ref.path)
-//            tx.delete(doc.ref)
+            //            tx.delete(doc.ref)
         }
     })
     return {}

@@ -23,6 +23,12 @@ export const S1_0 : InputOp<Indexes['v1.0']['State']> = {
 
 export const E1_0 : Op<Indexes['v1.0']['State'], Indexes['v1.0']['Export']> = exportMapper(S1_0)
 
+export const COLLECTION_GRAPH = {
+    'v1.0-exports': E1_0
+}
+export const INPUT_ID = 'v1.0-state'
+export const INPUT_OP : Op<Indexes['v1.0']['State'], Indexes['v1.0']['State']> = S1_0 
+
 // Collection-based below.
 
 

@@ -7,10 +7,11 @@ import { Dictionary, Request } from 'express-serve-static-core'
 import admin from 'firebase-admin'
 import uuid from 'uuid/v1'
 import batch from './batch'
-import { InputCollections, inputCollections, pipeline } from './collections'
+import { InputCollections, inputCollections, pipeline, INPUT_OP, COLLECTION_GRAPH, INPUT_ID } from './collections'
 import GetConfig from './config'
-import { DBCollection, pathToDocumentReference } from './framework/db'
-import { Diff, Item, ReadableCollection, WriteableCollection, MappedEnumerable, MappedReactive, CombinedWriteable, EchoReactive } from './framework/incremental'
+import { DBCollection, pathToDocumentReference, DBHelper } from './framework/db'
+import { Diff, Op, Processor, getSchema } from './framework/graph'
+import { Item, ReadableCollection, WriteableCollection, MappedEnumerable, MappedReactive, CombinedWriteable, EchoReactive } from './framework/incremental'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
 import * as v1_0 from './model/v1.0'
@@ -239,22 +240,22 @@ const checkState = {
 
 
 
-function applyDiffs<V>(db: Firestore, tx: Transaction, schema: string[], diffs: Item<Diff<V>>[]): void {
-    for (const [path, diff] of diffs) {
-        const docRef = pathToDocumentReference(db, schema, path)
-        switch (diff.kind) {
-            case 'delete':
-                tx.delete(docRef)
-                break
-            case 'add':
-                tx.set(docRef, diff.value as DocumentData)
-                break
-            case 'replace':
-                tx.set(docRef, diff.newValue as DocumentData)
-                break
-        }
-    }
-}
+// function applyDiffs<V>(db: Firestore, tx: Transaction, schema: string[], diffs: Diff<V>[]): void {
+//     for (const diff of diffs) {
+//         const docRef = pathToDocumentReference(db, schema, diff.key)
+//         switch (diff.kind) {
+//             case 'delete':
+//                 tx.delete(docRef)
+//                 break
+//             case 'add':
+//                 tx.set(docRef, diff.value as DocumentData)
+//                 break
+//             case 'replace':
+//                 tx.set(docRef, diff.newValue as DocumentData)
+//                 break
+//         }
+//     }
+// }
 
 // const doTheRootThing: Mapper<AnyState, AnyState> = (path, value): Item<AnyState>[] => {
 //     return [[['singleton'], value]]
@@ -292,32 +293,37 @@ function applyDiffs<V>(db: Firestore, tx: Transaction, schema: string[], diffs: 
 //     }
 // }
 
-async function reactTo(action: v1_0.Action, inputs: InputCollections): Promise<Item<Diff<v1_0.State>>[]> {
-    const maybeState = await inputs['v1.0-state'].get(['root'])
+async function reactTo(
+    p: Processor,
+    action: v1_0.Action,
+    input: Op<Indexes['v1.0']['State'], Indexes['v1.0']['State']>): Promise<Diff<v1_0.State>[]> {
+    const maybeState = await p.get(input, ['root'])
     const state = maybeState || v1_0.initState()
 
     const newState = v1_0.integrate(state, action)
 
-    return [[['root'], maybeState !== null
-        ? { kind: 'replace', oldValue: state, newValue: newState }
-        : { kind: 'add', value: newState }]]
+    return [maybeState !== null
+        ? { kind: 'replace', key: ['root'], oldValue: state, newValue: newState }
+        : { kind: 'add', key: ['root'], value: newState }]
+}
+
+function applyDiffs(db: Firestore, tx: Transaction, collectionId: string, schema: string[], diffs: Diff<DocumentData>[]): void {
+    new DBHelper(db, tx, collectionId, schema).applyDiffs(diffs)
 }
 
 async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise<void> {
     const action = validator('v1.0', 'Action')(body)
 
     await db.runTransaction(async (tx: Transaction): Promise<void> => {
-        const inputs = inputCollections(db, tx)
-        const outputs = pipeline(inputs)
+        const p = new Processor(db, tx)
 
-        const state1_0Diffs = await reactTo(action, inputs)
+        const state1_0Diffs = await reactTo(p, action, INPUT_OP)
 
-        applyDiffs(db, tx, inputs['v1.0-state'].schema, state1_0Diffs)
-        for (const collectionId in outputs) {
-            const diffs =
-                await outputs[collectionId as keyof typeof outputs].reactTo(state1_0Diffs)
-            applyDiffs<unknown>(db, tx,
-                outputs[collectionId as keyof typeof outputs].schema, diffs)
+        new DBHelper(db, tx, INPUT_ID, getSchema(INPUT_OP)).applyDiffs(state1_0Diffs)
+        for (const collectionId in COLLECTION_GRAPH) {
+            const op = COLLECTION_GRAPH[collectionId as keyof typeof COLLECTION_GRAPH]
+            const diffs = await p.reactTo(op, state1_0Diffs)
+            new DBHelper(db, tx, collectionId, getSchema(op)).applyDiffs(diffs)
         }
     })
 }

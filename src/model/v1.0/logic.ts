@@ -83,7 +83,7 @@ export function exportMapper<S>(input: Op<S, State>): Op<S, Export> {
     return {
         kind: 'map',
         input,
-        subSchema: ['game', 'player'],
+        subSchema: ['player', 'game'],
         fn(_path: string[], state: State): Item<Export>[] {
             const res: Item<Export>[] = []
             for (const gameId in state.players) {
