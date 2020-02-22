@@ -1,9 +1,17 @@
 
-import {Index as v1_0} from './v1.0'
-import {Index as v1_1} from './v1.1'
+export interface JoinGameAction1_0 {
+    version: '1.0'
+    kind: 'join_game'
+    gameId: string
+    playerId: string
+}
 
-export type AnyIndex = v1_0 | v1_1
+export type Action1_0 = JoinGameAction1_0
 
-export type AnyAction = AnyIndex['Action']
-export type AnyState = AnyIndex['State']
-export type AnyExport = AnyIndex['Export']
+export interface Game1_0 {
+    players: string[]
+}
+
+export type State1_0 = Game1_0
+
+export type AnyAction = Action1_0

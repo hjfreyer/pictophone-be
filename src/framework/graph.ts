@@ -1,8 +1,8 @@
 import { Firestore, Transaction } from "@google-cloud/firestore"
-import { DBCollection, DBHelper } from "./db"
-import deepEqual = require("deep-equal")
+import deepEqual from "deep-equal"
 import _ from 'lodash'
-import { lexCompare, toStream, batchStreamBy, streamTakeWhile, keyStartsWith, toArray } from "../util"
+import { batchStreamBy, keyStartsWith, lexCompare, streamTakeWhile, toArray, toStream } from "../util"
+import { DBHelper } from "./db"
 
 export type Item<V> = [string[], V]
 
@@ -159,33 +159,6 @@ export class Processor {
         }
     }
 
-    // // private async *mapEnumerate<S, I, O>(op: MapOp<S, I, O>): AsyncIterable<Item<O>> {
-    // //     for await (const [inputKey, inputValue] of this.enumerate(op.input)) {
-    // //         const outputValues = op.fn(inputKey, inputValue)
-    // //         for (const [extraPath, mappedValue] of outputValues) {
-    // //             yield [[...inputKey, ...extraPath], mappedValue]
-    // //         }
-    // //     }
-    // // }
-
-    // // private async mapGet<S, I, O>(op: MapOp<S, I, O>, key: string[]): Promise<O | null> {
-    // //     const inputKey = key.slice(0, key.length - op.subSchema.length)
-    // //     const inputValue = await this.get(op.input, inputKey)
-
-    // //     if (inputValue === null) {
-    // //         return null
-    // //     }
-
-    // //     const outputValues = op.fn(inputKey, inputValue)
-
-    // //     for (const [extraPath, value] of outputValues) {
-    // //         if (deepEqual(key, [...inputKey, ...extraPath])) {
-    // //             return value
-    // //         }
-    // //     }
-    // //     return null
-    // // }
-
     private async mapReact<S, I, O>(op: MapOp<S, I, O>, diffs: Diff<S>[]): Promise<Diff<O>[]> {
         const inputDiffs = await this.reactTo(op.input, diffs)
         const unflattened = inputDiffs.map(diff => this.mapReactSingleDiff(op, diff))
@@ -280,11 +253,6 @@ export class Processor {
                 this.listWithPrefix(op.input, outputKey),
                 batchDiffs))
 
-            // console.log('batch')
-            // console.log(outputKey)
-            // console.log(oldBatchInput)
-            // console.log(newBatchInput)
-
             if (_.isEmpty(oldBatchInput) && _.isEmpty(newBatchInput)) {
                 throw new Error("something went wrong")
             }
@@ -311,30 +279,8 @@ export class Processor {
                 })
             }
         }
-    // console.log(res)
         return res
     }
-
-    // private async *reduceEnumerate<S, I, O>(op: ReduceOp<S, I, O>): AsyncIterable<Item<O>> {
-    //     const batched = batchStream(this.sortedEnumerate(op.input), op.newSchema.length)
-    //     for await (const batch of batched) {
-    //         yield [batch.batchKey, op.fn(batch.batchKey, batch.items)]
-    //     }
-    // }
-
-    // private async reduceGet<S, I, O>(op: ReduceOp<S, I, O>, key: string[]): Promise<O | null> {
-    //     const qualified = qualify(key, this.query(op.input, key))
-    //     const results: Item<I>[] = []
-    //     for await (const r of qualified) {
-    //         results.push(r)
-    //     }
-
-    //     if (results.length === 0) {
-    //         return null
-    //     }
-
-    //     return op.fn(key, results)
-    // }
 
     // Transpose.
     private async *transposeList<S, T>(op: TransposeOp<S, T>, startAt: string[]): AsyncIterable<Item<T>> {
@@ -351,38 +297,6 @@ export class Processor {
             key: permute(op.permutation, diff.key),
         }))
     }
-
-    // private async *transposeEnumerate<S, T>(op: TransposeOp<S, T>): AsyncIterable<Item<T>> {
-    //     for await (const [inputPath, value] of this.enumerate(op.input)) {
-    //         yield [permute(op.permutation, inputPath), value]
-    //     }
-    // }
-
-    // private async transposeGet<S, T>(op: TransposeOp<S, T>, key: string[]): Promise<T | null> {
-    //     return this.get(op.input, permute(invertPermutation(op.permutation), key))
-    // }
-
-    // Sorted
-    // private async sortedGet<S, T>(op: SortedOp<S, T>, key: string[]): Promise<T | null> {
-    //     const db = new DBHelper(this.db, this.tx, op.collectionId, getSchema(op))
-    //     const res = await db.get(key)
-    //     if (res === null) {
-    //         return null
-    //     }
-    //     return op.validator(res)
-    // }
-
-    // private async *query<S, T>(op: SortedOp<S, T>, key: string[]): AsyncIterable<Item<T>> {
-    //     const db = new DBCollection(this.db, this.tx,
-    //         toDbSchema(getSchema(op), op.collectionId), op.validator)
-    //     return db.query(key)
-    // }
-
-    // private async *sortedEnumerate<S, T>(op: SortedOp<S, T>): AsyncIterable<Item<T>> {
-    //     const db = new DBCollection(this.db, this.tx,
-    //         toDbSchema(getSchema(op), op.collectionId), op.validator)
-    //     return db.sortedEnumerate()
-    // }
 }
 
 
@@ -460,8 +374,6 @@ async function* merge<T>(input: AsyncIterable<Item<T>>, diffs: AsyncIterable<Dif
     }
 }
 
-
-
 async function* validate<T>(validator: (u: unknown) => T,
     input: AsyncIterable<Item<unknown>>): AsyncIterable<Item<T>> {
     for await (const [key, value] of input) {
@@ -526,7 +438,6 @@ async function* qualify<T>(baseKey: string[], inputs: AsyncIterable<Item<T>>): A
         yield [[...baseKey, ...key], value]
     }
 }
-
 
 type Batch<T> = {
     batchKey: string[]
