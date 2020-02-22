@@ -3,6 +3,7 @@ import deepEqual from "deep-equal"
 import _ from 'lodash'
 import { batchStreamBy, keyStartsWith, lexCompare, streamTakeWhile, toArray, toStream } from "../util"
 import { DBHelper } from "./db"
+import { strict as assert } from 'assert'
 
 export type Item<V> = [string[], V]
 
@@ -92,7 +93,7 @@ export class Processor {
             case "input":
             case "sort":
                 const db = new DBHelper(this.db, this.tx, op.collectionId, getSchema(op))
-                return validate(op.validator, db.list(startAt))
+                return validateStream(op.validator, db.list(startAt))
             case "map":
                 return this.mapList(op, startAt)
             case "reduce":
@@ -374,10 +375,51 @@ async function* merge<T>(input: AsyncIterable<Item<T>>, diffs: AsyncIterable<Dif
     }
 }
 
-async function* validate<T>(validator: (u: unknown) => T,
+async function* validateStream<T>(validator: (u: unknown) => T,
     input: AsyncIterable<Item<unknown>>): AsyncIterable<Item<T>> {
     for await (const [key, value] of input) {
         yield [key, validator(value)]
+    }
+}
+
+export function validateOp<S, T>(op: Op<S, T>): void {
+    switch (op.kind) {
+        case "input":
+            break
+        case "map":
+            validateOp(op.input)
+            break
+        case "reduce": {
+            validateOp(op.input)
+            const inputSchema = getSchema(op.input)
+            const inputOrder = getOrder(op.input)
+            for (let idx = 0; idx < op.newSchema.length; idx++) {
+                assert.equal(inputSchema[idx], op.newSchema[idx])
+                assert.equal(inputOrder[idx], idx)
+            }
+
+
+            break
+        }
+        case "transpose": {
+            validateOp(op.input)
+            assert.equal(op.permutation.length, getSchema(op.input).length)
+            const covered = new Set<number>()
+            for (const num of op.permutation) {
+                if (covered.has(num) || num < 0 || op.permutation.length <= num) {
+                    assert.fail(`not a permutation: ${op.permutation}`)
+                }
+                covered.add(num)
+            }
+            break
+        }
+        case "reschema":
+            validateOp(op.input)
+            assert.equal(op.newSchema.length, getSchema(op.input).length)
+            break
+        case "sort":
+            validateOp(op.input)
+            break
     }
 }
 

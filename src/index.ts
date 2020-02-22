@@ -1,4 +1,4 @@
-import { DocumentData, Firestore, Transaction } from '@google-cloud/firestore'
+import { DocumentData, Transaction } from '@google-cloud/firestore'
 import { Storage } from '@google-cloud/storage'
 import cors from 'cors'
 import express from 'express'
@@ -6,11 +6,11 @@ import { Dictionary, Request } from 'express-serve-static-core'
 import admin from 'firebase-admin'
 import uuid from 'uuid/v1'
 import batch from './batch'
-import { getCollections, INPUT_ID, INPUT_OP } from './collections'
+import { COLLECTION_GRAPH, getCollections, InputType, INPUT_ID, INPUT_OP } from './collections'
 import GetConfig from './config'
 import { DBHelper } from './framework/db'
 import { Diff, getSchema, Op, Processor } from './framework/graph'
-import { Action1_0, Game1_0, State1_0 } from './model'
+import { Action1_1, AnyAction } from './model'
 import { validate as validateModel } from './model/index.validator'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
@@ -32,37 +32,94 @@ app.listen(port, function() {
     console.log(`Example app listening on port ${port}!`)
 })
 
-export function integrate1_0(acc: Game1_0 | null, action: Action1_0): State1_0 {
-    acc = acc || {            players: []        }
+export type ActionType = Action1_1
 
-    if (acc.players.indexOf(action.playerId) !== -1) {
-        return acc
+function upgradeAction(a: AnyAction): ActionType {
+    switch (a.version) {
+        case "1.0":
+            return {
+                version: '1.1',
+                kind: 'join_game',
+                gameId: a.gameId,
+                playerId: a.playerId,
+                createIfNecessary: true,
+            }
     }
-    return {
-        players: [...acc.players, action.playerId]
+}
+
+export function integrate(
+    game: InputType | null,
+    shortCodeInUse: {} | null,
+    a: ActionType): InputType | null {
+    switch (a.kind) {
+        case 'create_game':
+            if (game !== null) {
+                // Don't create already created game.
+                return game
+            }
+            if (shortCodeInUse !== null) {
+                return null
+            }
+            return {
+                players: [],
+                shortCode: a.shortCode,
+            }
+        case 'join_game':
+            if (game === null) {
+                if (a.createIfNecessary) {
+                    return {
+                        players: [a.playerId],
+                        shortCode: ''
+                    }
+                } else {
+                    return null
+                }
+            }
+
+            if (game.players.indexOf(a.playerId) !== -1) {
+                return game
+            }
+            return {
+                ...game,
+                players: [...game.players, a.playerId],
+            }
     }
 }
 
 async function reactTo(
     p: Processor,
-    action: Action1_0,
-    input: Op<State1_0, State1_0>): Promise<Diff<State1_0>[]> {
-        const key = [action.gameId]
-    const maybeState = await p.get(input,key)
-    const newState = integrate1_0(maybeState, action)
+    action: ActionType,
+    input: Op<InputType, InputType>,
+    shortCodes: Op<InputType, {}>): Promise<Diff<InputType>[]> {
+    const gameKey = [action.gameId]
+    const maybeGame = await p.get(input, gameKey)
+    let maybeShortCodeInUse: {} | null = null
 
-    return [maybeState !== null
-        ? { kind: 'replace', key, oldValue: maybeState, newValue: newState }
-        : { kind: 'add', key, value: newState }]
+    if (action.kind === 'create_game') {
+        maybeShortCodeInUse = await p.get(shortCodes, [action.shortCode])
+    }
+    const newGame = integrate(maybeGame, maybeShortCodeInUse, action)
+
+    if (maybeGame === null) {
+        return newGame === null
+            ? []
+            : [{ kind: 'add', key: gameKey, value: newGame }]
+    } else {
+        return newGame === null
+            ? [{ kind: 'delete', key: gameKey, value: maybeGame }]
+            : [{ kind: 'replace', key: gameKey, oldValue: maybeGame, newValue: newGame }]
+    }
 }
 
 async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise<void> {
-    const action = validateModel('AnyAction')(body)
+    const anyAction = validateModel('AnyAction')(body)
+    const action = upgradeAction(anyAction)
 
     await db.runTransaction(async (tx: Transaction): Promise<void> => {
         const p = new Processor(db, tx)
 
-        const state1_0Diffs = await reactTo(p, action, INPUT_OP)
+        const state1_0Diffs = await reactTo(
+            p, action, INPUT_OP, COLLECTION_GRAPH['state-bysc-1.1'])
 
         const outputDiffs: [string, string[], Diff<DocumentData>[]][] = [
             [INPUT_ID, getSchema(INPUT_OP), state1_0Diffs]]
