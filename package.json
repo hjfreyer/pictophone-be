@@ -49,6 +49,7 @@
     "express": "^4.17.1",
     "firebase-admin": "^8.4.0",
     "immer": "^3.2.0",
+    "ix": "^3.0.2",
     "lodash": "^4.17.15",
     "rxjs": "^6.5.4",
     "typescript-json-validator": "^2.3.1",

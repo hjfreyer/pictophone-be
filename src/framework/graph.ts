@@ -4,6 +4,7 @@ import _ from 'lodash'
 import { batchStreamBy, keyStartsWith, lexCompare, streamTakeWhile, toArray, toStream } from "../util"
 import { DBHelper } from "./db"
 import { strict as assert } from 'assert'
+import { Source, InputInfo } from "./revision"
 
 export type Item<V> = [string[], V]
 
@@ -21,6 +22,12 @@ export type Diff<V> = {
 export interface MapFn<I, O> {
     (path: string[], value: I): Item<O>[]
 }
+
+export interface MapFn2<I, O> {
+    subSchema: string[]
+    map(path: string[], value: I): Item<O>[]
+}
+
 
 type Itemify<T> = {
     [K in keyof T]: Item<T[K]>[]
@@ -45,6 +52,30 @@ export type Op<S, T> = InputOp<SingleType<S, T>>
     | ReschemaOp<S, T>
     | SortOp<S, T>
 
+
+export type Op2<S, T> = LoadOp<S, T>
+    | MapOp2<S, T>
+    // | TransposeOp<S, T>
+    // | ReduceOp<S, any, T>
+    // | ReschemaOp<S, T>
+    // | SortOp<S, T>
+
+
+export interface LoadOp<S, T> {
+    kind: 'load',
+    load(s: Source<S>): InputInfo<T>
+}
+
+export type Pipeline<I, O> = {
+    kind: 'source',
+    schema: string[]
+    collectionId: string
+    validator: (u: unknown) => I
+    op: Op<I, O>
+} | {
+    kind: 'sort'
+}
+
 export interface InputOp<T> {
     kind: 'input'
     schema: string[]
@@ -57,6 +88,11 @@ interface MapOp<S, I, O> {
     subSchema: string[]
     input: Op<S, I>
     fn: MapFn<I, O>
+}
+
+interface MapOp2<S, T> {
+    kind: 'map'
+    visit<R>(go:<I>(input: Op2<S, I>, map: MapFn2<I, T>)=>R):R
 }
 
 interface TransposeOp<S, T> {

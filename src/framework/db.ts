@@ -2,6 +2,36 @@ import { DocumentData, DocumentReference, FieldPath, Firestore, Transaction } fr
 import { strict as assert } from "assert"
 import { basename, dirname, join } from "path"
 import { Diff, Item } from './graph'
+import { Readable, ReadWrite } from './base'
+import { InputInfo } from './revision';
+
+import { from } from 'ix/asynciterable';
+import { map } from 'ix/asynciterable/operators';
+
+
+export class DBHelper2 {
+    constructor(private db: Firestore,
+        private tx: Transaction) { }
+
+    open<T>(info: InputInfo<T>): ReadWrite<T> {
+        return new DBReadable(this.db, this.tx, info);
+    }
+}
+
+class DBReadable<T> implements ReadWrite<T> {
+    constructor(private db: Firestore,
+        private tx: Transaction,
+        private info: InputInfo<T>) { }
+
+    sortedList(startAt: string[]): AsyncIterable<Item<T>> {
+        return from(new DBHelper(this.db, this.tx, this.info.collectionId, this.info.schema).list(startAt))
+            .pipe(map(([k, v]) => [k, this.info.validator(v)]));
+    }
+
+    commit(diffs: Diff<T>[]): void {
+        new DBHelper(this.db, this.tx, this.info.collectionId, this.info.schema).applyDiffs(diffs)
+    }
+}
 
 export class DBHelper {
     private schema: string[]
