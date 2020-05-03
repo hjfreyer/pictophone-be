@@ -1,6 +1,15 @@
 
 export type Item<V> = [string[], V]
 
+export type Change<V> = {
+    key: string[]
+    kind: 'set'
+    value: V
+} | {
+    key: string[]
+    kind: 'delete'
+}
+
 export type Diff<V> = {
     key: string[]
     kind: 'add' | 'delete'
@@ -13,6 +22,7 @@ export type Diff<V> = {
 }
 
 export interface Readable<T> {
+    schema: string[]
     sortedList(startAt: string[]): AsyncIterable<Item<T>>
 }
 
@@ -21,8 +31,3 @@ export interface Writeable<T> {
 }
 
 export interface ReadWrite<T> extends Readable<T>, Writeable<T> {} 
-
-
-// export type CollectionSet<TypeSpec> = {
-//     [K in keyof TypeSpec]: 
-// }

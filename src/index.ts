@@ -9,15 +9,18 @@ import batch from './batch'
 import { COLLECTION_GRAPH, getCollections, InputType, INPUT_ID, INPUT_OP } from './collections'
 import GetConfig from './config'
 import { DBHelper, DBHelper2 } from './framework/db'
-import { Diff, getSchema, Op, Processor } from './framework/graph'
+import { getSchema, Op, Processor, Source, Diffs} from './framework/graph'
 import { Action1_1, AnyAction } from './model'
 import { validate as validateModel } from './model/index.validator'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
-import rev0 from './rev0'
-import { Sources as R0Sources } from './rev0'
-import { Source, Readables, DBs } from './framework/revision'
+import * as rev0 from './rev0'
+import { InitialRevision } from './framework/revision'
 import { mapValues } from './util'
+import * as read from './framework/read';
+import { ReadWrite, Change, Diff } from './framework/base'
+import deepEqual from 'deep-equal'
+import { DBs } from './framework/graph_builder'
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -122,20 +125,53 @@ async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise
     // const action = upgradeAction(anyAction)
 
     await db.runTransaction(async (tx: Transaction): Promise<void> => {
-        const p = new Processor(db, tx)
         const helper2 = new DBHelper2(db, tx);
 
-        const inputConfig: Source<R0Sources> = {
+        const stateConfig: Source<rev0.StateSpec> = {
             game: {
                 collectionId: 'state-2.0',
                 schema: ['game'],
                 validator: validateModel('Game1_0')
             }
+        };        
+        const intermediateConfig: Source<rev0.IntermediateSpec> = {};
+        const derivedConfig: Source<rev0.DerivedSpec> = {
+            gamesByPlayer: {
+                collectionId: 'derived-2.0',
+                schema: ['player', 'game'],
+                validator: validateModel('Game1_0')
+            }
         };
+        const p = new Processor(db, tx, stateConfig, intermediateConfig);
 
-        const dbs = mapValues(inputConfig, (_, i) => helper2.open(i)) as DBs<R0Sources>;
+        const stateDbs = mapValues(stateConfig, (_, i) => helper2.open(i)) as DBs<rev0.StateSpec>;
+        const derivedDbs = mapValues(derivedConfig, (_, i) => helper2.open(i)) as DBs<rev0.DerivedSpec>;
 
-        const sourceDiffs = await rev0.integrate(anyAction, dbs);
+
+        const rev00 : InitialRevision<AnyAction, rev0.StateSpec,rev0.IntermediateSpec, rev0.DerivedSpec>  = rev0;
+        const sourceChanges = await rev00.integrate(anyAction, stateDbs);
+        const sourceDiffsP : Partial<Diffs<rev0.StateSpec>> = {};
+        for (const untypedCollectionId in sourceChanges) {
+            const collectionId = untypedCollectionId as keyof typeof sourceChanges;
+            const diffs :Diff<rev0.StateSpec[typeof collectionId]>[] = [];
+            for (const change of sourceChanges[collectionId]) {
+                const maybeDiff = await changeToDiff(stateDbs[collectionId], change);
+                if (maybeDiff !== null) {
+                    diffs.push(maybeDiff);
+                }
+            }
+            sourceDiffsP[collectionId] = diffs;
+        }
+    const sourceDiffs = sourceDiffsP as Diffs<rev0.StateSpec>;
+
+        const deriveOps = rev00.derive();
+        const derivedDiffsP : Partial<Diffs<rev0.DerivedSpec>> = {};
+        for (const untypedCollectionId in deriveOps) {
+            const collectionId = untypedCollectionId as keyof rev0.DerivedSpec;
+            derivedDiffsP[collectionId] = await p.reactTo(deriveOps[collectionId], sourceDiffs);
+        }
+        const derivedDiffs = derivedDiffsP as Diffs<rev0.DerivedSpec>;
+
 
         // const outputDiffs: [string, string[], Diff<DocumentData>[]][] = [
         //     [INPUT_ID, getSchema(INPUT_OP), state1_0Diffs]]
@@ -147,10 +183,49 @@ async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise
         // }
 
         for (const untypedCollectionId in sourceDiffs) {
-            const collectionId = untypedCollectionId as keyof typeof sourceDiffs;
-            dbs[collectionId].commit(sourceDiffs[collectionId]);
+            const collectionId = untypedCollectionId as keyof rev0.StateSpec;
+            stateDbs[collectionId].commit(sourceDiffs[collectionId]);
+        }        
+        
+        for (const untypedCollectionId in derivedDiffs) {
+            const collectionId = untypedCollectionId as keyof rev0.DerivedSpec;
+            derivedDbs[collectionId].commit(derivedDiffs[collectionId]);
         }
     })
+}
+
+async function changeToDiff<T>(db: ReadWrite<T>, change: Change<T>) : Promise<Diff<T> |null> {
+    const current = await read.get(db, change.key);
+    if (current === null) {
+        if (change.kind == 'set') {
+            return {
+                key: change.key,
+                kind: 'add',
+                value: change.value,
+            }
+        } else {
+            return null
+        }
+    } else {
+        if (change.kind == 'set' ) {
+            if (!deepEqual(current, change.value)) {
+                        return {
+                key: change.key,
+                kind: 'replace',
+                oldValue: current,
+                newValue: change.value,
+            }
+            } else {
+                return null
+            }
+        } else {
+                   return {
+                key: change.key,
+                kind: 'delete',
+                value: current,
+            }
+        }
+    }
 }
 
 const MAX_POINTS = 50_000

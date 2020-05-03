@@ -1,10 +1,13 @@
 
+import {strict as assert} from 'assert';
+
 export function mapValues<V1, V2>(obj: { [k: string]: V1 },
     fn: (k: string, v: V1) => V2): { [k: string]: V2 } {
     return Object.assign({}, ...Object.entries(obj).map(([k, v]) => {
         return { [k]: fn(k, v) }
     }))
 }
+
 export type Maybe<V> = { result: 'some', value: V } | { result: 'none' }
 
 export function lexCompare(a: string[], b: string[]): number {
@@ -82,5 +85,32 @@ export async function* batchStreamBy<T, K>(
         }
 
         yield [batchKey, batch]
+    }
+}
+
+
+
+export function invertPermutation(permutation: number[]): number[] {
+    const res = permutation.map(() => -1)
+    for (let i = 0; i < permutation.length; i++) {
+        res[permutation[i]] = i
+    }
+    return res
+}
+
+export function permute<T>(permutation: number[], a: T[]): T[] {
+    return permutation.map(idx => a[idx])
+}
+
+export function assertIsPermutation(permutation: number[]): void {
+    const nums = new Set<number>();
+    for (const p of permutation) {
+        if (p < 0 || permutation.length <= p) {
+            assert.fail("out of bounds");
+        }
+        if (nums.has(p)) {
+            assert.fail("duplicate");
+        }
+        nums.add(p);
     }
 }

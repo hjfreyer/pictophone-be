@@ -1,12 +1,11 @@
 import { DocumentData, DocumentReference, FieldPath, Firestore, Transaction } from '@google-cloud/firestore'
 import { strict as assert } from "assert"
 import { basename, dirname, join } from "path"
-import { Diff, Item } from './graph'
-import { Readable, ReadWrite } from './base'
-import { InputInfo } from './revision';
+import { Diff, Item , Readable, ReadWrite } from './base'
 
 import { from } from 'ix/asynciterable';
 import { map } from 'ix/asynciterable/operators';
+import { InputInfo } from './graph';
 
 
 export class DBHelper2 {
@@ -23,6 +22,10 @@ class DBReadable<T> implements ReadWrite<T> {
         private tx: Transaction,
         private info: InputInfo<T>) { }
 
+    get schema(): string[] {
+        return new DBHelper(this.db, this.tx, this.info.collectionId, this.info.schema).schema
+    }
+
     sortedList(startAt: string[]): AsyncIterable<Item<T>> {
         return from(new DBHelper(this.db, this.tx, this.info.collectionId, this.info.schema).list(startAt))
             .pipe(map(([k, v]) => [k, this.info.validator(v)]));
@@ -34,7 +37,7 @@ class DBReadable<T> implements ReadWrite<T> {
 }
 
 export class DBHelper {
-    private schema: string[]
+    public schema: string[]
     constructor(private db: Firestore,
         private tx: Transaction,
         collectionId: string,

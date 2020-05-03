@@ -1,12 +1,35 @@
-import { Game1_0, Action1_0 } from "./model";
-import {  InputOps, OutputOps, Diffs, Readables, InitialRevision } from "./framework/revision";
+import { DirectoryOp, OpBuilder, Readables } from "./framework/graph_builder";
 import * as read from './framework/read';
+import { Changes } from "./framework/revision";
+import { Action1_0, Game1_0 } from "./model";
 
-export interface Sources {
+export interface StateSpec {
     game: Game1_0
 }
 
-export interface Derived { }
+export interface IntermediateSpec { }
+
+export interface DerivedSpec {
+    gamesByPlayer: Game1_0
+}
+
+export function derive(): DirectoryOp<StateSpec, IntermediateSpec, DerivedSpec> {
+    return {
+        gamesByPlayer: OpBuilder.load<StateSpec, IntermediateSpec, 'game'>('game', ['game'])
+            .indexBy(['player'], (_, g) => g.players.map(p => [p]))
+            .reindex(['player', 'game'])
+            .build()
+    };
+}
+
+export async function integrate(action: Action1_0, sources: Readables<StateSpec>): Promise<Changes<StateSpec>> {
+    const game = await read.getOrDefault(sources.game, [action.gameId], defaultGame())
+    const newGame = integrateHelper(action, game);
+    return {
+        game: [{ kind: 'set', key: [action.gameId], value: newGame }]
+    }
+}
+
 
 function defaultGame(): Game1_0 {
     return {
@@ -14,7 +37,7 @@ function defaultGame(): Game1_0 {
     }
 }
 
-function integrate(a: Action1_0, game: Game1_0): Game1_0 {
+function integrateHelper(a: Action1_0, game: Game1_0): Game1_0 {
     switch (a.kind) {
         case 'join_game':
             if (game.players.indexOf(a.playerId) !== -1) {
@@ -27,20 +50,3 @@ function integrate(a: Action1_0, game: Game1_0): Game1_0 {
     }
 }
 
-class Rev0 implements InitialRevision<Action1_0, Sources, Derived> {
-    derive(): OutputOps<Sources, Derived> {
-        return {};
-    }
-
-    async integrate(action: Action1_0, sources: Readables<Sources>): Promise<Diffs<Sources>> {
-        const game = await read.getOrDefault(sources.game, [action.gameId], defaultGame())
-        const newGame = integrate(action, game);
-        return {
-            game: [{ kind: 'add', key: [action.gameId], value: newGame }]
-        }
-    }
-}
-
-
-const R: InitialRevision<Action1_0, Sources, Derived> = new Rev0()
-export default R

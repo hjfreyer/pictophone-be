@@ -1,139 +1,101 @@
 import { Firestore, Transaction } from "@google-cloud/firestore"
 import deepEqual from "deep-equal"
 import _ from 'lodash'
-import { batchStreamBy, keyStartsWith, lexCompare, streamTakeWhile, toArray, toStream } from "../util"
-import { DBHelper } from "./db"
-import { strict as assert } from 'assert'
-import { Source, InputInfo } from "./revision"
+import { invertPermutation, keyStartsWith, lexCompare, permute, streamTakeWhile, toStream } from "../util"
+import { Diff, Item } from "./base"
+import { DBHelper2 } from "./db"
 
-export type Item<V> = [string[], V]
+export interface InputInfo<T> {
+    schema: string[]
+    collectionId: string
+    validator: (u: unknown) => T
+}
 
-export type Diff<V> = {
-    key: string[]
-    kind: 'add' | 'delete'
-    value: V
-} | {
-    key: string[]
-    kind: 'replace'
-    oldValue: V
-    newValue: V
+export type Source<S> = {
+    [K in keyof S]: InputInfo<S[K]>
+}
+
+export type Diffs<StateSpec> = {
+    [K in keyof StateSpec]: Diff<StateSpec[K]>[]
 }
 
 export interface MapFn<I, O> {
-    (path: string[], value: I): Item<O>[]
-}
-
-export interface MapFn2<I, O> {
     subSchema: string[]
     map(path: string[], value: I): Item<O>[]
 }
 
-
-type Itemify<T> = {
-    [K in keyof T]: Item<T[K]>[]
-}
-
-export type SortedOp<S, T> = InputOp<SingleType<S, T>> | SortOp<S, T>
-
-type Opify<S, T> = {
-    [K in keyof T]: SortedOp<S, T[K]>
-}
-
-type SingleType<A, B> = A extends B ? B extends A ? A : never : never
-
-export interface ReduceFn<I, O> {
-    (path: string[], values: Item<I>[]): O
-}
-
-export type Op<S, T> = InputOp<SingleType<S, T>>
-    | MapOp<S, any, T>
-    | TransposeOp<S, T>
-    | ReduceOp<S, any, T>
-    | ReschemaOp<S, T>
-    | SortOp<S, T>
+// export interface ReduceFn<I, O> {
+//     (path: string[], values: Item<I>[]): O
+// }
 
 
-export type Op2<S, T> = LoadOp<S, T>
-    | MapOp2<S, T>
-    // | TransposeOp<S, T>
-    // | ReduceOp<S, any, T>
-    // | ReschemaOp<S, T>
-    // | SortOp<S, T>
+export type Op<InputSpec, IntermediateSpec, T> =
+    LoadOp<InputSpec, T>
+    | MapOp<InputSpec, IntermediateSpec, T>
+    | TransposeOp<InputSpec, IntermediateSpec, T>
+    | ReschemaOp<InputSpec, IntermediateSpec, T>
+    | SortOp<InputSpec, IntermediateSpec, T>
+// | ReduceOp<S, any, T>
 
 
-export interface LoadOp<S, T> {
+interface LoadOp<InputSpec, T> {
     kind: 'load',
-    load(s: Source<S>): InputInfo<T>
-}
-
-export type Pipeline<I, O> = {
-    kind: 'source',
     schema: string[]
-    collectionId: string
-    validator: (u: unknown) => I
-    op: Op<I, O>
-} | {
-    kind: 'sort'
+    visit<R>(go: <K extends keyof InputSpec>(k: K, ii_cast: (t: InputInfo<InputSpec[K]>) => InputInfo<T>,
+        diff_cast: (t: Diff<InputSpec[K]>[]) => Diff<T>[]) => R): R
 }
 
-export interface InputOp<T> {
-    kind: 'input'
-    schema: string[]
-    collectionId: string
-    validator: (u: unknown) => T
-}
-
-interface MapOp<S, I, O> {
+interface MapOp<InputSpec, IntermediateSpec, T> {
     kind: 'map'
-    subSchema: string[]
-    input: Op<S, I>
-    fn: MapFn<I, O>
+    visit<R>(go: <I>(input: Op<InputSpec, IntermediateSpec, I>, map: MapFn<I, T>) => R): R
 }
 
-interface MapOp2<S, T> {
-    kind: 'map'
-    visit<R>(go:<I>(input: Op2<S, I>, map: MapFn2<I, T>)=>R):R
-}
-
-interface TransposeOp<S, T> {
+interface TransposeOp<InputSpec, IntermediateSpec, T> {
     kind: 'transpose'
     permutation: number[]
-    input: Op<S, T>
+    input: Op<InputSpec, IntermediateSpec, T>
 }
 
-interface ReduceOp<S, I, O> {
-    kind: 'reduce'
-    newSchema: string[]
-    input: SortedOp<S, I>
-    fn: ReduceFn<I, O>
-}
+// interface ReduceOp<S, I, O> {
+//     kind: 'reduce'
+//     newSchema: string[]
+//     input: SortedOp<S, I>
+//     fn: ReduceFn<I, O>
+// }
 
-interface ReschemaOp<S, T> {
+interface ReschemaOp<InputSpec, IntermediateSpec, T> {
     kind: 'reschema'
     newSchema: string[]
-    input: Op<S, T>
+    input: Op<InputSpec, IntermediateSpec, T>
 }
 
-interface SortOp<S, T> {
+interface SortOp<InputSpec, IntermediateSpec, T> {
     kind: 'sort'
-    input: Op<S, T>
-    collectionId: string
-    validator: (u: unknown) => T
+    input: Op<InputSpec, IntermediateSpec, T>
+    key: keyof IntermediateSpec
 }
 
-export class Processor {
-    constructor(private db: Firestore, private tx: Transaction) { }
+export class Processor<InputSpec, IntermediateSpec> {
+    constructor(private db: Firestore, private tx: Transaction,
+        private inputs: Source<InputSpec>,
+        private intermediates: Source<IntermediateSpec>) { }
 
-    list<S, T>(op: Op<S, T>, startAt: string[]): AsyncIterable<Item<T>> {
+    list<T>(op: Op<InputSpec, IntermediateSpec, T>, startAt: string[]): AsyncIterable<Item<T>> {
         switch (op.kind) {
-            case "input":
-            case "sort":
-                const db = new DBHelper(this.db, this.tx, op.collectionId, getSchema(op))
-                return validateStream(op.validator, db.list(startAt))
+            case "load":
+                return op.visit((key, ii_cast, _) => {
+                    const inputInfo = ii_cast(this.inputs[key]);
+                    return new DBHelper2(this.db, this.tx).open(inputInfo).sortedList(startAt);
+                });
+
+            case "sort": {
+                const intermediate = this.intermediates[op.key] as any as InputInfo<T>;
+                return new DBHelper2(this.db, this.tx).open(intermediate).sortedList(startAt);
+            }
             case "map":
-                return this.mapList(op, startAt)
-            case "reduce":
-                return this.reduceList(op, startAt)
+                return op.visit((input, fn) => { return this.mapList(input, fn, startAt) });
+            // case "reduce":
+            //     return this.reduceList(op, startAt)
             case "transpose":
                 return this.transposeList(op, startAt)
             case "reschema":
@@ -142,10 +104,10 @@ export class Processor {
     }
 
 
-    enumerate<S, T>(op: Op<S, T>): AsyncIterable<Item<T>> {
+    enumerate<T>(op: Op<InputSpec, IntermediateSpec, T>): AsyncIterable<Item<T>> {
         return this.list(op, getSchema(op).map(() => ''))
     }
-    async get<S, T>(op: Op<S, T>, key: string[]): Promise<T | null> {
+    async get<T>(op: Op<InputSpec, IntermediateSpec, T>, key: string[]): Promise<T | null> {
         for await (const [k, value] of this.list(op, key)) {
             if (deepEqual(k, key)) {
                 return value
@@ -156,35 +118,34 @@ export class Processor {
         return null
     }
 
-    listWithPrefix<S, T>(op: Op<S, T>, prefix: string[]): AsyncIterable<Item<T>> {
+    listWithPrefix<T>(op: Op<InputSpec, IntermediateSpec, T>, prefix: string[]): AsyncIterable<Item<T>> {
         const extension = Array(getSchema(op).length - prefix.length).fill('')
         return streamTakeWhile(this.list(op, [...prefix, ...extension]),
             ([key,]) => keyStartsWith(key, prefix))
     }
 
-
-    async reactTo<S, T>(op: Op<S, T>, diffs: Diff<S>[]): Promise<Diff<T>[]> {
+    async reactTo<T>(op: Op<InputSpec, IntermediateSpec, T>, diffs: Diffs<InputSpec>): Promise<Diff<T>[]> {
         switch (op.kind) {
-            case "input":
-                return diffs as any as Diff<T>[]
+            case "load":
+                return op.visit((key, _, diff_cast) => diff_cast(diffs[key]));
             case "sort":
                 return await this.reactTo(op.input, diffs)
             case "map":
-                return await this.mapReact(op, diffs)
+                return op.visit((input, fn) => { return this.mapReact(input, fn, diffs) });
             case "reschema":
                 return await this.reactTo(op.input, diffs)
-            case "reduce":
-                return this.reduceReact(op, diffs)
+            // case "reduce":
+            //     return this.reduceReact(op, diffs)
             case "transpose":
                 return this.transposeReact(op, diffs)
         }
     }
 
     // Map.
-    private async *mapList<S, I, O>(op: MapOp<S, I, O>, startAt: string[]): AsyncIterable<Item<O>> {
-        const inputStart = startAt.slice(0, getSchema(op.input).length)
-        for await (const [inputKey, inputValue] of this.list(op.input, inputStart)) {
-            const outputValues = op.fn(inputKey, inputValue)
+    private async *mapList<I, O>(input: Op<InputSpec, IntermediateSpec, I>, fn: MapFn<I, O>, startAt: string[]): AsyncIterable<Item<O>> {
+        const inputStart = startAt.slice(0, getSchema(input).length)
+        for await (const [inputKey, inputValue] of this.list(input, inputStart)) {
+            const outputValues = fn.map(inputKey, inputValue)
             outputValues.sort(([a,], [b,]) => lexCompare(a, b))
             for (const [extraPath, mappedValue] of outputValues) {
                 const outputKey = [...inputKey, ...extraPath]
@@ -196,17 +157,20 @@ export class Processor {
         }
     }
 
-    private async mapReact<S, I, O>(op: MapOp<S, I, O>, diffs: Diff<S>[]): Promise<Diff<O>[]> {
-        const inputDiffs = await this.reactTo(op.input, diffs)
-        const unflattened = inputDiffs.map(diff => this.mapReactSingleDiff(op, diff))
+    private async mapReact<I, O>(input: Op<InputSpec, IntermediateSpec, I>, fn: MapFn<I, O>, diffs: Diffs<InputSpec>): Promise<Diff<O>[]> {
+        console.log('orig diffs', JSON.stringify(diffs));
+        const inputDiffs = await this.reactTo(input, diffs)
+        console.log('input diffs', JSON.stringify(inputDiffs));
+        const unflattened = inputDiffs.map(diff => this.mapReactSingleDiff(fn, diff))
+        console.log('mapped diffs', JSON.stringify(unflattened));
         return _.flatten(unflattened)
     }
 
-    private mapReactSingleDiff<S, I, O>(op: MapOp<S, I, O>, diff: Diff<I>): Diff<O>[] {
+    private mapReactSingleDiff<I, O>(fn: MapFn<I, O>, diff: Diff<I>): Diff<O>[] {
         switch (diff.kind) {
             case 'add':
             case 'delete': {
-                const mapped = op.fn(diff.key, diff.value)
+                const mapped = fn.map(diff.key, diff.value)
                 return mapped.map(([extraKey, value]) => ({
                     kind: diff.kind,
                     key: [...diff.key, ...extraKey],
@@ -217,8 +181,8 @@ export class Processor {
             case 'replace': {
                 const res: Diff<O>[] = []
 
-                const oldMapped = op.fn(diff.key, diff.oldValue)
-                const newMapped = op.fn(diff.key, diff.newValue)
+                const oldMapped = fn.map(diff.key, diff.oldValue)
+                const newMapped = fn.map(diff.key, diff.newValue)
 
                 const oldByKey: Record<string, O> = {}
                 const newByKey: Record<string, O> = {}
@@ -265,70 +229,70 @@ export class Processor {
 
 
     // Reduce.
-    private async *reduceList<S, I, O>(op: ReduceOp<S, I, O>, startAt: string[]): AsyncIterable<Item<O>> {
-        const extension = Array(getSchema(op.input).length - op.newSchema.length).fill('')
-        const inputStart = [...startAt, ...extension]
-        const batched = batchStream(this.list(op.input, inputStart), op.newSchema.length)
-        for await (const batch of batched) {
-            yield [batch.batchKey, op.fn(batch.batchKey, batch.items)]
-        }
-    }
+    // private async *reduceList<S, I, O>(op: ReduceOp<S, I, O>, startAt: string[]): AsyncIterable<Item<O>> {
+    //     const extension = Array(getSchema(op.input).length - op.newSchema.length).fill('')
+    //     const inputStart = [...startAt, ...extension]
+    //     const batched = batchStream(this.list(op.input, inputStart), op.newSchema.length)
+    //     for await (const batch of batched) {
+    //         yield [batch.batchKey, op.fn(batch.batchKey, batch.items)]
+    //     }
+    // }
 
-    private async reduceReact<S, I, O>(op: ReduceOp<S, I, O>, sourceDiffs: Diff<S>[]): Promise<Diff<O>[]> {
-        const inputDiffs = await this.reactTo(op.input, sourceDiffs)
-        const sortedDiffs = [...inputDiffs]
-        sortedDiffs.sort((a, b) => lexCompare(a.key, b.key))
+    // private async reduceReact<S, I, O>(op: ReduceOp<S, I, O>, sourceDiffs: Diff<S>[]): Promise<Diff<O>[]> {
+    //     const inputDiffs = await this.reactTo(op.input, sourceDiffs)
+    //     const sortedDiffs = [...inputDiffs]
+    //     sortedDiffs.sort((a, b) => lexCompare(a.key, b.key))
 
-        const batchedDiffs = batchStreamBy(toStream(sortedDiffs),
-            (d) => d.key.slice(0, op.newSchema.length),
-            lexCompare)
+    //     const batchedDiffs = batchStreamBy(toStream(sortedDiffs),
+    //         (d) => d.key.slice(0, op.newSchema.length),
+    //         lexCompare)
 
-        const res: Diff<O>[] = []
-        for await (const [outputKey, batchDiffs] of batchedDiffs) {
-            const oldBatchInput = await toArray(this.listWithPrefix(op.input, outputKey))
-            const newBatchInput = await toArray(patch(
-                this.listWithPrefix(op.input, outputKey),
-                batchDiffs))
+    //     const res: Diff<O>[] = []
+    //     for await (const [outputKey, batchDiffs] of batchedDiffs) {
+    //         const oldBatchInput = await toArray(this.listWithPrefix(op.input, outputKey))
+    //         const newBatchInput = await toArray(patch(
+    //             this.listWithPrefix(op.input, outputKey),
+    //             batchDiffs))
 
-            if (_.isEmpty(oldBatchInput) && _.isEmpty(newBatchInput)) {
-                throw new Error("something went wrong")
-            }
-            if (_.isEmpty(oldBatchInput) && !_.isEmpty(newBatchInput)) {
-                res.push({
-                    key: outputKey,
-                    kind: 'add',
-                    value: op.fn(outputKey, newBatchInput)
-                })
-            }
-            if (!_.isEmpty(oldBatchInput) && _.isEmpty(newBatchInput)) {
-                res.push({
-                    key: outputKey,
-                    kind: 'delete',
-                    value: op.fn(outputKey, oldBatchInput)
-                })
-            }
-            if (!_.isEmpty(oldBatchInput) && !_.isEmpty(newBatchInput)) {
-                res.push({
-                    key: outputKey,
-                    kind: 'replace',
-                    oldValue: op.fn(outputKey, oldBatchInput),
-                    newValue: op.fn(outputKey, newBatchInput)
-                })
-            }
-        }
-        return res
-    }
+    //         if (_.isEmpty(oldBatchInput) && _.isEmpty(newBatchInput)) {
+    //             throw new Error("something went wrong")
+    //         }
+    //         if (_.isEmpty(oldBatchInput) && !_.isEmpty(newBatchInput)) {
+    //             res.push({
+    //                 key: outputKey,
+    //                 kind: 'add',
+    //                 value: op.fn(outputKey, newBatchInput)
+    //             })
+    //         }
+    //         if (!_.isEmpty(oldBatchInput) && _.isEmpty(newBatchInput)) {
+    //             res.push({
+    //                 key: outputKey,
+    //                 kind: 'delete',
+    //                 value: op.fn(outputKey, oldBatchInput)
+    //             })
+    //         }
+    //         if (!_.isEmpty(oldBatchInput) && !_.isEmpty(newBatchInput)) {
+    //             res.push({
+    //                 key: outputKey,
+    //                 kind: 'replace',
+    //                 oldValue: op.fn(outputKey, oldBatchInput),
+    //                 newValue: op.fn(outputKey, newBatchInput)
+    //             })
+    //         }
+    //     }
+    //     return res
+    // }
 
     // Transpose.
-    private async *transposeList<S, T>(op: TransposeOp<S, T>, startAt: string[]): AsyncIterable<Item<T>> {
+    private async *transposeList<T>(op: TransposeOp<InputSpec, IntermediateSpec, T>, startAt: string[]): AsyncIterable<Item<T>> {
         const inputStart = permute(invertPermutation(op.permutation), startAt)
         for await (const [inputPath, value] of this.list(op.input, inputStart)) {
             yield [permute(op.permutation, inputPath), value]
         }
     }
 
-    private async transposeReact<S, T>(op: TransposeOp<S, T>, sourceDiffs: Diff<S>[]): Promise<Diff<T>[]> {
-        const inputDiffs = await this.reactTo(op.input, sourceDiffs)
+    private async transposeReact<T>(op: TransposeOp<InputSpec, IntermediateSpec, T>, diffs: Diffs<InputSpec>): Promise<Diff<T>[]> {
+        const inputDiffs = await this.reactTo(op.input, diffs)
         return inputDiffs.map(diff => ({
             ...diff,
             key: permute(op.permutation, diff.key),
@@ -418,55 +382,55 @@ async function* validateStream<T>(validator: (u: unknown) => T,
     }
 }
 
-export function validateOp<S, T>(op: Op<S, T>): void {
+// export function validateOp<S, T>(op: Op<S, T>): void {
+//     switch (op.kind) {
+//         case "input":
+//             break
+//         case "map":
+//             validateOp(op.input)
+//             break
+//         case "reduce": {
+//             validateOp(op.input)
+//             const inputSchema = getSchema(op.input)
+//             const inputOrder = getOrder(op.input)
+//             for (let idx = 0; idx < op.newSchema.length; idx++) {
+//                 assert.equal(inputSchema[idx], op.newSchema[idx])
+//                 assert.equal(inputOrder[idx], idx)
+//             }
+
+
+//             break
+//         }
+//         case "transpose": {
+//             validateOp(op.input)
+//             assert.equal(op.permutation.length, getSchema(op.input).length)
+//             const covered = new Set<number>()
+//             for (const num of op.permutation) {
+//                 if (covered.has(num) || num < 0 || op.permutation.length <= num) {
+//                     assert.fail(`not a permutation: ${op.permutation}`)
+//                 }
+//                 covered.add(num)
+//             }
+//             break
+//         }
+//         case "reschema":
+//             validateOp(op.input)
+//             assert.equal(op.newSchema.length, getSchema(op.input).length)
+//             break
+//         case "sort":
+//             validateOp(op.input)
+//             break
+//     }
+// }
+
+export function getSchema<InputSpec, IntermediateSpec, T>(op: Op<InputSpec, IntermediateSpec, T>): string[] {
     switch (op.kind) {
-        case "input":
-            break
-        case "map":
-            validateOp(op.input)
-            break
-        case "reduce": {
-            validateOp(op.input)
-            const inputSchema = getSchema(op.input)
-            const inputOrder = getOrder(op.input)
-            for (let idx = 0; idx < op.newSchema.length; idx++) {
-                assert.equal(inputSchema[idx], op.newSchema[idx])
-                assert.equal(inputOrder[idx], idx)
-            }
-
-
-            break
-        }
-        case "transpose": {
-            validateOp(op.input)
-            assert.equal(op.permutation.length, getSchema(op.input).length)
-            const covered = new Set<number>()
-            for (const num of op.permutation) {
-                if (covered.has(num) || num < 0 || op.permutation.length <= num) {
-                    assert.fail(`not a permutation: ${op.permutation}`)
-                }
-                covered.add(num)
-            }
-            break
-        }
-        case "reschema":
-            validateOp(op.input)
-            assert.equal(op.newSchema.length, getSchema(op.input).length)
-            break
-        case "sort":
-            validateOp(op.input)
-            break
-    }
-}
-
-export function getSchema<S, T>(op: Op<S, T>): string[] {
-    switch (op.kind) {
-        case "input":
+        case "load":
             return op.schema
         case "map":
-            return [...getSchema(op.input), ...op.subSchema]
-        case "reduce":
-            return op.newSchema
+            return op.visit((input, fn) => [...getSchema(input), ...fn.subSchema])
+        // case "reduce":
+        //     return op.newSchema
         case "transpose":
             return permute(op.permutation, getSchema(op.input))
         case "reschema":
@@ -476,16 +440,19 @@ export function getSchema<S, T>(op: Op<S, T>): string[] {
     }
 }
 
-export function getOrder<S, T>(op: Op<S, T>): number[] {
+export function getOrder<InputSpec, IntermediateSpec, T>(op: Op<InputSpec, IntermediateSpec, T>): number[] {
     switch (op.kind) {
-        case "input":
+        case "load":
         case "sort":
-        case "reduce":
+            //        case "reduce":
             return getSchema(op).map((_, i) => i)
         case "map":
-            const base = getOrder(op.input)
-            const rest = op.subSchema.map((_, i) => i + base.length)
-            return [...base, ...rest]
+            return op.visit((input, fn) => {
+                const base = getOrder(input)
+                const rest = fn.subSchema.map((_, i) => i + base.length)
+                return [...base, ...rest]
+            })
+
         case "transpose":
             return permute(op.permutation, getOrder(op.input))
         case "reschema":
@@ -493,18 +460,6 @@ export function getOrder<S, T>(op: Op<S, T>): number[] {
     }
 }
 
-
-function invertPermutation(permutation: number[]): number[] {
-    const res = permutation.map(() => -1)
-    for (let i = 0; i < permutation.length; i++) {
-        res[permutation[i]] = i
-    }
-    return res
-}
-
-function permute<T>(permutation: number[], a: T[]): T[] {
-    return permutation.map(idx => a[idx])
-}
 
 function toDbSchema(schema: string[], collectionId: string) {
     const last = `${schema[schema.length - 1]}-${collectionId}`
