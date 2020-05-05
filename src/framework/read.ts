@@ -1,4 +1,4 @@
-import { Readable } from "./base";
+import { Item, Readable } from "./base";
 import deepEqual from "deep-equal";
 
 export async function get<T>(source: Readable<T>, key: string[]): Promise<T | null> {
@@ -14,4 +14,9 @@ export async function getOrDefault<T, D>(source: Readable<T>, key: string[], def
         }
     }
     return def
+}
+
+
+export function readAll<T>(source: Readable<T>): AsyncIterable<Item<T>> {
+    return source.sortedList([]);
 }

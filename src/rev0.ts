@@ -1,6 +1,6 @@
 import { DirectoryOp, OpBuilder, Readables } from "./framework/graph_builder";
 import * as read from './framework/read';
-import { Changes } from "./framework/revision";
+import { Changes, Result } from "./framework/revision";
 import { Action1_0, Game1_0 } from "./model";
 
 export interface StateSpec {
@@ -22,11 +22,14 @@ export function derive(): DirectoryOp<StateSpec, IntermediateSpec, DerivedSpec> 
     };
 }
 
-export async function integrate(action: Action1_0, sources: Readables<StateSpec>): Promise<Changes<StateSpec>> {
+export async function integrate(action: Action1_0, sources: Readables<StateSpec>,  intermediates: Readables<IntermediateSpec>): Promise<Result<{}, StateSpec>> {
     const game = await read.getOrDefault(sources.game, [action.gameId], defaultGame())
     const newGame = integrateHelper(action, game);
     return {
-        game: [{ kind: 'set', key: [action.gameId], value: newGame }]
+        response: {},
+        changes: {
+            game: [{ kind: 'set', key: [action.gameId], value: newGame }]
+        }
     }
 }
 

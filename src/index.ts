@@ -10,7 +10,7 @@ import { COLLECTION_GRAPH, getCollections, InputType, INPUT_ID, INPUT_OP } from 
 import GetConfig from './config'
 import { DBHelper, DBHelper2 } from './framework/db'
 import { getSchema, Op, Processor, Source, Diffs} from './framework/graph'
-import { Action1_1, AnyAction } from './model'
+import { Action1_1, AnyAction, Action1_0 } from './model'
 import { validate as validateModel } from './model/index.validator'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
@@ -148,8 +148,8 @@ async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise
         const derivedDbs = mapValues(derivedConfig, (_, i) => helper2.open(i)) as DBs<rev0.DerivedSpec>;
 
 
-        const rev00 : InitialRevision<AnyAction, rev0.StateSpec,rev0.IntermediateSpec, rev0.DerivedSpec>  = rev0;
-        const sourceChanges = await rev00.integrate(anyAction, stateDbs);
+        const rev00 : InitialRevision<Action1_0, {}, rev0.StateSpec,rev0.IntermediateSpec, rev0.DerivedSpec>  = rev0;
+        const sourceChanges = await rev00.integrate(anyAction, stateDbs, {});
         const sourceDiffsP : Partial<Diffs<rev0.StateSpec>> = {};
         for (const untypedCollectionId in sourceChanges) {
             const collectionId = untypedCollectionId as keyof typeof sourceChanges;

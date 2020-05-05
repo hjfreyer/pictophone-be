@@ -92,35 +92,17 @@ export const Schema = {
       }
     },
     "AnyAction": {
-      "defaultProperties": [
-      ],
-      "properties": {
-        "gameId": {
-          "type": "string"
+      "anyOf": [
+        {
+          "$ref": "#/definitions/JoinGameAction1_0"
         },
-        "kind": {
-          "enum": [
-            "join_game"
-          ],
-          "type": "string"
+        {
+          "$ref": "#/definitions/CreateGameAction1_1"
         },
-        "playerId": {
-          "type": "string"
-        },
-        "version": {
-          "enum": [
-            "1.0"
-          ],
-          "type": "string"
+        {
+          "$ref": "#/definitions/JoinGameAction1_1"
         }
-      },
-      "required": [
-        "gameId",
-        "kind",
-        "playerId",
-        "version"
-      ],
-      "type": "object"
+      ]
     },
     "CreateGameAction1_1": {
       "defaultProperties": [

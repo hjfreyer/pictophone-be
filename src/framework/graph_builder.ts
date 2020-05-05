@@ -4,8 +4,8 @@ import {Readable, Diff, ReadWrite} from './base';
 import {Op, getSchema, InputInfo, MapFn} from './graph';
 import {assertIsPermutation} from '../util';
 
-export type DirectoryOp<StateSpec, IntermediateSpec, DerivedSpec> = {
-    [K in keyof DerivedSpec]: Op<StateSpec, IntermediateSpec, DerivedSpec[K]>
+export type DirectoryOp<StateSpec, DerivedSpec> = {
+    [K in keyof DerivedSpec]: Op<StateSpec, DerivedSpec[K]>
 }
 
 export type Readables<StateSpec> = {
@@ -16,11 +16,11 @@ export type DBs<StateSpec> = {
     [K in keyof StateSpec]: ReadWrite<StateSpec[K]>
 }
 
-export class OpBuilder<InputSpec, IntermediateSpec, T> {
-    private op: Op<InputSpec, IntermediateSpec, T>
-    constructor(op: Op<InputSpec, IntermediateSpec, T>) { this.op = op; }
+export class OpBuilder<InputSpec, T> {
+    private op: Op<InputSpec, T>
+    constructor(op: Op<InputSpec, T>) { this.op = op; }
 
-    static load<InputSpec, IntermediateSpec, K extends keyof InputSpec>(key: K, schema: string[]): OpBuilder<InputSpec, IntermediateSpec, InputSpec[K]> {
+    static load<InputSpec, K extends keyof InputSpec>(key: K, schema: string[]): OpBuilder<InputSpec, InputSpec[K]> {
         return new OpBuilder({
             kind: 'load',
             schema,
@@ -31,11 +31,11 @@ export class OpBuilder<InputSpec, IntermediateSpec, T> {
         })
     }
 
-    multiMap<O>(subSchema: string[], fn: (k: string[], i: T) => [string[], O][]): OpBuilder<InputSpec, IntermediateSpec, O> {
+    multiMap<O>(subSchema: string[], fn: (k: string[], i: T) => [string[], O][]): OpBuilder<InputSpec, O> {
         const self = this;
         return new OpBuilder({
             kind: 'map',
-            visit<R>(go: (input: Op<InputSpec, IntermediateSpec, T>, map: MapFn<T, O>) => R): R {
+            visit<R>(go: (input: Op<InputSpec, T>, map: MapFn<T, O>) => R): R {
                 return go(self.op, {
                     subSchema: subSchema,
                     map: fn
@@ -44,11 +44,21 @@ export class OpBuilder<InputSpec, IntermediateSpec, T> {
         })
     }
 
-    map<O>(fn: (k: string[], i: T) => O): OpBuilder<InputSpec, IntermediateSpec, O> {
+    map<O>(fn: (k: string[], i: T) => O): OpBuilder<InputSpec, O> {
         return this.multiMap([], (k, i) => { return [[[], fn(k, i)]] });
     }
 
-    indexBy(subSchema: string[], fn: (k: string[], i: T) => string[][]): OpBuilder<InputSpec, IntermediateSpec, T> {
+    narrow<O>(fn: (k: string[], i: T) => i is T & O): OpBuilder<InputSpec, O> {
+        return this.multiMap([], (k, i) => {
+            if (fn(k, i)) {
+                return [[[], i]]
+            } else {
+                return [];
+            }
+        });
+    }
+
+    indexBy(subSchema: string[], fn: (k: string[], i: T) => string[][]): OpBuilder<InputSpec, T> {
         return this.multiMap(subSchema, (k, i) => {
             const res: [string[], T][] = [];
             for (const subKey of fn(k, i)) {
@@ -58,7 +68,7 @@ export class OpBuilder<InputSpec, IntermediateSpec, T> {
         });
     }
 
-    reindex(newSchema: string[]): OpBuilder<InputSpec, IntermediateSpec, T> {
+    reindex(newSchema: string[]): OpBuilder<InputSpec, T> {
         const schema = getSchema(this.op);
 
         // Might be backwards
@@ -71,7 +81,7 @@ export class OpBuilder<InputSpec, IntermediateSpec, T> {
         })
     }
 
-    build(): Op<InputSpec, IntermediateSpec, T> {
+    build(): Op<InputSpec, T> {
         return this.op;
     }
 }

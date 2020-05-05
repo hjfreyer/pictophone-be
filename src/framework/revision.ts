@@ -5,22 +5,30 @@ export type Changes<StateSpec> = {
     [K in keyof StateSpec]: Change<StateSpec[K]>[]
 }
 
-export type GetAction<Revision> = Revision extends InitialRevision<infer A, infer _, infer _, infer _> ? A : never;
-
-export type GetInput<Revision> = Revision extends InitialRevision<infer _, infer S, infer _, infer _> ? S : never;
-
-export interface InitialRevision<Action, StateSpec, IntermediateSpec, DerivedSpec> {
-    derive(): DirectoryOp<StateSpec, IntermediateSpec, DerivedSpec>
-    integrate(action: Action, sources: Readables<StateSpec>): Promise<Changes<StateSpec>>
+export interface Result<ActionResponse, StateSpec> {
+    response: ActionResponse
+    changes: Changes<StateSpec>
 }
 
-// export interface Revision<Action, StateSpec, IntermediateSpec, DerivedSpec> {
-//     derive(): DirectoryOp<StateSpec, IntermediateSpec, DerivedSpec>
-//     integrate(action: Action, sources: Readables<Sources>): Promise<Diffs<Sources>>
-//     upgradeAction(old_action: GetAction<Previous>): Action
-//     upgradeSources(): DirectoryOp<GetSources<Previous>, Sources>
-//     downgradeSources(): DirectoryOp<Sources, GetSources<Previous>>
-// }
+export type GetAction<Revision> = Revision extends InitialRevision<infer A, infer _,infer _, infer _, infer _> ? A : never;
+
+export type GetState<Revision> = Revision extends InitialRevision<infer _,infer _, infer S, infer _, infer _> ? S : never;
+
+export interface InitialRevision<Action, ActionResponse, StateSpec, IntermediateSpec, DerivedSpec> {
+    derive(): DirectoryOp<StateSpec, DerivedSpec>
+    deriveIntermediate(): DirectoryOp<StateSpec, IntermediateSpec>
+    integrate(action: Action, sources: Readables<StateSpec>, intermediates: Readables<IntermediateSpec>): Promise<Result<ActionResponse, StateSpec>>
+}
+
+
+export interface Revision<Previous, Action, ActionResponse, StateSpec, IntermediateSpec, DerivedSpec> {
+    derive(): DirectoryOp<StateSpec, DerivedSpec>
+    deriveIntermediate(): DirectoryOp<StateSpec, IntermediateSpec>
+    integrate(action: Action, sources: Readables<StateSpec>, intermediates: Readables<IntermediateSpec>): Promise<Result<ActionResponse, StateSpec>>
+    upgradeAction(old_action: GetAction<Previous>): Action
+    upgradeState(): DirectoryOp<GetState<Previous>, StateSpec>
+    downgradeState(): DirectoryOp<StateSpec, GetState<Previous>>
+}
 
 // export interface DerivedRevision {
 //     preActionCollections(): any

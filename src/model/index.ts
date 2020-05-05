@@ -35,11 +35,16 @@ export interface JoinGameAction1_1 {
 
 export type Action1_1 = CreateGameAction1_1 | JoinGameAction1_1
 
-export interface Game1_1 {
+export interface UncreatedGame1_1 {
+    state: 'UNCREATED'
+}
+
+export interface CreatedGame1_1 {
+    state: 'CREATED'
     players: string[]
     shortCode: string
 }
 
-export type State1_1 = Game1_1
+export type Game1_1 = UncreatedGame1_1 | CreatedGame1_1
 
-export type AnyAction = Action1_0 
+export type AnyAction = Action1_0 | Action1_1

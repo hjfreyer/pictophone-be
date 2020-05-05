@@ -1,11 +1,13 @@
 import { DocumentData, DocumentReference, FieldPath, Firestore, Transaction } from '@google-cloud/firestore'
 import { strict as assert } from "assert"
 import { basename, dirname, join } from "path"
-import { Diff, Item , Readable, ReadWrite } from './base'
+import { Diff, Item , Readable, ReadWrite, Change } from './base'
 
 import { from } from 'ix/asynciterable';
 import { map } from 'ix/asynciterable/operators';
 import { InputInfo } from './graph';
+
+
 
 
 export class DBHelper2 {
@@ -31,8 +33,8 @@ class DBReadable<T> implements ReadWrite<T> {
             .pipe(map(([k, v]) => [k, this.info.validator(v)]));
     }
 
-    commit(diffs: Diff<T>[]): void {
-        new DBHelper(this.db, this.tx, this.info.collectionId, this.info.schema).applyDiffs(diffs)
+    commit(changes: Change<T>[]): void {
+        new DBHelper(this.db, this.tx, this.info.collectionId, this.info.schema).commit(changes)
     }
 }
 
@@ -78,18 +80,15 @@ export class DBHelper {
         }
     }
 
-    applyDiffs(diffs: Diff<DocumentData>[]): void {
-        for (const diff of diffs) {
-            const docRef = this.getDocReference(diff.key)
-            switch (diff.kind) {
+    commit(changes: Change<DocumentData>[]): void {
+        for (const change of changes) {
+            const docRef = this.getDocReference(change.key)
+            switch (change.kind) {
                 case 'delete':
                     this.tx.delete(docRef)
                     break
-                case 'add':
-                    this.tx.set(docRef, diff.value)
-                    break
-                case 'replace':
-                    this.tx.set(docRef, diff.newValue)
+                case 'set':
+                    this.tx.set(docRef, change.value)
                     break
             }
         }

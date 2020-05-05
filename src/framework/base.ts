@@ -27,7 +27,11 @@ export interface Readable<T> {
 }
 
 export interface Writeable<T> {
-    commit(diffs : Diff<T>[]): void
+    commit(changes : Change<T>[]): void
 }
 
 export interface ReadWrite<T> extends Readable<T>, Writeable<T> {} 
+
+export interface Database<Spec> {
+    
+}
