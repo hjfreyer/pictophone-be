@@ -1,6 +1,6 @@
 
 export type Bound<T> = {
-    kind: 'inclusive' | 'exclusive' ,//| 'successor_exclusive',
+    kind: 'inclusive' | 'exclusive',
     value : T,
 } | {
     kind: 'unbounded'

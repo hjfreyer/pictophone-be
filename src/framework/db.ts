@@ -1,4 +1,4 @@
-import { DocumentData, DocumentReference, FieldPath, Firestore, Transaction } from '@google-cloud/firestore'
+import { DocumentData, DocumentReference, FieldPath, Firestore, Transaction, Timestamp } from '@google-cloud/firestore'
 import { strict as assert } from "assert"
 import { basename, dirname, join } from "path"
 import { Diff, Item , Readable, ReadWrite, Change } from './base'
@@ -8,7 +8,12 @@ import { map } from 'ix/asynciterable/operators';
 import { InputInfo } from './graph';
 
 
+interface Timestamped {
+    ts: Timestamp
+    value: unknown
+}
 
+export type TimestampedItem<V> = [string[], V, Timestamp]
 
 export class DBHelper2 {
     constructor(private db: Firestore,
@@ -28,7 +33,7 @@ class DBReadable<T> implements ReadWrite<T> {
         return new DBHelper(this.db, this.tx, this.info.collectionId, this.info.schema).schema
     }
 
-    sortedList(startAt: string[]): AsyncIterable<Item<T>> {
+    sortedList(startAt: string[]): AsyncIterable<TimestampedItem<T>> {
         return from(new DBHelper(this.db, this.tx, this.info.collectionId, this.info.schema).list(startAt))
             .pipe(map(([k, v]) => [k, this.info.validator(v)]));
     }
@@ -38,7 +43,7 @@ class DBReadable<T> implements ReadWrite<T> {
     }
 }
 
-export class DBHelper {
+class DBHelper {
     public schema: string[]
     constructor(private db: Firestore,
         private tx: Transaction,
@@ -50,15 +55,6 @@ export class DBHelper {
         ]
     }
 
-    async get(key: string[]): Promise<DocumentData | null> {
-        const doc = await this.tx.get(this.getDocReference(key))
-        if (!doc.exists) {
-            return null
-        }
-        return doc.data() || null
-    }
-
-
     async* list(startAt: string[]): AsyncIterable<Item<DocumentData>> {
         let q = this.db.collectionGroup(this.schema[this.schema.length - 1])
             .orderBy(FieldPath.documentId())
@@ -68,13 +64,6 @@ export class DBHelper {
             q = q.startAt(path)
         }
         const subDocs = await this.tx.get(q)
-        for (const doc of subDocs.docs) {
-            yield [this.getKey(doc.ref), doc.data()]
-        }
-    }
-
-    async *sortedEnumerate(): AsyncIterable<Item<DocumentData>> {
-        const subDocs = await this.tx.get(this.db.collectionGroup(this.schema[this.schema.length - 1]))
         for (const doc of subDocs.docs) {
             yield [this.getKey(doc.ref), doc.data()]
         }
