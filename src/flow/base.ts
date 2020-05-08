@@ -1,4 +1,4 @@
-import { Option, sortedMerge, batchStreamBy, Comparator } from "./util"
+import { Option, sortedMerge, batchStreamBy, Comparator, stringSuccessor } from "./util"
 import { from, toArray } from "ix/asynciterable"
 import { map } from "ix/asynciterable/operators"
 import _ from 'lodash'
@@ -52,8 +52,14 @@ export type Readables<Spec> = {
     [K in keyof Spec]: Readable<Spec[K]>
 }
 
+// For a key K of length N, returns the first N-length key J after it. That is,
+// the unique key J such that N < J and there are no N-length keys between them.
+export function keySuccessor(k : Key): Key {
+    return [...k.slice(0, k.length - 1), stringSuccessor(k[k.length - 1])]
+}
+
 export interface MonoOp<I, O> {
-    schema: string[]
+    schema(inputSchema: string[]): string[]
     image(inputRange: Range<Key>): Range<Key>
     preimage(outputRange: Range<Key>): Range<Key>
     apply(inputIter: ItemIterable<I>): ItemIterable<O>

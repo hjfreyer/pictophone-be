@@ -89,3 +89,7 @@ export function lexCompare(a: string[], b: string[]): number {
     }
     return 0
 }
+
+export function stringSuccessor(s: string): string {
+    return s + '\0';
+}
