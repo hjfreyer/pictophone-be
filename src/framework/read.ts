@@ -28,3 +28,7 @@ export function list<T>(source: Readable<T>, range: Range<OrderedKey>): AsyncIte
 export function readAll<T>(source: Readable<T>): AsyncIterable<Item<T>> {
     return list(source, everything());
 }
+
+export function readRangeFromSingleSlice<T>(input : ScrambledSpace, range : Range<OrderedKey>): ItemIterable<T> {
+    
+}

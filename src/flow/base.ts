@@ -1,8 +1,8 @@
-import { Option, sortedMerge, batchStreamBy, Comparator, stringSuccessor } from "./util"
-import { from, toArray } from "ix/asynciterable"
-import { map, filter } from "ix/asynciterable/operators"
+import { Option, sortedMerge, batchStreamBy, Comparator, stringSuccessor, Result } from "./util"
+import { from, of, toArray, first, single } from "ix/asynciterable"
+import { map, filter, flatMap } from "ix/asynciterable/operators"
 import _ from 'lodash'
-import { Range, Bound, singleValue, isEverything, Comparable, rangeContains } from './range'
+import { Range, Bound, singleValue, isEverything, Comparable, rangeContains, everything } from './range'
 import { lexCompare } from "./util"
 import deepEqual from "deep-equal"
 import * as read from "../framework/read"
@@ -61,17 +61,59 @@ export type Readables<Spec> = {
     [K in keyof Spec]: Readable<Spec[K]>
 }
 
+export function unscrambledSpace<T>(r: Readable<T>): ScrambledSpace<T> {
+    return {
+        schema: r.schema,
+        seekTo(_key: Key): SliceIterable<T> {
+            return of({
+                schema: r.schema,
+                range: everything(),
+                seekTo(key): ItemIterable<T> {
+                    return r.sortedList({
+                        start: { kind: 'inclusive', value: new OrderedKey(key) },
+                        end: { kind: 'unbounded' }
+                    });
+                }
+            })
+        }
+    }
+}
+
+
 // For a key K of length N, returns the first N-length key J after it. That is,
 // the unique key J such that N < J and there are no N-length keys between them.
 export function keySuccessor(k: Key): Key {
     return [...k.slice(0, k.length - 1), stringSuccessor(k[k.length - 1])]
 }
 
+
+export interface Slice<T> {
+    schema: string[]
+    range: Range<OrderedKey>
+    // Key must be contained within range. The first returned item
+    // will be the smallest element not smaller "key". The rest of 
+    // the range will follow in lexicographic order.
+    seekTo(key: Key): ItemIterable<T>
+}
+
+export type SliceIterable<T> = AsyncIterable<Slice<T>>
+
+export interface ScrambledSpace<T> {
+    schema: string[]
+
+    // The first returned Slice will be the singular slice whose range
+    // contains "key". The rest will follow in their natural (scrambled) order.
+    seekTo(key: Key): SliceIterable<T>
+}
+
 export interface MonoOp<I, O> {
-    schema(inputSchema: string[]): string[]
-    image(inputRange: Range<OrderedKey>): Range<OrderedKey>
-    preimage(outputRange: Range<OrderedKey>): Range<OrderedKey>
-    apply(inputIter: ItemIterable<I>): ItemIterable<O>
+    // schema(inputSchema: string[]): string[]
+    // rewindInputKey(key: Key): Key
+    // smallestImpactingInputKey(outputKey: Key): Key
+    impactedOutputRange(inputKey: Key): Range<OrderedKey>
+    // apply(inputIter: ItemIterable<I>): ItemIterable<O>
+    // mapSlice(input: Slice<I>): SliceIterable<O>
+    map(input: ScrambledSpace<I>): ScrambledSpace<O>
 }
 
 export function diffToChange<T>(d: Diff<T>): Change<T> {
@@ -176,7 +218,7 @@ export async function isKeyExpected<Inputs, Intermediates, T>(
     inputs: Readables<Inputs>,
     intermediates: Readables<Intermediates>,
     key: Key): Promise<boolean> {
-    for await (const _result of query(collection, inputs, intermediates, singleValue(new OrderedKey(key)))) {
+    for await (const _result of enumerate(collection, inputs, intermediates, key)) {
         return true;
     }
     return false;
@@ -185,18 +227,41 @@ export async function isKeyExpected<Inputs, Intermediates, T>(
 export function enumerate<Inputs, Intermediates, T>(
     collection: Collection<Inputs, Intermediates, T>,
     inputs: Readables<Inputs>,
-    intermediates: Readables<Intermediates>,
-    startFromCursor: Bound<OrderedKey>): ItemIterable<T> {
+    intermediates: Readables<Intermediates>): ScrambledSpace<T> {
     switch (collection.kind) {
-        //        case "sorted_op":
-        case "merge":
         case "load":
+            return collection.visit((key, _cast): ScrambledSpace<T> => {
+                // Assumes that _cast will be the identity function. I could change 
+                // this to explicitly cast each row.
+                const readable = inputs[key] as any as Readable<T>;
+                return unscrambledSpace(readable);
+            });
         case "sort":
-            return query(collection, inputs, intermediates, { start: startFromCursor, end: { kind: 'unbounded' } })
+            return collection.visit((key, _cast): ScrambledSpace<T> => {
+                // Assumes that _cast will be the identity function. I could change 
+                // this to explicitly cast each row.
+                const readable = intermediates[key] as any as Readable<T>;
+                return unscrambledSpace(readable);
+            })
+        case "merge":
+            throw "unimplemented";
+        // case "op":
+
+        //     return collection.visit((input, op) => {
+        //         const inputRange = op.preimage(range);
+        //         if (isEverything(inputRange)) {
+        //             throw "not doing a full DB scan";
+        //         }
+        //         return from(op.apply(query(input, inputs, intermediates, inputRange)))
+        //             .pipe(filter(([k, v]) => rangeContains(range, new OrderedKey(k))))
+        //     })
         case "op":
             return collection.visit((input, op) => {
-                const enumeratedInput = enumerate(input, inputs, intermediates, startFromCursor);
-                return op.apply(enumeratedInput);
+//                const inputStartAt = op.smallestImpactingInputKey(startAt);
+                const enumeratedInput = enumerate(input, inputs, intermediates);
+                return op.map(enumeratedInput)
+                // return from(enumeratedInput)
+                //     .pipe(flatMap(i => op.mapSlice(i)));
             })
     }
 }
@@ -262,42 +327,42 @@ export class CollectionBuilder<Inputs, Intermediates, T>{
 }
 
 
-export function query<Inputs, Intermediates, T>(
-    collection: Collection<Inputs, Intermediates, T>,
-    inputs: Readables<Inputs>,
-    intermediates: Readables<Intermediates>,
-    range: Range<OrderedKey>): ItemIterable<T> {
-    switch (collection.kind) {
-        case "merge":
-            throw "not implemented"
-        case "load":
-            return collection.visit((key, _cast): ItemIterable<T> => {
-                // Assumes that _cast will be the identity function. I could change 
-                // this to explicitly cast each row.
-                const readable = inputs[key] as any as Readable<T>;
+// export function query<Inputs, Intermediates, T>(
+//     collection: Collection<Inputs, Intermediates, T>,
+//     inputs: Readables<Inputs>,
+//     intermediates: Readables<Intermediates>,
+//     range: Range<OrderedKey>): ItemIterable<T> {
+//     switch (collection.kind) {
+//         case "merge":
+//             throw "not implemented"
+//         case "load":
+//             return collection.visit((key, _cast): ItemIterable<T> => {
+//                 // Assumes that _cast will be the identity function. I could change 
+//                 // this to explicitly cast each row.
+//                 const readable = inputs[key] as any as Readable<T>;
 
-                return read.list(readable, range);
-            });
-        case "sort":
-            return collection.visit((key, _cast): ItemIterable<T> => {
-                // Assumes that _cast will be the identity function. I could change 
-                // this to explicitly cast each row.
-                const readable = intermediates[key] as any as Readable<T>;
+//                 return read.list(readable, range);
+//             });
+//         case "sort":
+//             return collection.visit((key, _cast): ItemIterable<T> => {
+//                 // Assumes that _cast will be the identity function. I could change 
+//                 // this to explicitly cast each row.
+//                 const readable = intermediates[key] as any as Readable<T>;
 
-                return read.list(readable, range);
-            })
-        case "op":
+//                 return read.list(readable, range);
+//             })
+//         case "op":
 
-            return collection.visit((input, op) => {
-                const inputRange = op.preimage(range);
-                if (isEverything(inputRange)) {
-                    throw "not doing a full DB scan";
-                }
-                return from(op.apply(query(input, inputs, intermediates, inputRange)))
-                    .pipe(filter(([k, v]) => rangeContains(range, new OrderedKey(k))))
-            })
-    }
-}
+//             return collection.visit((input, op) => {
+//                 const inputRange = op.preimage(range);
+//                 if (isEverything(inputRange)) {
+//                     throw "not doing a full DB scan";
+//                 }
+//                 return from(op.apply(query(input, inputs, intermediates, inputRange)))
+//                     .pipe(filter(([k, v]) => rangeContains(range, new OrderedKey(k))))
+//             })
+//     }
+// }
 
 export function getIntermediates<Inputs, Intermediates, Outputs>(
     graph: Graph<Inputs, Intermediates, Outputs>): IntermediateCollections<Inputs, Intermediates> {
@@ -390,17 +455,40 @@ async function* collectionDiffsOp<Inputs, Intermediates, I, O>(input: Collection
     intermediates: Readables<Intermediates>,
     sourceDiffs: Diffs<Inputs>): AsyncIterable<Diff<O>> {
     const inputDiffs = await collectionDiffs(input, inputs, intermediates, sourceDiffs);
-    const outputRanges = inputDiffs.map(d => op.image(singleValue(new OrderedKey(d.key))));
-    const inputRanges = outputRanges.map(r => op.preimage(r));
+    const outputRanges = inputDiffs.map(d => op.impactedOutputRange(d.key));
+    // TODO: dedup outputRanges.
 
-    for (const inputSubspace of inputRanges) {
-        const oldOutput = op.apply(query(input, inputs, intermediates, inputSubspace));
-        const newOutput = op.apply(patch(query(input, inputs, intermediates, inputSubspace), inputDiffs));
+    for (const outputRange of outputRanges) {
+        if (outputRange.start.kind !== 'inclusive') {
+            throw "operation output range must be inclusive on the start"
+        }
+        // const inputStartAt = op.smallestImpactingInputKey(outputRange.start.value.key);
+        // const inputEnum = await first(enumerate(input, inputs, intermediates, inputStartAt));
 
-        const taggedOld: AsyncIterable<['old' | 'new', Item<O>]> = from(oldOutput).pipe(
+        // if (inputEnum === undefined) {
+        //     throw new Error("enumerate must always output at least one slice");
+        // }
+
+        const inputSpace = enumerate(input, inputs, intermediates);
+
+        const oldOutput = op.map(inputSpace).seekTo(outputRange.start.value.key);
+        const newOutput = op.map(transformScrambled(inputSpace, i => patch(i, inputDiffs)))
+            .seekTo(outputRange.start.value.key);
+
+        if (!deepEqual(oldOutput.range, newOutput.range)) {
+            throw "patches should never changes slice range";
+        }
+        if (!rangeContainsRange(oldOutput.range, outputRange)) {
+            throw "diff impact range cannot span multiple slices"
+        }
+
+        const oldItemIter = oldOutput.seekTo(outputRange.start.value.key);
+        const newItemIter = newOutput.seekTo(outputRange.start.value.key);
+
+        const taggedOld: AsyncIterable<['old' | 'new', Item<O>]> = from(oldItemIter).pipe(
             map(i => ['old', i])
         );
-        const taggedNew: AsyncIterable<['old' | 'new', Item<O>]> = from(newOutput).pipe(
+        const taggedNew: AsyncIterable<['old' | 'new', Item<O>]> = from(newItemIter).pipe(
             map(i => ['new', i])
         );
 
@@ -467,6 +555,23 @@ async function* patch<T>(input: ItemIterable<T>,
                 yield [diff.key, diff.newValue]
                 break
         }
+    }
+}
+
+function transformScrambled<A, B>(input: ScrambledSpace<A>,
+    fn: (a: ItemIterable<A>) => ItemIterable<B>): ScrambledSpace<B> {
+  return {
+        schema: input.schema,
+seekTo(key: Key):SliceIterable<B> {
+    return from(input.seekTo(key))
+        .pipe(map((slice: Slice<A>): Slice<B> => ({
+            schema: slice.schema,
+            seekTo(key: Key): ItemIterable<B> {
+                return fn(slice.seekTo(key))
+            }
+        })));
+
+}
     }
 }
 

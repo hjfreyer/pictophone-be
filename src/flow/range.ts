@@ -1,6 +1,6 @@
 
 import _ from 'lodash';
-import {Comparator, Option, none, some} from './util';
+import { Comparator, Option, none, some } from './util';
 
 
 export interface Comparable<T> {
@@ -19,15 +19,15 @@ export interface Range<T extends Comparable<T>> {
     end: Bound<T>
 }
 
-export function singleValue<T extends Comparable<T>>(value : T): Range<T> {
+export function singleValue<T extends Comparable<T>>(value: T): Range<T> {
     return {
-        start: {kind: 'inclusive', value},
-        end: {kind: 'inclusive', value},
+        start: { kind: 'inclusive', value },
+        end: { kind: 'inclusive', value },
     };
 }
 
 
-export function isSingleValue<T extends Comparable<T>>(r : Range<T>): Option<T> {
+export function isSingleValue<T extends Comparable<T>>(r: Range<T>): Option<T> {
     if (r.start.kind != 'inclusive' || r.end.kind != 'inclusive') {
         return none()
     }
@@ -43,7 +43,7 @@ export function isSingleValue<T extends Comparable<T>>(r : Range<T>): Option<T> 
 // }
 
 
-export function isEmpty<T extends Comparable<T>>({start, end} : Range<T>):boolean {
+export function isEmpty<T extends Comparable<T>>({ start, end }: Range<T>): boolean {
     if (start.kind === 'unbounded' || end.kind === 'unbounded') {
         return false;
     }
@@ -55,33 +55,74 @@ export function isEmpty<T extends Comparable<T>>({start, end} : Range<T>):boolea
 }
 
 export function everything<T extends Comparable<T>>(): Range<T> {
-    return {start: {kind: 'unbounded'}, end: {kind: 'unbounded'}}
+    return { start: { kind: 'unbounded' }, end: { kind: 'unbounded' } }
 }
 
-export function isEverything<T extends Comparable<T>>({start, end} : Range<T>):boolean {
+export function isEverything<T extends Comparable<T>>({ start, end }: Range<T>): boolean {
     return start.kind === 'unbounded' && end.kind === 'unbounded'
 }
 
-export function rangeContains<T extends Comparable<T>>({start, end} : Range<T>, point: T):boolean {
+export function rangeContains<T extends Comparable<T>>({ start, end }: Range<T>, point: T): boolean {
     const afterStart = (() => {
-  switch (start.kind) {
+        switch (start.kind) {
             case 'unbounded':
-            return true;
+                return true;
             case 'exclusive':
-            return start.value.compareTo(point) < 0
+                return start.value.compareTo(point) < 0
             case 'inclusive':
-            return start.value.compareTo(point) <= 0
+                return start.value.compareTo(point) <= 0
         }
-    })();   
+    })();
     const beforeEnd = (() => {
-  switch (end.kind) {
+        switch (end.kind) {
             case 'unbounded':
-            return true;
+                return true;
             case 'exclusive':
-            return end.value.compareTo(point) > 0
+                return end.value.compareTo(point) > 0
             case 'inclusive':
-            return end.value.compareTo(point) >= 0
+                return end.value.compareTo(point) >= 0
         }
+    })();
+    return afterStart && beforeEnd;
+}
+
+
+export function rangeContainsRange<T extends Comparable<T>>(
+    { start: outerStart, end: outerEnd }: Range<T>,
+    { start: innerStart, end: innerEnd }: Range<T>): boolean {
+    const afterStart = (() => {
+        if (outerStart.kind === 'unbounded') {
+            return true;
+        }
+        if (innerStart.kind === 'unbounded') {
+            return false;
+        }
+        const cmp = innerStart.value.compareTo(outerStart.value);
+        if (cmp < 0) {  // innerStart < outerStart
+            return false;
+        }
+        if (cmp > 0) {  // innerStart > outerStart
+            return true;
+        }
+
+        return outerStart.kind === 'inclusive' || (outerStart.kind === 'exclusive' && innerStart.kind === 'exclusive')
+    })();
+    const beforeEnd = (() => {
+        if (outerEnd.kind === 'unbounded') {
+            return true;
+        }
+        if (innerEnd.kind === 'unbounded') {
+            return false;
+        }
+        const cmp = innerEnd.value.compareTo(outerEnd.value);
+        if (cmp < 0) {  // innerEnd < outerEnd
+            return true;
+        }
+        if (cmp > 0) {  // innerEnd > outerEnd
+            return false;
+        }
+
+        return outerEnd.kind === 'inclusive' || (outerEnd.kind === 'exclusive' && innerEnd.kind === 'exclusive')
     })();
     return afterStart && beforeEnd;
 }
