@@ -1,19 +1,28 @@
 import { Option, sortedMerge, batchStreamBy, Comparator, stringSuccessor } from "./util"
 import { from, toArray } from "ix/asynciterable"
-import { map } from "ix/asynciterable/operators"
+import { map, filter } from "ix/asynciterable/operators"
 import _ from 'lodash'
-import { Range, Bound, singleValue, isInfinite } from './range'
+import { Range, Bound, singleValue, isEverything, Comparable, rangeContains } from './range'
 import { lexCompare } from "./util"
 import deepEqual from "deep-equal"
+import * as read from "../framework/read"
+
+export class OrderedKey implements Comparable<OrderedKey> {
+    constructor(public key: Key) { }
+
+    compareTo(other: OrderedKey) {
+        return lexCompare(this.key, other.key)
+    }
+}
 
 export type Key = string[]
 
-export type Item<V> = [string[], V]
+export type Item<V> = [Key, V]
 
 export interface Cursor<V> {
     key: Key
     value: V
-    cursor: Bound<Key>
+    cursor: Bound<OrderedKey>
 }
 
 export type Change<V> = {
@@ -45,7 +54,7 @@ export type CursorIterable<V> = AsyncIterable<Cursor<V>>
 
 export interface Readable<T> {
     schema: string[]
-    sortedList(range: Range<Key>): ItemIterable<T>
+    sortedList(range: Range<OrderedKey>): ItemIterable<T>
 }
 
 export type Readables<Spec> = {
@@ -54,15 +63,37 @@ export type Readables<Spec> = {
 
 // For a key K of length N, returns the first N-length key J after it. That is,
 // the unique key J such that N < J and there are no N-length keys between them.
-export function keySuccessor(k : Key): Key {
+export function keySuccessor(k: Key): Key {
     return [...k.slice(0, k.length - 1), stringSuccessor(k[k.length - 1])]
 }
 
 export interface MonoOp<I, O> {
     schema(inputSchema: string[]): string[]
-    image(inputRange: Range<Key>): Range<Key>
-    preimage(outputRange: Range<Key>): Range<Key>
+    image(inputRange: Range<OrderedKey>): Range<OrderedKey>
+    preimage(outputRange: Range<OrderedKey>): Range<OrderedKey>
     apply(inputIter: ItemIterable<I>): ItemIterable<O>
+}
+
+export function diffToChange<T>(d: Diff<T>): Change<T> {
+    switch (d.kind) {
+        case 'add':
+            return {
+                kind: 'set',
+                key: d.key,
+                value: d.value,
+            }
+        case 'replace':
+            return {
+                kind: 'set',
+                key: d.key,
+                value: d.newValue,
+            }
+        case 'delete':
+            return {
+                kind: 'delete',
+                key: d.key,
+            }
+    }
 }
 
 // export interface SortedMonoOp<I, O> {
@@ -78,7 +109,6 @@ export interface MonoOp<I, O> {
 //     preimage(outputRange: Range<Key>): Range<Key>
 //     applyToOrdered(inputIter: ItemIterator<I>): ItemIterator<O>
 // }
-
 
 export type Graph<Inputs, Intermediates, Outputs> = {
     [K in keyof Outputs]: Collection<Inputs, Intermediates, Outputs[K]>
@@ -111,6 +141,15 @@ interface LoadNode<Inputs, T> {
     visit<R>(go: <K extends keyof Inputs>(k: K, cast: (t: Inputs[K]) => T) => R): R
 }
 
+export function load<Inputs, Intermediates, K extends keyof Inputs>(k: K, schema: string[]):
+    Collection<Inputs, Intermediates, Inputs[K]> {
+    return {
+        kind: 'load',
+        schema,
+        visit: (go) => go(k, x => x)
+    }
+}
+
 // interface SortedOpNode<Inputs, Intermediates, O> {
 //     kind: 'sorted_op'
 //     visit<R>(go: <I>(input: SortedCollection<Inputs, Intermediates, I>, op: SortedMonoOp<I, O>) => R): R
@@ -132,17 +171,28 @@ interface MergeNode<Inputs, Intermediates, T> {
     inputs: Collection<Inputs, Intermediates, T>[],
 }
 
+export async function isKeyExpected<Inputs, Intermediates, T>(
+    collection: Collection<Inputs, Intermediates, T>,
+    inputs: Readables<Inputs>,
+    intermediates: Readables<Intermediates>,
+    key: Key): Promise<boolean> {
+    for await (const _result of query(collection, inputs, intermediates, singleValue(new OrderedKey(key)))) {
+        return true;
+    }
+    return false;
+}
+
 export function enumerate<Inputs, Intermediates, T>(
     collection: Collection<Inputs, Intermediates, T>,
     inputs: Readables<Inputs>,
     intermediates: Readables<Intermediates>,
-    startFromCursor: Bound<Key>): ItemIterable<T> {
+    startFromCursor: Bound<OrderedKey>): ItemIterable<T> {
     switch (collection.kind) {
         //        case "sorted_op":
         case "merge":
         case "load":
         case "sort":
-            return query(collection, inputs, intermediates, {start: startFromCursor, end: {kind:'unbounded'}})
+            return query(collection, inputs, intermediates, { start: startFromCursor, end: { kind: 'unbounded' } })
         case "op":
             return collection.visit((input, op) => {
                 const enumeratedInput = enumerate(input, inputs, intermediates, startFromCursor);
@@ -200,12 +250,23 @@ export function enumerate<Inputs, Intermediates, T>(
 //     }
 // }
 
+export class CollectionBuilder<Inputs, Intermediates, T>{
+    constructor(public collection: Collection<Inputs, Intermediates, T>) { }
+
+    pipe<O>(op: MonoOp<T, O>): CollectionBuilder<Inputs, Intermediates, O> {
+        return new CollectionBuilder({
+            kind: 'op',
+            visit: (go) => go(this.collection, op)
+        })
+    }
+}
+
 
 export function query<Inputs, Intermediates, T>(
     collection: Collection<Inputs, Intermediates, T>,
     inputs: Readables<Inputs>,
     intermediates: Readables<Intermediates>,
-    range: Range<Key>): ItemIterable<T> {
+    range: Range<OrderedKey>): ItemIterable<T> {
     switch (collection.kind) {
         case "merge":
             throw "not implemented"
@@ -215,23 +276,25 @@ export function query<Inputs, Intermediates, T>(
                 // this to explicitly cast each row.
                 const readable = inputs[key] as any as Readable<T>;
 
-                return readable.sortedList(range);
+                return read.list(readable, range);
             });
         case "sort":
             return collection.visit((key, _cast): ItemIterable<T> => {
                 // Assumes that _cast will be the identity function. I could change 
                 // this to explicitly cast each row.
                 const readable = intermediates[key] as any as Readable<T>;
-                return readable.sortedList(range);
+
+                return read.list(readable, range);
             })
         case "op":
 
             return collection.visit((input, op) => {
                 const inputRange = op.preimage(range);
-                if (isInfinite(inputRange)) {
+                if (isEverything(inputRange)) {
                     throw "not doing a full DB scan";
                 }
-                return op.apply(query(input, inputs, intermediates, inputRange))
+                return from(op.apply(query(input, inputs, intermediates, inputRange)))
+                    .pipe(filter(([k, v]) => rangeContains(range, new OrderedKey(k))))
             })
     }
 }
@@ -241,7 +304,7 @@ export function getIntermediates<Inputs, Intermediates, Outputs>(
     let res: IntermediateCollections<Inputs, Intermediates> = {};
     for (const untypedCollectionId in graph) {
         const collectionId = untypedCollectionId as keyof typeof graph;
-        res = {...res, ...getIntermediatesForCollection(graph[collectionId])}
+        res = { ...res, ...getIntermediatesForCollection(graph[collectionId]) }
     }
     return res;
 }
@@ -327,7 +390,7 @@ async function* collectionDiffsOp<Inputs, Intermediates, I, O>(input: Collection
     intermediates: Readables<Intermediates>,
     sourceDiffs: Diffs<Inputs>): AsyncIterable<Diff<O>> {
     const inputDiffs = await collectionDiffs(input, inputs, intermediates, sourceDiffs);
-    const outputRanges = inputDiffs.map(d => op.image(singleValue(d.key)));
+    const outputRanges = inputDiffs.map(d => op.image(singleValue(new OrderedKey(d.key))));
     const inputRanges = outputRanges.map(r => op.preimage(r));
 
     for (const inputSubspace of inputRanges) {

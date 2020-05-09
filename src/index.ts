@@ -6,11 +6,11 @@ import { Dictionary, Request } from 'express-serve-static-core'
 import admin from 'firebase-admin'
 import uuid from 'uuid/v1'
 import batch from './batch'
-import { COLLECTION_GRAPH, getCollections, InputType, INPUT_ID, INPUT_OP } from './collections'
+import { getStateReadables } from './collections'
 import GetConfig from './config'
-import { DBHelper, DBHelper2 } from './framework/db'
-import { getSchema, Op, Processor, Source, Diffs} from './framework/graph'
-import { Action1_1, AnyAction, Action1_0, Game1_0 } from './model'
+import {  DBHelper2 } from './framework/db'
+import { getSchema, Op, Processor, Source, Diffs } from './framework/graph'
+import { Action1_1, AnyAction, Action1_0, Game1_0, TimestampedGame1_0 } from './model'
 import { validate as validateModel } from './model/index.validator'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
@@ -20,7 +20,10 @@ import { mapValues } from './util'
 import * as read from './framework/read';
 import { ReadWrite, Change, Diff } from './framework/base'
 import deepEqual from 'deep-equal'
-import { DBs, Readables } from './framework/graph_builder'
+import { DBs } from './framework/graph_builder'
+import { Graph, load, CollectionBuilder, Readables, Readable } from './flow/base'
+import { multiIndexBy, transpose } from './flow/ops'
+import timestamp from 'timestamp-nano';
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -118,11 +121,15 @@ app.listen(port, function() {
 //     }
 // }
 
-type StateSpec = {
-    games: Game1_0
+export type StateSpec = {
+    games: TimestampedGame1_0
 }
 
 type SideSpec = {}
+
+export type ExportSpec = {
+    gamesByPlayer: TimestampedGame1_0
+}
 
 type Keys<Spec> = {
     [K in keyof Spec]: string[][]
@@ -132,7 +139,7 @@ type Values<Spec> = {
 }
 
 
-interface ActionResponse {}
+interface ActionResponse { }
 
 type IntegrateResponse<R, ChangeSpec> = {
     response: R
@@ -149,89 +156,153 @@ class IntegrateContinue {
 
 
 interface Database {
-    
+
 }
 
-async function doAction2(action: Action1_0, {games} : Readables<Spec>): Promise<IntegrateResponse> {
 
+function placeholders(): Graph<StateSpec, {}, StateSpec> {
+    return {
+        games: load('games', ['game'])
+    }
+}
+
+export function getExports(): Graph<StateSpec, {}, ExportSpec> {
+    const ph = placeholders();
+    const gamesByPlayer = new CollectionBuilder(ph.games)
+        .pipe(multiIndexBy('player', (_, g) => g.players))
+        .pipe(transpose([1, 0])).collection;
+
+    return { gamesByPlayer }
+}
+
+function defaultGame(): Game1_0 {
+    return {
+        players: [],
+    }
+}
+
+function integrateHelper(a: Action1_0, game: Game1_0): Game1_0 {
+    switch (a.kind) {
+        case 'join_game':
+            if (game.players.indexOf(a.playerId) !== -1) {
+                return game
+            }
+            return {
+                ...game,
+                players: [...game.players, a.playerId],
+            }
+    }
+}
+
+
+async function doAction2(action: Action1_0, readables: Readables<StateSpec>): Promise<
+    IntegrateResponse<ActionResponse, StateSpec>> {
+    const game = await read.getOrDefault(readables.games, [action.gameId], defaultGame())
+    const newGame = integrateHelper(action, game);
+    const now = timestamp.fromDate(new Date());
+    return {
+        response: {},
+        changes: {
+            games: [{ kind: 'set', key: [action.gameId], value: {
+                timestamp: {
+                    seconds: now.getTimeT(),
+                    nanoseconds: now.getNano(),
+                },
+                ...newGame
+             } }]
+        }
+    }
 
 }
 
 async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise<void> {
-    // const anyAction = validateModel('Action1_0')(body)
+    const anyAction = validateModel('Action1_0')(body)
     // // const action = upgradeAction(anyAction)
 
-    // await db.runTransaction(async (tx: Transaction): Promise<void> => {
-    //     const helper2 = new DBHelper2(db, tx);
-
-    //     const stateConfig: Source<rev0.StateSpec> = {
-    //         game: {
-    //             collectionId: 'state-2.0',
-    //             schema: ['game'],
-    //             validator: validateModel('Game1_0')
-    //         }
-    //     };        
-    //     const intermediateConfig: Source<rev0.IntermediateSpec> = {};
-    //     const derivedConfig: Source<rev0.DerivedSpec> = {
-    //         gamesByPlayer: {
-    //             collectionId: 'derived-2.0',
-    //             schema: ['player', 'game'],
-    //             validator: validateModel('Game1_0')
-    //         }
-    //     };
-    //     const p = new Processor(db, tx, stateConfig, intermediateConfig);
-
-    //     const stateDbs = mapValues(stateConfig, (_, i) => helper2.open(i)) as DBs<rev0.StateSpec>;
-    //     const derivedDbs = mapValues(derivedConfig, (_, i) => helper2.open(i)) as DBs<rev0.DerivedSpec>;
+    await db.runTransaction(async (tx: Transaction): Promise<void> => {
+//        const helper2 = new DBHelper2(db, tx);
+        const stateReadables = getStateReadables(db, tx);
+        const response = await doAction2(anyAction, stateReadables);
+//        const stateDiffs = changeToDiff(response.changes
 
 
-    //     const rev00 : InitialRevision<Action1_0, {}, rev0.StateSpec,rev0.IntermediateSpec, rev0.DerivedSpec>  = rev0;
-    //     const sourceChanges = await rev00.integrate(anyAction, stateDbs, {});
-    //     const sourceDiffsP : Partial<Diffs<rev0.StateSpec>> = {};
-    //     for (const untypedCollectionId in sourceChanges) {
-    //         const collectionId = untypedCollectionId as keyof typeof sourceChanges;
-    //         const diffs :Diff<rev0.StateSpec[typeof collectionId]>[] = [];
-    //         for (const change of sourceChanges[collectionId]) {
-    //             const maybeDiff = await changeToDiff(stateDbs[collectionId], change);
-    //             if (maybeDiff !== null) {
-    //                 diffs.push(maybeDiff);
-    //             }
-    //         }
-    //         sourceDiffsP[collectionId] = diffs;
-    //     }
-    // const sourceDiffs = sourceDiffsP as Diffs<rev0.StateSpec>;
+        for (const untypedCollectionId in response.changes) {
+            const collectionId = untypedCollectionId as keyof typeof response.changes;
+            stateReadables[collectionId].commit(response.changes[collectionId]);
+        }       
 
-    //     const deriveOps = rev00.derive();
-    //     const derivedDiffsP : Partial<Diffs<rev0.DerivedSpec>> = {};
-    //     for (const untypedCollectionId in deriveOps) {
-    //         const collectionId = untypedCollectionId as keyof rev0.DerivedSpec;
-    //         derivedDiffsP[collectionId] = await p.reactTo(deriveOps[collectionId], sourceDiffs);
-    //     }
-    //     const derivedDiffs = derivedDiffsP as Diffs<rev0.DerivedSpec>;
+        //     const stateConfig: Source<rev0.StateSpec> = {
+        //         game: {
+        //             collectionId: 'state-2.0',
+        //             schema: ['game'],
+        //             validator: validateModel('Game1_0')
+        //         }
+        //     };        
+        //     const intermediateConfig: Source<rev0.IntermediateSpec> = {};
+        //     const derivedConfig: Source<rev0.DerivedSpec> = {
+        //         gamesByPlayer: {
+        //             collectionId: 'derived-2.0',
+        //             schema: ['player', 'game'],
+        //             validator: validateModel('Game1_0')
+        //         }
+        //     };
+        //     const p = new Processor(db, tx, stateConfig, intermediateConfig);
+
+        //     const stateDbs = mapValues(stateConfig, (_, i) => helper2.open(i)) as DBs<rev0.StateSpec>;
+        //     const derivedDbs = mapValues(derivedConfig, (_, i) => helper2.open(i)) as DBs<rev0.DerivedSpec>;
 
 
-    //     // const outputDiffs: [string, string[], Diff<DocumentData>[]][] = [
-    //     //     [INPUT_ID, getSchema(INPUT_OP), state1_0Diffs]]
-    //     // const output = getCollections()
+        //     const rev00 : InitialRevision<Action1_0, {}, rev0.StateSpec,rev0.IntermediateSpec, rev0.DerivedSpec>  = rev0;
+        //     const sourceChanges = await rev00.integrate(anyAction, stateDbs, {});
+        //     const sourceDiffsP : Partial<Diffs<rev0.StateSpec>> = {};
+        //     for (const untypedCollectionId in sourceChanges) {
+        //         const collectionId = untypedCollectionId as keyof typeof sourceChanges;
+        //         const diffs :Diff<rev0.StateSpec[typeof collectionId]>[] = [];
+        //         for (const change of sourceChanges[collectionId]) {
+        //             const maybeDiff = await changeToDiff(stateDbs[collectionId], change);
+        //             if (maybeDiff !== null) {
+        //                 diffs.push(maybeDiff);
+        //             }
+        //         }
+        //         sourceDiffsP[collectionId] = diffs;
+        //     }
+        // const sourceDiffs = sourceDiffsP as Diffs<rev0.StateSpec>;
 
-    //     // for (const collectionId in output) {
-    //     //     const op = output[collectionId]
-    //     //     outputDiffs.push([collectionId, getSchema(op), await p.reactTo(op, state1_0Diffs)])
-    //     // }
+        //     const deriveOps = rev00.derive();
+        //     const derivedDiffsP : Partial<Diffs<rev0.DerivedSpec>> = {};
+        //     for (const untypedCollectionId in deriveOps) {
+        //         const collectionId = untypedCollectionId as keyof rev0.DerivedSpec;
+        //         derivedDiffsP[collectionId] = await p.reactTo(deriveOps[collectionId], sourceDiffs);
+        //     }
+        //     const derivedDiffs = derivedDiffsP as Diffs<rev0.DerivedSpec>;
 
-    //     for (const untypedCollectionId in sourceDiffs) {
-    //         const collectionId = untypedCollectionId as keyof rev0.StateSpec;
-    //         stateDbs[collectionId].commit(sourceDiffs[collectionId]);
-    //     }        
-        
-    //     for (const untypedCollectionId in derivedDiffs) {
-    //         const collectionId = untypedCollectionId as keyof rev0.DerivedSpec;
-    //         derivedDbs[collectionId].commit(derivedDiffs[collectionId]);
-    //     }
-    // })
+
+        //     // const outputDiffs: [string, string[], Diff<DocumentData>[]][] = [
+        //     //     [INPUT_ID, getSchema(INPUT_OP), state1_0Diffs]]
+        //     // const output = getCollections()
+
+        //     // for (const collectionId in output) {
+        //     //     const op = output[collectionId]
+        //     //     outputDiffs.push([collectionId, getSchema(op), await p.reactTo(op, state1_0Diffs)])
+        //     // }
+
+        //     for (const untypedCollectionId in sourceDiffs) {
+        //         const collectionId = untypedCollectionId as keyof rev0.StateSpec;
+        //         stateDbs[collectionId].commit(sourceDiffs[collectionId]);
+        //     }        
+
+        //     for (const untypedCollectionId in derivedDiffs) {
+        //         const collectionId = untypedCollectionId as keyof rev0.DerivedSpec;
+        //         derivedDbs[collectionId].commit(derivedDiffs[collectionId]);
+        //     }
+    })
 }
 
-async function changeToDiff<T>(db: ReadWrite<T>, change: Change<T>) : Promise<Diff<T> |null> {
+// async function changesToDiffs<Spec>(dbs: Readables<Spec>, change: Changes<Spec>): Promise<Diff<T> | null> {
+
+// }
+
+async function changeToDiff<T>(db: Readable<T>, change: Change<T>): Promise<Diff<T> | null> {
     const current = await read.get(db, change.key);
     if (current === null) {
         if (change.kind == 'set') {
@@ -244,19 +315,19 @@ async function changeToDiff<T>(db: ReadWrite<T>, change: Change<T>) : Promise<Di
             return null
         }
     } else {
-        if (change.kind == 'set' ) {
+        if (change.kind == 'set') {
             if (!deepEqual(current, change.value)) {
-                        return {
-                key: change.key,
-                kind: 'replace',
-                oldValue: current,
-                newValue: change.value,
-            }
+                return {
+                    key: change.key,
+                    kind: 'replace',
+                    oldValue: current,
+                    newValue: change.value,
+                }
             } else {
                 return null
             }
         } else {
-                   return {
+            return {
                 key: change.key,
                 kind: 'delete',
                 value: current,

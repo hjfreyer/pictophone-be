@@ -52,6 +52,7 @@
     "ix": "^3.0.2",
     "lodash": "^4.17.15",
     "rxjs": "^6.5.4",
+    "timestamp-nano": "^1.0.0",
     "typescript-json-validator": "^2.3.1",
     "uuid": "^3.3.3"
   }

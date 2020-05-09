@@ -1,6 +1,7 @@
 import _ from 'lodash'
 import { from, last } from 'ix/iterable'
 import { minBy, takeLast, filter, flatMap } from 'ix/iterable/operators'
+import {strict as assert} from 'assert';
 
 export type Result<R, E> = {
     ok: true,
@@ -92,4 +93,29 @@ export function lexCompare(a: string[], b: string[]): number {
 
 export function stringSuccessor(s: string): string {
     return s + '\0';
+}
+
+export function invertPermutation(permutation: number[]): number[] {
+    const res = permutation.map(() => -1)
+    for (let i = 0; i < permutation.length; i++) {
+        res[permutation[i]] = i
+    }
+    return res
+}
+
+export function permute<T>(permutation: number[], a: T[]): T[] {
+    return permutation.map(idx => a[idx])
+}
+
+export function assertIsPermutation(permutation: number[]): void {
+    const nums = new Set<number>();
+    for (const p of permutation) {
+        if (p < 0 || permutation.length <= p) {
+            assert.fail("out of bounds");
+        }
+        if (nums.has(p)) {
+            assert.fail("duplicate");
+        }
+        nums.add(p);
+    }
 }

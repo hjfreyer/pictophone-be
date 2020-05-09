@@ -1,11 +1,13 @@
 import { DocumentData, DocumentReference, FieldPath, Firestore, Transaction, Timestamp } from '@google-cloud/firestore'
 import { strict as assert } from "assert"
 import { basename, dirname, join } from "path"
-import { Diff, Item , Readable, ReadWrite, Change } from './base'
+import { Diff, Item , Change } from './base'
 
 import { from } from 'ix/asynciterable';
-import { map } from 'ix/asynciterable/operators';
+import { map, tap } from 'ix/asynciterable/operators';
 import { InputInfo } from './graph';
+import { ItemIterable, Readable, OrderedKey } from '../flow/base';
+import { Range } from '../flow/range';
 
 
 interface Timestamped {
@@ -19,12 +21,12 @@ export class DBHelper2 {
     constructor(private db: Firestore,
         private tx: Transaction) { }
 
-    open<T>(info: InputInfo<T>): ReadWrite<T> {
-        return new DBReadable(this.db, this.tx, info);
+    open<T>(info: InputInfo<T>): Dataspace<T> {
+        return new Dataspace(this.db, this.tx, info);
     }
 }
 
-class DBReadable<T> implements ReadWrite<T> {
+export class Dataspace<T> implements Readable<T> {
     constructor(private db: Firestore,
         private tx: Transaction,
         private info: InputInfo<T>) { }
@@ -33,9 +35,14 @@ class DBReadable<T> implements ReadWrite<T> {
         return new DBHelper(this.db, this.tx, this.info.collectionId, this.info.schema).schema
     }
 
-    sortedList(startAt: string[]): AsyncIterable<TimestampedItem<T>> {
-        return from(new DBHelper(this.db, this.tx, this.info.collectionId, this.info.schema).list(startAt))
-            .pipe(map(([k, v]) => [k, this.info.validator(v)]));
+    sortedList(range : Range<OrderedKey>): ItemIterable<T> {
+            console.log('SORTED LIST ', this.schema, range)
+
+        return from(new DBHelper(this.db, this.tx, this.info.collectionId, this.info.schema).list(range))
+            .pipe(tap(x=>console.log("sortedlist tap"), null, ()=>console.log("DONE")))
+            .pipe(map(([k, v]) => {
+console.log("in pipe", v);
+                return [k, this.info.validator(v)]}));
     }
 
     commit(changes: Change<T>[]): void {
@@ -55,9 +62,14 @@ class DBHelper {
         ]
     }
 
-    async* list(startAt: string[]): AsyncIterable<Item<DocumentData>> {
+    async* list(range : Range<OrderedKey>): AsyncIterable<Item<DocumentData>> {
+        console.log('list ', this.schema, range)
+
         let q = this.db.collectionGroup(this.schema[this.schema.length - 1])
             .orderBy(FieldPath.documentId())
+
+        // TODO: respect the range.
+        const startAt : string[] = this.schema.map(()=>"");
 
         const path = this.getDocPath(startAt)
         if (path !== '') {
@@ -65,6 +77,8 @@ class DBHelper {
         }
         const subDocs = await this.tx.get(q)
         for (const doc of subDocs.docs) {
+            console.log('doc ', doc.ref)
+
             yield [this.getKey(doc.ref), doc.data()]
         }
     }

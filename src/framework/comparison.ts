@@ -1,6 +1,7 @@
-import { Readable, Diff , Item} from "./base";
+import { Diff , Item} from "./base";
 import * as read from './read';
 import deepEqual from "deep-equal";
+import { Readable } from "../flow/base";
 
 export async function *getDiffs<T>(expected: AsyncIterable<Item<T>>, actual: Readable<T>): AsyncIterable<Diff<T>> {
     for await(const [key, expectedValue] of expected) {

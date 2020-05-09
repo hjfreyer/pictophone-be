@@ -1,4 +1,5 @@
 import { Timestamp } from '@google-cloud/firestore'
+import { Readable } from '../flow/base'
 
 export type Item<V> = [string[], V]
 
@@ -22,14 +23,14 @@ export type Diff<V> = {
     newValue: V
 }
 
-export interface Readable<T> {
-    schema: string[]
-    sortedList(startAt: string[]): AsyncIterable<Item<T>>
-}
+// export interface Readable<T> {
+//     schema: string[]
+//     sortedList(startAt: string[]): AsyncIterable<Item<T>>
+// }
 
-export type Readables<Spec> = {
-    [K in keyof Spec]: Readable<Spec[K]>
-}
+// export type Readables<Spec> = {
+//     [K in keyof Spec]: Readable<Spec[K]>
+// }
 
 
 export interface Writeable<T> {

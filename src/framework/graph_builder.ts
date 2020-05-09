@@ -8,9 +8,9 @@ export type DirectoryOp<StateSpec, DerivedSpec> = {
     [K in keyof DerivedSpec]: Op<StateSpec, DerivedSpec[K]>
 }
 
-export type Readables<StateSpec> = {
-    [K in keyof StateSpec]: Readable<StateSpec[K]>
-}
+// export type Readables<StateSpec> = {
+//     [K in keyof StateSpec]: Readable<StateSpec[K]>
+// }
 
 export type DBs<StateSpec> = {
     [K in keyof StateSpec]: ReadWrite<StateSpec[K]>
