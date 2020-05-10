@@ -37,9 +37,7 @@ export class Dataspace<T> implements Readable<T> {
 
     seekTo(startAt: Key): ItemIterable<T> {
         return from(new DBHelper(this.db, this.tx, this.info.collectionId, this.info.schema).list(startAt))
-            .pipe(
-                tap(([k, v]) => console.log(`startAt: ${startAt}`, this.schema, k, v)), map(([k, v]) => {
-                return [k, this.info.validator(v)]}));
+            .pipe(map(([k, v]) => [k, this.info.validator(v)]));
     }
 
     commit(changes: Change<T>[]): void {

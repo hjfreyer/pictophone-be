@@ -56,12 +56,11 @@ export type Readables<Spec> = {
 export function unscrambledSpace<T>(r: Readable<T>): ScrambledSpace<T> {
     return {
         schema: r.schema,
-        seekTo(_key: Key): SliceIterable<T> {
+        seekTo(key: Key): SliceIterable<T> {
             return of({
-                schema: r.schema,
-                range: {kind: 'unbounded', start: r.schema.map(_=>'')},
-                seekTo(key): ItemIterable<T> { return r.seekTo(key) }
-                        })
+                range: {kind: 'unbounded', start: key},
+                iter: r.seekTo(key)
+            })
         }
     }
 }
@@ -73,23 +72,12 @@ export function keySuccessor(k: Key): Key {
     return [...k.slice(0, k.length - 1), stringSuccessor(k[k.length - 1])]
 }
 
-
-export interface Slice2<T> {
-    range: Range
-    // Key must be contained within range. The first returned item
-    // will be the smallest element not smaller "key". The rest of 
-    // the range will follow in lexicographic order.
-    seekTo(key: Key): ItemIterable<T>
-}
-
-
+// An ordered slice of key space.
 export interface Slice<T> {
-    schema: string[]
     range: Range
-    // Key must be contained within range. The first returned item
-    // will be the smallest element not smaller "key". The rest of 
-    // the range will follow in lexicographic order.
-    seekTo(key: Key): ItemIterable<T>
+    // All records in "range" will be present in this iterable, in lexicographic
+    // order, unless they've been skipped for being less than the "seekTo" key.
+    iter: ItemIterable<T>
 }
 
 export type SliceIterable<T> = AsyncIterable<Slice<T>>
@@ -97,8 +85,7 @@ export type SliceIterable<T> = AsyncIterable<Slice<T>>
 export interface ScrambledSpace<T> {
     schema: string[]
 
-    // The first returned Slice will be the singular slice whose range
-    // contains "key". The rest will follow in their natural (scrambled) order.
+    // Returns an iterator into the scrambled space starting from "key".
     seekTo(key: Key): SliceIterable<T>
 }
 
@@ -548,11 +535,8 @@ function transformScrambled<A, B>(input: ScrambledSpace<A>,
 seekTo(key: Key):SliceIterable<B> {
     return from(input.seekTo(key))
         .pipe(map((slice: Slice<A>): Slice<B> => ({
-            schema: slice.schema,
             range: slice.range,
-            seekTo(key: Key): ItemIterable<B> {
-                return fn(slice.seekTo(key))
-            }
+            iter: fn(slice.iter)
         })));
 }
     }

@@ -26,8 +26,6 @@ export function getDiffs<T>(expected: ScrambledSpace<T>, actual: Readable<T>): A
             return of();
         }
     }));
-    console.log("expected schema:", expected.schema)
-    console.log("actual schema:", actual.schema)
 
     const orphans = from(read.readAll(actual))
         .pipe(flatMap(async ([key, actualValue]):Promise<AsyncIterable<Diff<T>>> => {
@@ -44,15 +42,3 @@ export function getDiffs<T>(expected: ScrambledSpace<T>, actual: Readable<T>): A
 
     return of(diffs, orphans).pipe(concatAll());
 }
-
-// export async function *getOrphans<T>(isExpected: (key: string[]) => Promise<boolean>, actual: Readable<T>): AsyncIterable<Diff<T>> {
-//     for await(const [key, actualValue] of read.readAll(actual)) {
-//         if (!await isExpected(key)) {
-//             yield {
-//                 kind: 'delete',
-//                 key,
-//                 value: actualValue,
-//             }
-//         }
-//     }
-// }
