@@ -6,7 +6,7 @@ import { } from './framework/db'
 import { getSchema, Op, Processor } from './framework/graph'
 import { getExports } from '.'
 import { enumerate, isKeyExpected } from './flow/base'
-import { getDiffs, getOrphans } from './framework/comparison'
+import { getDiffs } from './flow/comparison'
 
 type BackwardsCheckCursor = {}
 
@@ -19,69 +19,64 @@ export async function check(db: Firestore, cursor: BackwardsCheckCursor): Promis
         for (const untypedCollectionId in exportz) {
             const collectionId = untypedCollectionId as keyof typeof exportz;
             console.log('checking:', collectionId)
-            const list = enumerate(exportz[collectionId], stateReadables, {}, { kind: 'unbounded' });
+            const space = enumerate(exportz[collectionId], stateReadables, {});
 
-            for await (const diff of getDiffs(list, exportzReadables[collectionId])) {
+            for await (const diff of getDiffs(space, exportzReadables[collectionId])) {
                 throw new Error(JSON.stringify(diff))
             }
-            for await (const orphan of getOrphans(
-                k=> isKeyExpected(exportz[collectionId], stateReadables, {}, k), 
-                exportzReadables[collectionId])) {
-                throw new Error(JSON.stringify(orphan))
-            }
         }
     })
 
     return {}
 }
 
-export async function backfill(db: Firestore, cursor: BackwardsCheckCursor): Promise<BackwardsCheckCursor> {
-    await db.runTransaction(async (tx) => {
-        const stateReadables = getStateReadables(db, tx);
-        const exportzReadables = getExportsReadables(db, tx);
-        const exportz = getExports();
+// export async function backfill(db: Firestore, cursor: BackwardsCheckCursor): Promise<BackwardsCheckCursor> {
+//     await db.runTransaction(async (tx) => {
+//         const stateReadables = getStateReadables(db, tx);
+//         const exportzReadables = getExportsReadables(db, tx);
+//         const exportz = getExports();
 
-        for (const untypedCollectionId in exportz) {
-            const collectionId = untypedCollectionId as keyof typeof exportz;
-            console.log('populating:', collectionId)
-            const list = enumerate(exportz[collectionId], stateReadables, {}, { kind: 'unbounded' });
+//         for (const untypedCollectionId in exportz) {
+//             const collectionId = untypedCollectionId as keyof typeof exportz;
+//             console.log('populating:', collectionId)
+//             const list = enumerate(exportz[collectionId], stateReadables, {}, { kind: 'unbounded' });
 
-            for await (const [key, value] of list) {
-                exportzReadables[collectionId].commit([{
-                    kind: 'set',
-                    key,
-                    value
-                }])
-            }
-        }
-    })
+//             for await (const [key, value] of list) {
+//                 exportzReadables[collectionId].commit([{
+//                     kind: 'set',
+//                     key,
+//                     value
+//                 }])
+//             }
+//         }
+//     })
 
-    return {}
-}
+//     return {}
+// }
 
-export async function purgeOrphans(db: Firestore, cursor: BackwardsCheckCursor): Promise<BackwardsCheckCursor> {
-    await db.runTransaction(async (tx) => {
-        const stateReadables = getStateReadables(db, tx);
-        const exportzReadables = getExportsReadables(db, tx);
-        const exportz = getExports();
+// export async function purgeOrphans(db: Firestore, cursor: BackwardsCheckCursor): Promise<BackwardsCheckCursor> {
+//     await db.runTransaction(async (tx) => {
+//         const stateReadables = getStateReadables(db, tx);
+//         const exportzReadables = getExportsReadables(db, tx);
+//         const exportz = getExports();
 
-        for (const untypedCollectionId in exportz) {
-            const collectionId = untypedCollectionId as keyof typeof exportz;
-            console.log('populating:', collectionId)
-            const list = enumerate(exportz[collectionId], stateReadables, {}, { kind: 'unbounded' });
+//         for (const untypedCollectionId in exportz) {
+//             const collectionId = untypedCollectionId as keyof typeof exportz;
+//             console.log('populating:', collectionId)
+//             const list = enumerate(exportz[collectionId], stateReadables, {}, { kind: 'unbounded' });
 
-            for await (const [key, value] of list) {
-                exportzReadables[collectionId].commit([{
-                    kind: 'set',
-                    key,
-                    value
-                }])
-            }
-        }
-    })
+//             for await (const [key, value] of list) {
+//                 exportzReadables[collectionId].commit([{
+//                     kind: 'set',
+//                     key,
+//                     value
+//                 }])
+//             }
+//         }
+//     })
 
-    return {}
-}
+//     return {}
+// }
 
 // export async function backfill(db: Firestore, cursor: BackwardsCheckCursor): Promise<BackwardsCheckCursor> {
 //     await db.runTransaction(async (tx) => {
@@ -153,13 +148,13 @@ function batch(db: Firestore): Router {
         }).catch(next)
     })
 
-    res.post('/backfill', function(_req: Request<{}>, res, next) {
-        const cursor = _req.body as BackwardsCheckCursor
-        backfill(db, cursor).then(result => {
-            res.status(200)
-            res.json(result)
-        }).catch(next)
-    })
+    // res.post('/backfill', function(_req: Request<{}>, res, next) {
+    //     const cursor = _req.body as BackwardsCheckCursor
+    //     backfill(db, cursor).then(result => {
+    //         res.status(200)
+    //         res.json(result)
+    //     }).catch(next)
+    // })
 
     // res.post('/delete-collection/:collectionId', function(req: Request<DeleteRequest>, res, next) {
     //     deleteCollection(db, req.params).then(result => {

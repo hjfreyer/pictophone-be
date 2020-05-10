@@ -6,7 +6,7 @@ import { Diff, Item , Change } from './base'
 import { from } from 'ix/asynciterable';
 import { map, tap } from 'ix/asynciterable/operators';
 import { InputInfo } from './graph';
-import { ItemIterable, Readable, OrderedKey } from '../flow/base';
+import { ItemIterable, Readable, Key } from '../flow/base';
 import { Range } from '../flow/range';
 
 
@@ -32,16 +32,13 @@ export class Dataspace<T> implements Readable<T> {
         private info: InputInfo<T>) { }
 
     get schema(): string[] {
-        return new DBHelper(this.db, this.tx, this.info.collectionId, this.info.schema).schema
+        return this.info.schema
     }
 
-    sortedList(range : Range<OrderedKey>): ItemIterable<T> {
-            console.log('SORTED LIST ', this.schema, range)
-
-        return from(new DBHelper(this.db, this.tx, this.info.collectionId, this.info.schema).list(range))
-            .pipe(tap(x=>console.log("sortedlist tap"), null, ()=>console.log("DONE")))
-            .pipe(map(([k, v]) => {
-console.log("in pipe", v);
+    seekTo(startAt: Key): ItemIterable<T> {
+        return from(new DBHelper(this.db, this.tx, this.info.collectionId, this.info.schema).list(startAt))
+            .pipe(
+                tap(([k, v]) => console.log(`startAt: ${startAt}`, this.schema, k, v)), map(([k, v]) => {
                 return [k, this.info.validator(v)]}));
     }
 
@@ -62,14 +59,9 @@ class DBHelper {
         ]
     }
 
-    async* list(range : Range<OrderedKey>): AsyncIterable<Item<DocumentData>> {
-        console.log('list ', this.schema, range)
-
+    async* list(startAt : Key): AsyncIterable<Item<DocumentData>> {
         let q = this.db.collectionGroup(this.schema[this.schema.length - 1])
             .orderBy(FieldPath.documentId())
-
-        // TODO: respect the range.
-        const startAt : string[] = this.schema.map(()=>"");
 
         const path = this.getDocPath(startAt)
         if (path !== '') {
@@ -77,8 +69,6 @@ class DBHelper {
         }
         const subDocs = await this.tx.get(q)
         for (const doc of subDocs.docs) {
-            console.log('doc ', doc.ref)
-
             yield [this.getKey(doc.ref), doc.data()]
         }
     }

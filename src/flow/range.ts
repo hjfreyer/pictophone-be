@@ -1,137 +1,77 @@
 
 import _ from 'lodash';
-import { Comparator, Option, none, some } from './util';
+import { Comparator, Option, none, some, lexCompare } from './util';
+import { Key, keySuccessor } from './base';
 
-
-export interface Comparable<T> {
-    compareTo(other: T): number
-}
-
-export type Bound<T extends Comparable<T>> = {
-    kind: 'inclusive' | 'exclusive',
-    value: T,
+export type Range = {
+    kind: 'bounded'
+    start:Key
+    end:Key
 } | {
     kind: 'unbounded'
+    start: Key
 }
 
-export interface Range<T extends Comparable<T>> {
-    start: Bound<T>
-    end: Bound<T>
-}
-
-export function singleValue<T extends Comparable<T>>(value: T): Range<T> {
+export function singleValue(value: Key): Range {
     return {
-        start: { kind: 'inclusive', value },
-        end: { kind: 'inclusive', value },
+        kind: 'bounded',
+        start: value,
+        end: keySuccessor(value),
     };
 }
 
 
-export function isSingleValue<T extends Comparable<T>>(r: Range<T>): Option<T> {
-    if (r.start.kind != 'inclusive' || r.end.kind != 'inclusive') {
+export function isSingleValue(r: Range): Option<Key> {
+    if (r.kind === 'unbounded') {
         return none()
     }
-    if (r.start.value.compareTo(r.end.value) !== 0) {
+    if (lexCompare(keySuccessor(r.start), r.end) !== 0) {
         return none()
     }
-    return some(r.start.value);
+    return some(r.start);
 }
 
 
-// export function compareBounds<T>(a : Range<T>, b:Range<T>, cmp: (a:T, b:T)=> number):boolean {
+// export function compareBounds<Key>(a : Range, b:Range, cmp: (a:Key, b:Key)=> number):boolean {
 
 // }
 
 
-export function isEmpty<T extends Comparable<T>>({ start, end }: Range<T>): boolean {
-    if (start.kind === 'unbounded' || end.kind === 'unbounded') {
+export function isEmpty(r: Range): boolean {
+    if (r.kind === 'unbounded') {
         return false;
     }
-    const c = start.value.compareTo(end.value);
-    if (c === 0) {
-        return start.kind === 'exclusive' || end.kind === 'exclusive';
+    return lexCompare(r.end, r.start) <= 0;
+}
+
+// export function everything(): Range {
+//     return { start: { kind: 'unbounded' }, end: { kind: 'unbounded' } }
+// }
+
+// export function isEverything({ start, end }: Range): boolean {
+//     return start.kind === 'unbounded' && end.kind === 'unbounded'
+// }
+
+export function rangeContains(range: Range, point: Key): boolean {
+    if (lexCompare(point, range.start) < 0) {
+        return false;
     }
-    return c > 0;
-}
-
-export function everything<T extends Comparable<T>>(): Range<T> {
-    return { start: { kind: 'unbounded' }, end: { kind: 'unbounded' } }
-}
-
-export function isEverything<T extends Comparable<T>>({ start, end }: Range<T>): boolean {
-    return start.kind === 'unbounded' && end.kind === 'unbounded'
-}
-
-export function rangeContains<T extends Comparable<T>>({ start, end }: Range<T>, point: T): boolean {
-    const afterStart = (() => {
-        switch (start.kind) {
-            case 'unbounded':
-                return true;
-            case 'exclusive':
-                return start.value.compareTo(point) < 0
-            case 'inclusive':
-                return start.value.compareTo(point) <= 0
-        }
-    })();
-    const beforeEnd = (() => {
-        switch (end.kind) {
-            case 'unbounded':
-                return true;
-            case 'exclusive':
-                return end.value.compareTo(point) > 0
-            case 'inclusive':
-                return end.value.compareTo(point) >= 0
-        }
-    })();
-    return afterStart && beforeEnd;
+    return range.kind === 'unbounded' || (lexCompare(point, range.end) < 0);
 }
 
 
-export function rangeContainsRange<T extends Comparable<T>>(
-    { start: outerStart, end: outerEnd }: Range<T>,
-    { start: innerStart, end: innerEnd }: Range<T>): boolean {
-    const afterStart = (() => {
-        if (outerStart.kind === 'unbounded') {
-            return true;
-        }
-        if (innerStart.kind === 'unbounded') {
-            return false;
-        }
-        const cmp = innerStart.value.compareTo(outerStart.value);
-        if (cmp < 0) {  // innerStart < outerStart
-            return false;
-        }
-        if (cmp > 0) {  // innerStart > outerStart
-            return true;
-        }
-
-        return outerStart.kind === 'inclusive' || (outerStart.kind === 'exclusive' && innerStart.kind === 'exclusive')
-    })();
-    const beforeEnd = (() => {
-        if (outerEnd.kind === 'unbounded') {
-            return true;
-        }
-        if (innerEnd.kind === 'unbounded') {
-            return false;
-        }
-        const cmp = innerEnd.value.compareTo(outerEnd.value);
-        if (cmp < 0) {  // innerEnd < outerEnd
-            return true;
-        }
-        if (cmp > 0) {  // innerEnd > outerEnd
-            return false;
-        }
-
-        return outerEnd.kind === 'inclusive' || (outerEnd.kind === 'exclusive' && innerEnd.kind === 'exclusive')
-    })();
-    return afterStart && beforeEnd;
+export function rangeContainsRange(outer: Range, inner: Range): boolean {
+    if (lexCompare(inner.start, outer.start) < 0) {
+        return false;
+    }    
+    return outer.kind === 'unbounded' || (inner.kind === 'bounded' && lexCompare(inner.end, outer.end) <= 0);
 }
 
-// export function overlap<T>(a : Range<T>, b:Range<T>, cmp: (a:T, b:T)=> number):boolean {
+// export function overlap<Key>(a : Range, b:Range, cmp: (a:Key, b:Key)=> number):boolean {
 //     if (a.start.kind === 'unbounded')
 // }
 
-// export function collapse<T>(ranges : Range<T>[], cmp: (a:T, b:T)=> number): Range<T>[] {
+// export function collapse<Key>(ranges : Range[], cmp: (a:Key, b:Key)=> number): Range[] {
 //     const classes = ranges.map((_, idx) => idx);
 //     for (let i = 0; i < ranges.length; i++) {
 //     for (let j = i+1; j < ranges.length; j++) {

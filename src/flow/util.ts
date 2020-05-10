@@ -74,16 +74,19 @@ export async function* batchStreamBy<T>(
     }
 }
 
+export function strcmp(a : string, b: string) : number {
+    if (a < b) { return -1; }
+    if (b < a) { return 1; }
+    return 0;
+}
 
-
-
-export function lexCompare(a: string[], b: string[]): number {
+export function lexCompare(a: string[], b: string[]): number {    
     if (a.length !== b.length) {
-        throw new Error('not supported')
+        throw new Error(`cannot compare keys with different lengths: "${JSON.stringify(a)}" vs ${JSON.stringify(b)}`)
     }
-
+    
     for (let i = 0; i < a.length; i++) {
-        const cmp = a[i].localeCompare(b[i])
+        const cmp = strcmp(a[i], b[i])
         if (cmp !== 0) {
             return cmp
         }

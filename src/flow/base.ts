@@ -2,28 +2,20 @@ import { Option, sortedMerge, batchStreamBy, Comparator, stringSuccessor, Result
 import { from, of, toArray, first, single } from "ix/asynciterable"
 import { map, filter, flatMap } from "ix/asynciterable/operators"
 import _ from 'lodash'
-import { Range, Bound, singleValue, isEverything, Comparable, rangeContains, everything } from './range'
+import { Range, singleValue, rangeContains, rangeContainsRange } from './range'
 import { lexCompare } from "./util"
 import deepEqual from "deep-equal"
-import * as read from "../framework/read"
-
-export class OrderedKey implements Comparable<OrderedKey> {
-    constructor(public key: Key) { }
-
-    compareTo(other: OrderedKey) {
-        return lexCompare(this.key, other.key)
-    }
-}
+import * as read from "./read"
 
 export type Key = string[]
 
 export type Item<V> = [Key, V]
 
-export interface Cursor<V> {
-    key: Key
-    value: V
-    cursor: Bound<OrderedKey>
-}
+// export interface Cursor<V> {
+//     key: Key
+//     value: V
+//     cursor: Bound<OrderedKey>
+// }
 
 export type Change<V> = {
     key: string[]
@@ -50,11 +42,11 @@ export type Diffs<Spec> = {
 }
 
 export type ItemIterable<V> = AsyncIterable<Item<V>>
-export type CursorIterable<V> = AsyncIterable<Cursor<V>>
+//export type CursorIterable<V> = AsyncIterable<Cursor<V>>
 
 export interface Readable<T> {
     schema: string[]
-    sortedList(range: Range<OrderedKey>): ItemIterable<T>
+    seekTo(startAt: Key): ItemIterable<T>
 }
 
 export type Readables<Spec> = {
@@ -67,14 +59,9 @@ export function unscrambledSpace<T>(r: Readable<T>): ScrambledSpace<T> {
         seekTo(_key: Key): SliceIterable<T> {
             return of({
                 schema: r.schema,
-                range: everything(),
-                seekTo(key): ItemIterable<T> {
-                    return r.sortedList({
-                        start: { kind: 'inclusive', value: new OrderedKey(key) },
-                        end: { kind: 'unbounded' }
-                    });
-                }
-            })
+                range: {kind: 'unbounded', start: r.schema.map(_=>'')},
+                seekTo(key): ItemIterable<T> { return r.seekTo(key) }
+                        })
         }
     }
 }
@@ -87,9 +74,18 @@ export function keySuccessor(k: Key): Key {
 }
 
 
+export interface Slice2<T> {
+    range: Range
+    // Key must be contained within range. The first returned item
+    // will be the smallest element not smaller "key". The rest of 
+    // the range will follow in lexicographic order.
+    seekTo(key: Key): ItemIterable<T>
+}
+
+
 export interface Slice<T> {
     schema: string[]
-    range: Range<OrderedKey>
+    range: Range
     // Key must be contained within range. The first returned item
     // will be the smallest element not smaller "key". The rest of 
     // the range will follow in lexicographic order.
@@ -110,7 +106,7 @@ export interface MonoOp<I, O> {
     // schema(inputSchema: string[]): string[]
     // rewindInputKey(key: Key): Key
     // smallestImpactingInputKey(outputKey: Key): Key
-    impactedOutputRange(inputKey: Key): Range<OrderedKey>
+    impactedOutputRange(inputKey: Key): Range
     // apply(inputIter: ItemIterable<I>): ItemIterable<O>
     // mapSlice(input: Slice<I>): SliceIterable<O>
     map(input: ScrambledSpace<I>): ScrambledSpace<O>
@@ -218,10 +214,8 @@ export async function isKeyExpected<Inputs, Intermediates, T>(
     inputs: Readables<Inputs>,
     intermediates: Readables<Intermediates>,
     key: Key): Promise<boolean> {
-    for await (const _result of enumerate(collection, inputs, intermediates, key)) {
-        return true;
-    }
-    return false;
+    const output = enumerate(collection, inputs, intermediates);
+    return (await read.getFromScrambledOrDefault(output, key, null)) === null;
 }
 
 export function enumerate<Inputs, Intermediates, T>(
@@ -331,7 +325,7 @@ export class CollectionBuilder<Inputs, Intermediates, T>{
 //     collection: Collection<Inputs, Intermediates, T>,
 //     inputs: Readables<Inputs>,
 //     intermediates: Readables<Intermediates>,
-//     range: Range<OrderedKey>): ItemIterable<T> {
+//     range: Range): ItemIterable<T> {
 //     switch (collection.kind) {
 //         case "merge":
 //             throw "not implemented"
@@ -459,9 +453,6 @@ async function* collectionDiffsOp<Inputs, Intermediates, I, O>(input: Collection
     // TODO: dedup outputRanges.
 
     for (const outputRange of outputRanges) {
-        if (outputRange.start.kind !== 'inclusive') {
-            throw "operation output range must be inclusive on the start"
-        }
         // const inputStartAt = op.smallestImpactingInputKey(outputRange.start.value.key);
         // const inputEnum = await first(enumerate(input, inputs, intermediates, inputStartAt));
 
@@ -471,19 +462,11 @@ async function* collectionDiffsOp<Inputs, Intermediates, I, O>(input: Collection
 
         const inputSpace = enumerate(input, inputs, intermediates);
 
-        const oldOutput = op.map(inputSpace).seekTo(outputRange.start.value.key);
-        const newOutput = op.map(transformScrambled(inputSpace, i => patch(i, inputDiffs)))
-            .seekTo(outputRange.start.value.key);
+        const oldOutput = op.map(inputSpace);
+        const newOutput = op.map(transformScrambled(inputSpace, i => patch(i, inputDiffs)));
 
-        if (!deepEqual(oldOutput.range, newOutput.range)) {
-            throw "patches should never changes slice range";
-        }
-        if (!rangeContainsRange(oldOutput.range, outputRange)) {
-            throw "diff impact range cannot span multiple slices"
-        }
-
-        const oldItemIter = oldOutput.seekTo(outputRange.start.value.key);
-        const newItemIter = newOutput.seekTo(outputRange.start.value.key);
+        const oldItemIter = read.readRangeFromSingleSlice(oldOutput, outputRange);
+        const newItemIter = read.readRangeFromSingleSlice(newOutput, outputRange);
 
         const taggedOld: AsyncIterable<['old' | 'new', Item<O>]> = from(oldItemIter).pipe(
             map(i => ['old', i])
@@ -566,11 +549,11 @@ seekTo(key: Key):SliceIterable<B> {
     return from(input.seekTo(key))
         .pipe(map((slice: Slice<A>): Slice<B> => ({
             schema: slice.schema,
+            range: slice.range,
             seekTo(key: Key): ItemIterable<B> {
                 return fn(slice.seekTo(key))
             }
         })));
-
 }
     }
 }

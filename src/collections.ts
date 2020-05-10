@@ -17,7 +17,7 @@ import { validate as validateRpc } from './model/rpc.validator'
 import * as rev0 from './rev0'
 import { InitialRevision, Changes } from './framework/revision'
 import { mapValues } from './util'
-import * as read from './framework/read';
+import * as read from './flow/read';
 import { ReadWrite, Change, Diff } from './framework/base'
 import deepEqual from 'deep-equal'
 import { DBs } from './framework/graph_builder'
