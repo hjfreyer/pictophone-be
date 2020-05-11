@@ -8,6 +8,7 @@ import { getExports } from '.'
 import { enumerate, isKeyExpected, diffToChange } from './flow/base'
 import { getDiffs } from './flow/comparison'
 import { from, of, first, toArray } from "ix/asynciterable";
+import * as read from './flow/read'
 
 type BackwardsCheckCursor = {}
 
@@ -22,12 +23,21 @@ export async function check(db: Firestore, cursor: BackwardsCheckCursor): Promis
             console.log('checking:', collectionId)
             const space = enumerate(exportz[collectionId], stateReadables, {});
 
-            for await (const diff of getDiffs(space, exportzReadables[collectionId])) {
-                throw new Error(JSON.stringify(diff))
+            for await(const slice of space.seekTo(['', ''])) {
+                console.log('slice:', slice.range)
+                for await (const [key, value] of slice.iter) {
+                    console.log("OUTPUT: ", key);
+                }
+
             }
+
+//             for await (const diff of getDiffs(space, exportzReadables[collectionId])) {
+//                 console.log("DIFF: ", diff);
+// //                throw new Error(JSON.stringify(diff))
+//             }
         }
     })
-
+    console.log("done")
     return {}
 }
 

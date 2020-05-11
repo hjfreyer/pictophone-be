@@ -25,6 +25,9 @@ import { Graph, load, CollectionBuilder, Readables, Readable, getDiffs, diffToCh
 import { multiIndexBy, transpose } from './flow/ops'
 import timestamp from 'timestamp-nano';
 
+import { interval, from, of, toArray, first, single, concat } from "ix/asynciterable"
+import { map, filter, flatMap, tap, take, skip, skipWhile } from "ix/asynciterable/operators"
+
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
 })
@@ -400,3 +403,30 @@ app.post('/upload', cors(), function(req: Request<Dictionary<string>>, res, next
 })
 
 app.use('/batch', batch(db))
+
+
+const x = interval(1000);
+//    .pipe(tap(i=>console.log('go', i)));
+
+            const outputSlicesHead = x.pipe(
+            // tap(slice=>console.log("****** INTO THING 1", slice)),
+        take(1),
+            tap(slice=>console.log("****** THING 1", slice)),
+    );
+    const outputSlicesTail = x.pipe(
+            // tap(slice=>console.log("****** INTO THING 2", slice)),
+            skip(1),
+            tap(slice=>console.log("****** THING 2", slice)),
+        );
+
+        const y = concat(outputSlicesHead, outputSlicesTail);
+
+(async () => {
+    for await (const z of y) {
+//        console.log(z);
+        // expected output:
+        //    "hello"
+        //    "async"
+        //    "iteration!"
+    }
+})();

@@ -1,6 +1,6 @@
 import { Option, sortedMerge, batchStreamBy, Comparator, stringSuccessor, Result } from "./util"
-import { from, of, toArray, first, single } from "ix/asynciterable"
-import { map, filter, flatMap, tap } from "ix/asynciterable/operators"
+import { from, of, toArray, first, single, concat } from "ix/asynciterable"
+import { map, filter, flatMap, tap, take, skip, skipWhile } from "ix/asynciterable/operators"
 import _ from 'lodash'
 import { Range, singleValue, rangeContains, rangeContainsRange } from './range'
 import { lexCompare } from "./util"
@@ -58,7 +58,7 @@ export function unscrambledSpace<T>(r: Readable<T>): ScrambledSpace<T> {
         schema: r.schema,
         seekTo(key: Key): SliceIterable<T> {
             return of({
-                range: {kind: 'unbounded', start: key},
+                range: { kind: 'unbounded', start: key },
                 iter: r.seekTo(key)
             })
         }
@@ -90,13 +90,18 @@ export interface ScrambledSpace<T> {
 }
 
 export interface MonoOp<I, O> {
-    // schema(inputSchema: string[]): string[]
+    schema(inputSchema: string[]): string[]
     // rewindInputKey(key: Key): Key
     // smallestImpactingInputKey(outputKey: Key): Key
-    impactedOutputRange(inputKey: Key): Range
+
+    // Returns an input-space key such that a slice beginning with it
+    // will map onto a slice containing the output key.
+    preimage(outputKey: Key): Key
+    // impactedOutputRange(inputKey: Key): Range
+    getSmallestInputRange(inputKey: Key): Range
     // apply(inputIter: ItemIterable<I>): ItemIterable<O>
-    // mapSlice(input: Slice<I>): SliceIterable<O>
-    map(input: ScrambledSpace<I>): ScrambledSpace<O>
+    mapSlice(input: Slice<I>): SliceIterable<O>
+    //map(input: ScrambledSpace<I>): ScrambledSpace<O>
 }
 
 export function diffToChange<T>(d: Diff<T>): Change<T> {
@@ -238,12 +243,72 @@ export function enumerate<Inputs, Intermediates, T>(
         //     })
         case "op":
             return collection.visit((input, op) => {
-//                const inputStartAt = op.smallestImpactingInputKey(startAt);
                 const enumeratedInput = enumerate(input, inputs, intermediates);
-                return op.map(enumeratedInput)
+                const schema = op.schema(enumeratedInput.schema);
+
+                return {
+                    schema,
+                    seekTo(outputStartAt: Key): SliceIterable<T> {
+                        console.log("seeking from:", outputStartAt, op)
+                        const inputStartAt = op.preimage(outputStartAt);
+                        const inputSliceIter = enumeratedInput.seekTo(inputStartAt);
+                        const outputSliceIter = from(inputSliceIter)
+                            .pipe(
+                                tap(slice=> console.log("into op", slice.range, op)),
+                                flatMap(slice => op.mapSlice(slice)))
+
+
+                        // return outputSliceIter.pipe(
+                        //     map((slice: Slice<T>, idx:number ): Slice<T> => {
+                        //         if (idx !== 0) {
+                        //             return slice;
+                        //         }
+                        //         // The first slice of outputSliceIter will necessarily
+                        //         // contain "outputStartAt" (by definition of preimage), but
+                        //         // won't necessarily start there. Skip ahead.
+                        //         return seekSliceTo(slice, outputStartAt);
+                        //     })
+                        // )
+
+                        // The first slice of outputSliceIter will necessarily
+                        // contain "outputStartAt" (by definition of preimage), but
+                        // won't necessarily start there. Skip ahead.
+                        const outputSlicesHead = outputSliceIter.pipe(
+                                tap(slice=>console.log("****** INTO THING 1", slice.range)),
+                            take(1),
+                                tap(slice=>console.log("****** THING 1", slice.range)),
+                        );
+                        const outputSlicesTail = outputSliceIter.pipe(
+                                tap(slice=>console.log("****** INTO THING 2", slice.range)),
+                                skip(1),
+                                tap(slice=>console.log("****** THING 2", slice.range)),
+                            );
+
+
+                        // const outputHeadSeeked = outputSlicesHead.pipe(
+                        //     map(head => seekSliceTo(head, outputStartAt)));
+                
+                        return concat(outputSlicesHead, outputSlicesTail);
+                    }
+                }
+
+                //                const inputStartAt = op.smallestImpactingInputKey(startAt);
+                //return op.map(enumeratedInput)
                 // return from(enumeratedInput)
                 //     .pipe(flatMap(i => op.mapSlice(i)));
             })
+    }
+}
+
+function seekSliceTo<T>(slice: Slice<T>, start: Key): Slice<T> {
+    return {
+        range: {
+            ...slice.range,
+            start: start
+        },
+        iter: from(slice.iter).pipe(
+            skipWhile(([k,]) => lexCompare(k, start) < 0)
+        )
     }
 }
 
@@ -430,72 +495,76 @@ async function collectionDiffs<Inputs, Intermediates, T>(
     }
 }
 
+
+
 async function* collectionDiffsOp<Inputs, Intermediates, I, O>(input: Collection<Inputs, Intermediates, I>,
     op: MonoOp<I, O>,
     inputs: Readables<Inputs>,
     intermediates: Readables<Intermediates>,
     sourceDiffs: Diffs<Inputs>): AsyncIterable<Diff<O>> {
+    const inputSpace = enumerate(input, inputs, intermediates);
     const inputDiffs = await collectionDiffs(input, inputs, intermediates, sourceDiffs);
-    const outputRanges = inputDiffs.map(d => op.impactedOutputRange(d.key));
-    // TODO: dedup outputRanges.
+    let inputRanges = inputDiffs.map(d => op.getSmallestInputRange(d.key));
 
-    const uniqdOutputRanges = _.uniq(outputRanges);
+    // TODO: dedup this better.
+    inputRanges = _.uniq(inputRanges);
 
-    for (const outputRange of uniqdOutputRanges) {
-        console.log('update output range', outputRange)
+    for (const inputRange of inputRanges) {
+        console.log('update from input range', inputRange)
         // const inputStartAt = op.smallestImpactingInputKey(outputRange.start.value.key);
         // const inputEnum = await first(enumerate(input, inputs, intermediates, inputStartAt));
 
         // if (inputEnum === undefined) {
         //     throw new Error("enumerate must always output at least one slice");
         // }
+        const inputSlice = read.subslice(inputSpace, inputRange);
 
-        const inputSpace = enumerate(input, inputs, intermediates);
+        const oldOutput = op.mapSlice(inputSlice);
+        const newOutput = op.mapSlice(patchSlice(inputSlice, inputDiffs));
 
-        const oldOutput = op.map(inputSpace);
-        const newOutput = op.map(transformScrambled(inputSpace, i => patch(i, inputDiffs)));
+        type AgedItem = {age: 'old' | 'new', key: Key, value: O};
+        const agedItemCmp: Comparator<AgedItem> =
+            (a, b) => lexCompare(a.key, b.key);
+        const toTagged = async (age: 'old'| 'new', slices: SliceIterable<O>): Promise<AgedItem[]> => {
+            const items = from(slices)
+                .pipe(flatMap(slice => from(slice.iter).pipe(map(([key, value]) => ({age, key, value})))))
+                const itemArray = await toArray(items);
+                itemArray.sort(agedItemCmp)
+                return itemArray;
+        }
 
-        const oldItemIter = read.readRangeFromSingleSlice(oldOutput, outputRange);
-        const newItemIter = read.readRangeFromSingleSlice(newOutput, outputRange);
+        const oldItems = await toTagged('old', oldOutput);
+        const newItems = await toTagged('new', newOutput);
 
-        const taggedOld: AsyncIterable<['old' | 'new', Item<O>]> = from(oldItemIter).pipe(
-            map(i => ['old', i])
+        const merged = from(sortedMerge([of(...oldItems), of(...newItems)], agedItemCmp)).pipe(
+//            tap(([age, [key,]]) => console.log('TAP ', age, key))
         );
-        const taggedNew: AsyncIterable<['old' | 'new', Item<O>]> = from(newItemIter).pipe(
-            map(i => ['new', i])
-        );
-
-        const cmp: Comparator<['old' | 'new', Item<O>]> =
-            ([_aa, [akey, _av]], [_ba, [bkey, _bv]]) => lexCompare(akey, bkey);
-        const merged = from(sortedMerge([taggedOld, taggedNew], cmp)).pipe(
-            tap(([age, [key, ]]) =>console.log('TAP ', age, key))
-        );
-        for await (const batch of batchStreamBy(merged, cmp)) {
-            console.log("  batch", batch.map(([age, [key, ]])=> [age, key]))
+        for await (const batch of batchStreamBy(merged, agedItemCmp)) {
             if (2 < batch.length) {
                 throw "batch too big!"
             }
             if (batch.length == 2) {
-                const [key, oldValue] = batch[0][0] == 'old' ? batch[0][1] : batch[1][1];
-                const [, newValue] = batch[0][0] == 'new' ? batch[0][1] : batch[1][1];
+                const oldValue = batch[0].age === 'old' ? batch[0] : batch[1];
+                const newValue = batch[0].age === 'new' ? batch[0] : batch[1];
+                const key = oldValue.key;
 
-                if (!deepEqual(oldValue, newValue)) {
-                                    console.log("  doing",  {
+                if (!deepEqual(oldValue.value, newValue.value)) {
+                    console.log("  doing", {
                         kind: 'replace',
                         key,
-                        oldValue,
-                        newValue,
+                        oldValue:  oldValue.value,
+                        newValue: newValue.value,
                     })
                     yield {
                         kind: 'replace',
                         key,
-                        oldValue,
-                        newValue,
+                        oldValue:  oldValue.value,
+                        newValue: newValue.value,
                     }
                 }
             } else {
                 // Else, batch.length == 1.
-                const [age, [key, value]] = batch[0];
+                const {age, key, value} = batch[0];
                 console.log("  doing", {
                     kind: age === 'old' ? 'delete' : 'add',
                     key,
@@ -546,19 +615,26 @@ async function* patch<T>(input: ItemIterable<T>,
     }
 }
 
-function transformScrambled<A, B>(input: ScrambledSpace<A>,
-    fn: (a: ItemIterable<A>) => ItemIterable<B>): ScrambledSpace<B> {
-  return {
-        schema: input.schema,
-seekTo(key: Key):SliceIterable<B> {
-    return from(input.seekTo(key))
-        .pipe(map((slice: Slice<A>): Slice<B> => ({
-            range: slice.range,
-            iter: fn(slice.iter)
-        })));
-}
+function patchSlice<T>(input: Slice<T>, diffs: Diff<T>[]): Slice<T> {
+    const diffsInRange = diffs.filter(d => rangeContains(input.range, d.key));
+    return {
+        range: input.range,
+        iter: patch(input.iter, diffsInRange)
     }
 }
+// function transformScrambled<A, B>(input: ScrambledSpace<A>,
+//     fn: (a: ItemIterable<A>) => ItemIterable<B>): ScrambledSpace<B> {
+//     return {
+//         schema: input.schema,
+//         seekTo(key: Key): SliceIterable<B> {
+//             return from(input.seekTo(key))
+//                 .pipe(map((slice: Slice<A>): Slice<B> => ({
+//                     range: slice.range,
+//                     iter: fn(slice.iter)
+//                 })));
+//         }
+//     }
+// }
 
 async function* merge<T>(input: ItemIterable<T>, diffs: AsyncIterable<Diff<T>>):
     AsyncIterable<[string[], T | null, Diff<T> | null]> {

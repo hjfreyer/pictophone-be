@@ -12,6 +12,50 @@ export type SortedStreamMapFn<I, O> = (key: Key, value: I) => Iterable<[Key, O]>
 class MapOp<I, O> implements MonoOp<I, O>{
     constructor(private subschema: string[], private fn: SortedStreamMapFn<I, O>) { }
 
+    getSmallestInputRange(inputKey: Key): Range {
+        return singleValue(inputKey);
+    }
+
+    preimage(outputKey: Key): Key {
+        return outputKey.slice(0, outputKey.length - this.subschema.length);
+    }
+    schema(inputSchema: string[]): string[] {
+        return [...inputSchema, ...this.subschema];
+    }
+
+
+    mapSlice(inputSlice: Slice<I>): SliceIterable<O> {
+        const outputStart = [...inputSlice.range.start, ...this.subschema.map(_ => '')]
+        const outputRange: Range = inputSlice.range.kind === 'bounded'
+            ? {
+                kind: 'bounded',
+                start: outputStart,
+                end: [...inputSlice.range.end, ...this.subschema.map(_ => '')]
+            }
+            : { kind: 'unbounded', start: outputStart };
+        return of({
+            range: outputRange,
+            iter: from(inputSlice.iter)
+                .pipe(
+//                   tap(i=> console.log('in map',i)),
+                    flatMap(([inputKey, inputValue]) => {
+                        console.log("here:", inputKey, inputValue)
+                    return from(this.fn(inputKey, inputValue))
+                        .pipe(iterMap(([extension, outputValue]): Item<O> => [[...inputKey, ...extension], outputValue]));
+                }),
+                )
+        })
+    }
+
+
+
+
+
+
+
+
+
+
     impactedOutputRange(key: Key): Range {
         const subschemaPad = Array(this.subschema.length).fill("")
         return {
@@ -48,9 +92,9 @@ class MapOp<I, O> implements MonoOp<I, O>{
                                 }),
                                     tap(([k,]) => console.log("raw", k, outputKey)),
                                     skipWhile(([k,]) => lexCompare(k, outputKey) < 0),
-                                            tap(([k,]) => console.log("refined", k, outputKey)),
+                                    tap(([k,]) => console.log("refined", k, outputKey)),
 
-                                    )
+                                )
                         }
                     }))
             }
@@ -78,6 +122,35 @@ export function multiIndexBy<T>(field: string, extractor: (k: Key, t: T) => stri
 class TransposeOp<T> implements MonoOp<T, T>{
     constructor(private permutation: number[]) { }
 
+schema(inputSchema: string[]): string[] {
+    return permute(this.permutation, inputSchema)
+}
+
+preimage(outputKey: Key): Key {
+return    permute(invertPermutation(this.permutation), outputKey)
+}
+getSmallestInputRange(inputKey : Key): Range {
+    return singleValue(inputKey);
+}
+
+    mapSlice(inputSlice: Slice<T>): SliceIterable<T> {
+        return from(inputSlice.iter)
+                            .pipe(//
+                           // tap(([ik,]) => console.log("in transpose", ik)),
+                                iterMap(([inputKey, inputValue]): Slice<T> => {
+                                    console.log("inside  transpose", inputKey)
+                                    const outputKey = permute(this.permutation, inputKey);
+                                    return {
+                                        // TODO: Can do better than splitting every 
+                                        // value into its own slice, under some circumstances.
+                                        range: singleValue(outputKey),
+                                        iter: of([outputKey, inputValue] as Item<T>)
+                                    }
+                                }),
+//                                tap(_=>console.log('foo'))
+                                );
+    }
+
     impactedOutputRange(key: Key): Range {
         return singleValue(permute(this.permutation, key));
     }
@@ -92,18 +165,18 @@ class TransposeOp<T> implements MonoOp<T, T>{
                 const inputStartAt = permute(invertPermutation(self.permutation), outputStartAt);
                 console.log("input start at", inputStartAt, outputStartAt)
                 return from(input.seekTo(inputStartAt))
-                    .pipe(flatMap((inputSlice: Slice<T>): SliceIterable<T> => {                        
+                    .pipe(flatMap((inputSlice: Slice<T>): SliceIterable<T> => {
                         return from(inputSlice.iter)
-                            .pipe(tap(([ik,]) =>console.log("in transpose", outputStartAt, ik)),
-                            iterMap(([inputKey, inputValue]): Slice<T> => {
-                                const outputKey = permute(self.permutation, inputKey);
-                                return {
-                                    // TODO: Can do better than splitting every 
-                                    // value into its own slice, under some circumstances.
-                                    range: singleValue(outputKey),
-                                    iter: of([outputKey, inputValue] as Item<T>)
-                                }
-                            }));
+                            .pipe(tap(([ik,]) => console.log("in transpose", outputStartAt, ik)),
+                                iterMap(([inputKey, inputValue]): Slice<T> => {
+                                    const outputKey = permute(self.permutation, inputKey);
+                                    return {
+                                        // TODO: Can do better than splitting every 
+                                        // value into its own slice, under some circumstances.
+                                        range: singleValue(outputKey),
+                                        iter: of([outputKey, inputValue] as Item<T>)
+                                    }
+                                }));
                     }));
             }
         }
