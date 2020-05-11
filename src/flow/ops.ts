@@ -39,7 +39,7 @@ class MapOp<I, O> implements MonoOp<I, O>{
                 .pipe(
 //                   tap(i=> console.log('in map',i)),
                     flatMap(([inputKey, inputValue]) => {
-                        console.log("here:", inputKey, inputValue)
+                        // console.log("here:", inputKey, inputValue)
                     return from(this.fn(inputKey, inputValue))
                         .pipe(iterMap(([extension, outputValue]): Item<O> => [[...inputKey, ...extension], outputValue]));
                 }),
@@ -136,9 +136,7 @@ getSmallestInputRange(inputKey : Key): Range {
     mapSlice(inputSlice: Slice<T>): SliceIterable<T> {
         return from(inputSlice.iter)
                             .pipe(//
-                           // tap(([ik,]) => console.log("in transpose", ik)),
                                 iterMap(([inputKey, inputValue]): Slice<T> => {
-                                    console.log("inside  transpose", inputKey)
                                     const outputKey = permute(this.permutation, inputKey);
                                     return {
                                         // TODO: Can do better than splitting every 
@@ -163,11 +161,11 @@ getSmallestInputRange(inputKey : Key): Range {
             schema: outputSchema,
             seekTo(outputStartAt: Key): SliceIterable<T> {
                 const inputStartAt = permute(invertPermutation(self.permutation), outputStartAt);
-                console.log("input start at", inputStartAt, outputStartAt)
                 return from(input.seekTo(inputStartAt))
                     .pipe(flatMap((inputSlice: Slice<T>): SliceIterable<T> => {
                         return from(inputSlice.iter)
-                            .pipe(tap(([ik,]) => console.log("in transpose", outputStartAt, ik)),
+                            .pipe(
+                                // tap(([ik,]) => console.log("in transpose", outputStartAt, ik)),
                                 iterMap(([inputKey, inputValue]): Slice<T> => {
                                     const outputKey = permute(self.permutation, inputKey);
                                     return {

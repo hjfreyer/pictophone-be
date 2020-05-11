@@ -6,10 +6,8 @@ import { map, flatMap, concatAll, tap } from "ix/asynciterable/operators";
 import { from, of, concat } from "ix/asynciterable";
 
 export function getDiffs<T>(expected: ScrambledSpace<T>, actual: Readable<T>): AsyncIterable<Diff<T>> {
-    console.log("getting diffs")
     const diffs = from(read.unsortedListAll(expected))
-        .pipe(tap(i=>console.log("item", i)), 
-        flatMap(async ([key, expectedValue]): Promise<AsyncIterable<Diff<T>>> => {
+        .pipe(flatMap(async ([key, expectedValue]): Promise<AsyncIterable<Diff<T>>> => {
             const actualValue = await read.get(actual, key);
         if (actualValue === null) {
             return of({
@@ -28,7 +26,7 @@ export function getDiffs<T>(expected: ScrambledSpace<T>, actual: Readable<T>): A
             return of();
         }
     }));
-return diffs;
+
     const orphans = from(read.readAll(actual))
         .pipe(flatMap(async ([key, actualValue]):Promise<AsyncIterable<Diff<T>>> => {
             if (await read.getFromScrambledOrDefault(expected, key, null) === null) {

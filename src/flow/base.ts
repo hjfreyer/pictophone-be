@@ -249,53 +249,28 @@ export function enumerate<Inputs, Intermediates, T>(
                 return {
                     schema,
                     seekTo(outputStartAt: Key): SliceIterable<T> {
-                        console.log("seeking from:", outputStartAt, op)
+                        // console.log("seeking from:", outputStartAt, op)
                         const inputStartAt = op.preimage(outputStartAt);
                         const inputSliceIter = enumeratedInput.seekTo(inputStartAt);
                         const outputSliceIter = from(inputSliceIter)
                             .pipe(
-                                tap(slice=> console.log("into op", slice.range, op)),
+                                // tap(slice=> console.log("into op", slice.range, op)),
                                 flatMap(slice => op.mapSlice(slice)))
 
 
-                        // return outputSliceIter.pipe(
-                        //     map((slice: Slice<T>, idx:number ): Slice<T> => {
-                        //         if (idx !== 0) {
-                        //             return slice;
-                        //         }
-                        //         // The first slice of outputSliceIter will necessarily
-                        //         // contain "outputStartAt" (by definition of preimage), but
-                        //         // won't necessarily start there. Skip ahead.
-                        //         return seekSliceTo(slice, outputStartAt);
-                        //     })
-                        // )
-
-                        // The first slice of outputSliceIter will necessarily
-                        // contain "outputStartAt" (by definition of preimage), but
-                        // won't necessarily start there. Skip ahead.
-                        const outputSlicesHead = outputSliceIter.pipe(
-                                tap(slice=>console.log("****** INTO THING 1", slice.range)),
-                            take(1),
-                                tap(slice=>console.log("****** THING 1", slice.range)),
-                        );
-                        const outputSlicesTail = outputSliceIter.pipe(
-                                tap(slice=>console.log("****** INTO THING 2", slice.range)),
-                                skip(1),
-                                tap(slice=>console.log("****** THING 2", slice.range)),
-                            );
-
-
-                        // const outputHeadSeeked = outputSlicesHead.pipe(
-                        //     map(head => seekSliceTo(head, outputStartAt)));
-                
-                        return concat(outputSlicesHead, outputSlicesTail);
+                        return outputSliceIter.pipe(
+                            map((slice: Slice<T>, idx:number ): Slice<T> => {
+                                if (idx !== 0) {
+                                    return slice;
+                                }
+                                // The first slice of outputSliceIter will necessarily
+                                // contain "outputStartAt" (by definition of preimage), but
+                                // won't necessarily start there. Skip ahead.
+                                return seekSliceTo(slice, outputStartAt);
+                            })
+                        )
                     }
                 }
-
-                //                const inputStartAt = op.smallestImpactingInputKey(startAt);
-                //return op.map(enumeratedInput)
-                // return from(enumeratedInput)
-                //     .pipe(flatMap(i => op.mapSlice(i)));
             })
     }
 }
@@ -510,7 +485,7 @@ async function* collectionDiffsOp<Inputs, Intermediates, I, O>(input: Collection
     inputRanges = _.uniq(inputRanges);
 
     for (const inputRange of inputRanges) {
-        console.log('update from input range', inputRange)
+        // console.log('update from input range', inputRange)
         // const inputStartAt = op.smallestImpactingInputKey(outputRange.start.value.key);
         // const inputEnum = await first(enumerate(input, inputs, intermediates, inputStartAt));
 
