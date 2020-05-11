@@ -28,6 +28,7 @@ class MapOp<I, O> implements MonoOp<I, O>{
         return {
             schema: outputSchema,
             seekTo(outputKey: Key): SliceIterable<O> {
+                console.log('map got seek for', outputKey)
                 const inputKey = outputKey.slice(0, outputKey.length - self.subschema.length);
                 return from(input.seekTo(inputKey))
                     .pipe(iterMap((inputSlice: Slice<I>): Slice<O> => {
@@ -45,7 +46,11 @@ class MapOp<I, O> implements MonoOp<I, O>{
                                     return from(self.fn(inputKey, inputValue))
                                         .pipe(iterMap(([extension, outputValue]): Item<O> => [[...inputKey, ...extension], outputValue]));
                                 }),
-                                    skipWhile(([k,]) => lexCompare(k, outputKey) < 0))
+                                    tap(([k,]) => console.log("raw", k, outputKey)),
+                                    skipWhile(([k,]) => lexCompare(k, outputKey) < 0),
+                                            tap(([k,]) => console.log("refined", k, outputKey)),
+
+                                    )
                         }
                     }))
             }
@@ -85,10 +90,12 @@ class TransposeOp<T> implements MonoOp<T, T>{
             schema: outputSchema,
             seekTo(outputStartAt: Key): SliceIterable<T> {
                 const inputStartAt = permute(invertPermutation(self.permutation), outputStartAt);
+                console.log("input start at", inputStartAt, outputStartAt)
                 return from(input.seekTo(inputStartAt))
                     .pipe(flatMap((inputSlice: Slice<T>): SliceIterable<T> => {                        
                         return from(inputSlice.iter)
-                            .pipe(iterMap(([inputKey, inputValue]): Slice<T> => {
+                            .pipe(tap(([ik,]) =>console.log("in transpose", outputStartAt, ik)),
+                            iterMap(([inputKey, inputValue]): Slice<T> => {
                                 const outputKey = permute(self.permutation, inputKey);
                                 return {
                                     // TODO: Can do better than splitting every 

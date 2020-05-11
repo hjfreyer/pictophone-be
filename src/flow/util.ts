@@ -1,6 +1,6 @@
 import _ from 'lodash'
 import { from, last } from 'ix/iterable'
-import { minBy, takeLast, filter, flatMap } from 'ix/iterable/operators'
+import { minBy, takeLast, filter, flatMap, tap , map} from 'ix/iterable/operators'
 import {strict as assert} from 'assert';
 
 export type Result<R, E> = {
@@ -44,10 +44,14 @@ export async function* sortedMerge<T>(
 
     const entries = await Promise.all(iters.map(i => i.next()));
     while (entries.some(e => !e.done)) {
-        let [minIdx, minVal] = last(from(entries.entries()).pipe(
+        const minned =from(entries).pipe(
+            map((entry, idx) => [idx, entry] as [number, IteratorResult<T>]),
             flatMap(([idx, e]): [number, T][] => e.done ? [] : [[idx, e.value]]),
-            minBy((([_idx, e]) => e), cmp),
-        ))!;
+            minBy((([_idx, e]) => e), cmp)
+        );
+
+        let [minIdx, minVal] = last(minned)!;
+
         yield minVal;
         entries[minIdx] = await iters[minIdx].next();
     }

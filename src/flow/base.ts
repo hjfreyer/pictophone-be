@@ -1,6 +1,6 @@
 import { Option, sortedMerge, batchStreamBy, Comparator, stringSuccessor, Result } from "./util"
 import { from, of, toArray, first, single } from "ix/asynciterable"
-import { map, filter, flatMap } from "ix/asynciterable/operators"
+import { map, filter, flatMap, tap } from "ix/asynciterable/operators"
 import _ from 'lodash'
 import { Range, singleValue, rangeContains, rangeContainsRange } from './range'
 import { lexCompare } from "./util"
@@ -439,7 +439,10 @@ async function* collectionDiffsOp<Inputs, Intermediates, I, O>(input: Collection
     const outputRanges = inputDiffs.map(d => op.impactedOutputRange(d.key));
     // TODO: dedup outputRanges.
 
-    for (const outputRange of outputRanges) {
+    const uniqdOutputRanges = _.uniq(outputRanges);
+
+    for (const outputRange of uniqdOutputRanges) {
+        console.log('update output range', outputRange)
         // const inputStartAt = op.smallestImpactingInputKey(outputRange.start.value.key);
         // const inputEnum = await first(enumerate(input, inputs, intermediates, inputStartAt));
 
@@ -463,9 +466,12 @@ async function* collectionDiffsOp<Inputs, Intermediates, I, O>(input: Collection
         );
 
         const cmp: Comparator<['old' | 'new', Item<O>]> =
-            ([_aa, [akey, _av]], [_ba, [bkey, _bv]]) => lexCompare(akey, bkey)
-        const merged = sortedMerge([taggedOld, taggedNew], cmp);
+            ([_aa, [akey, _av]], [_ba, [bkey, _bv]]) => lexCompare(akey, bkey);
+        const merged = from(sortedMerge([taggedOld, taggedNew], cmp)).pipe(
+            tap(([age, [key, ]]) =>console.log('TAP ', age, key))
+        );
         for await (const batch of batchStreamBy(merged, cmp)) {
+            console.log("  batch", batch.map(([age, [key, ]])=> [age, key]))
             if (2 < batch.length) {
                 throw "batch too big!"
             }
@@ -474,6 +480,12 @@ async function* collectionDiffsOp<Inputs, Intermediates, I, O>(input: Collection
                 const [, newValue] = batch[0][0] == 'new' ? batch[0][1] : batch[1][1];
 
                 if (!deepEqual(oldValue, newValue)) {
+                                    console.log("  doing",  {
+                        kind: 'replace',
+                        key,
+                        oldValue,
+                        newValue,
+                    })
                     yield {
                         kind: 'replace',
                         key,
@@ -481,13 +493,19 @@ async function* collectionDiffsOp<Inputs, Intermediates, I, O>(input: Collection
                         newValue,
                     }
                 }
-            }
-            // Else, batch.length == 1.
-            const [age, [key, value]] = batch[0];
-            yield {
-                kind: age === 'old' ? 'delete' : 'add',
-                key,
-                value,
+            } else {
+                // Else, batch.length == 1.
+                const [age, [key, value]] = batch[0];
+                console.log("  doing", {
+                    kind: age === 'old' ? 'delete' : 'add',
+                    key,
+                    value,
+                })
+                yield {
+                    kind: age === 'old' ? 'delete' : 'add',
+                    key,
+                    value,
+                }
             }
         }
     }

@@ -1,8 +1,8 @@
 import { Item,  Readable, Key, ScrambledSpace, ItemIterable } from "./base";
 import deepEqual from "deep-equal";
-import { Range, rangeContains, rangeContainsRange, singleValue } from "./range";
-import { from, first, of } from "ix/asynciterable";
-import { filter, takeWhile, flatMap, tap } from "ix/asynciterable/operators";
+import { Range, rangeContains, rangeContainsRange, singleValue, compareRangeEndpoints } from "./range";
+import { from, first, of, create } from "ix/asynciterable";
+import { filter, takeWhile, take, flatMap, tap } from "ix/asynciterable/operators";
 import { lexCompare } from "./util";
 
 export async function get<T>(source: Readable<T>, key: Key): Promise<T | null> {
@@ -35,18 +35,19 @@ export function unsortedListAll<T>(source: ScrambledSpace<T>): ItemIterable<T> {
 }
 
 export function readRangeFromSingleSlice<T>(input : ScrambledSpace<T>, range : Range): ItemIterable<T> {
-    return from((async (): Promise<ItemIterable<T>> => {
-        const slice = await first(input.seekTo(range.start));
-        if (slice === undefined) {
-            // No slice contains the range start.
-            return of();
-        }
-        if (!rangeContainsRange(slice.range, range)) {
-            throw "requested range wasn't contained in a single slice"
-        }
-        return from(slice.iter)
-           .pipe(takeWhile(([key, _value])=> rangeContains(range, key)))
-    })());
+    return from(input.seekTo(range.start))
+        .pipe(take(1),
+            flatMap(slice => {
+                console.log("want range "+JSON.stringify(range));
+                console.log("first slice had range "+JSON.stringify(slice.range));
+                if (rangeContains(slice.range, range.start) &&
+                    compareRangeEndpoints(slice.range, range) < 0) {
+                    throw new Error(`range spans multiple slices. range: ${JSON.stringify(range)}; 
+                    first slice: ${JSON.stringify(slice.range)}`)
+                }
+                return from(slice.iter)
+                    .pipe(takeWhile(([key, _value])=> rangeContains(range, key)))
+            }));
 }
 
 export async function getFromScrambledOrDefault<T, D>(input : ScrambledSpace<T>, key : Key, def : D): Promise<T | D> {

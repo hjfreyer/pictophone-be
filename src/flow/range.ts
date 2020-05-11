@@ -67,6 +67,16 @@ export function rangeContainsRange(outer: Range, inner: Range): boolean {
     return outer.kind === 'unbounded' || (inner.kind === 'bounded' && lexCompare(inner.end, outer.end) <= 0);
 }
 
+
+export function compareRangeEndpoints(a: Range, b: Range): number {
+    if (a.kind === 'unbounded') {
+        return b.kind === 'unbounded' ? 0 : 1;
+    } else {
+        return b.kind === 'unbounded' ? -1 : lexCompare(a.end, b.end);
+    }
+}
+
+
 // export function overlap<Key>(a : Range, b:Range, cmp: (a:Key, b:Key)=> number):boolean {
 //     if (a.start.kind === 'unbounded')
 // }
