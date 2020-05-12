@@ -1,7 +1,7 @@
 import { DocumentData, DocumentReference, FieldPath, Firestore, Transaction, Timestamp } from '@google-cloud/firestore'
 import { strict as assert } from "assert"
 import { basename, dirname, join } from "path"
-import { Diff, Item , Change } from './base'
+import { Diff, Item, Change } from './base'
 
 import { from } from 'ix/asynciterable';
 import { map, tap } from 'ix/asynciterable/operators';
@@ -57,7 +57,7 @@ class DBHelper {
         ]
     }
 
-    async* list(startAt : Key): AsyncIterable<Item<DocumentData>> {
+    async* list(startAt: Key): AsyncIterable<Item<DocumentData>> {
         let q = this.db.collectionGroup(this.schema[this.schema.length - 1])
             .orderBy(FieldPath.documentId())
 

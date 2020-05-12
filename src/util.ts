@@ -1,5 +1,5 @@
 
-import {strict as assert} from 'assert';
+import { strict as assert } from 'assert';
 
 export function mapValues<V1, V2>(obj: { [k: string]: V1 },
     fn: (k: string, v: V1) => V2): { [k: string]: V2 } {
@@ -10,7 +10,7 @@ export function mapValues<V1, V2>(obj: { [k: string]: V1 },
 
 export type Maybe<V> = { result: 'some', value: V } | { result: 'none' }
 
-export function strcmp(a : string, b: string) : number {
+export function strcmp(a: string, b: string): number {
     if (a < b) { return -1; }
     if (b < a) { return 1; }
     return 0;

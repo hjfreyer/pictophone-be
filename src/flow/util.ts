@@ -1,7 +1,7 @@
 import _ from 'lodash'
 import { from, last } from 'ix/iterable'
-import { minBy, takeLast, filter, flatMap, tap , map} from 'ix/iterable/operators'
-import {strict as assert} from 'assert';
+import { minBy, takeLast, filter, flatMap, tap, map } from 'ix/iterable/operators'
+import { strict as assert } from 'assert';
 
 export type Result<R, E> = {
     ok: true,
@@ -11,12 +11,12 @@ export type Result<R, E> = {
     err: E
 }
 
-export function ok<R, E>(r : R): Result<R, E> {
-    return {ok: true, value: r}
+export function ok<R, E>(r: R): Result<R, E> {
+    return { ok: true, value: r }
 }
 
-export function err<R, E>(e : E): Result<R, E> {
-    return {ok: false, err: e}
+export function err<R, E>(e: E): Result<R, E> {
+    return { ok: false, err: e }
 }
 
 export type Option<R> = {
@@ -27,14 +27,14 @@ export type Option<R> = {
 }
 
 export function some<R>(r: R): Option<R> {
-    return {some: true, value: r}
+    return { some: true, value: r }
 }
 
 export function none<R>(): Option<R> {
-    return {some: false}
+    return { some: false }
 }
 
-export type Comparator<T> = (a : T, b : T) => number
+export type Comparator<T> = (a: T, b: T) => number
 
 
 export async function* sortedMerge<T>(
@@ -44,7 +44,7 @@ export async function* sortedMerge<T>(
 
     const entries = await Promise.all(iters.map(i => i.next()));
     while (entries.some(e => !e.done)) {
-        const minned =from(entries).pipe(
+        const minned = from(entries).pipe(
             map((entry, idx) => [idx, entry] as [number, IteratorResult<T>]),
             flatMap(([idx, e]): [number, T][] => e.done ? [] : [[idx, e.value]]),
             minBy((([_idx, e]) => e), cmp)
@@ -78,17 +78,17 @@ export async function* batchStreamBy<T>(
     }
 }
 
-export function strcmp(a : string, b: string) : number {
+export function strcmp(a: string, b: string): number {
     if (a < b) { return -1; }
     if (b < a) { return 1; }
     return 0;
 }
 
-export function lexCompare(a: string[], b: string[]): number {    
+export function lexCompare(a: string[], b: string[]): number {
     if (a.length !== b.length) {
         throw new Error(`cannot compare keys with different lengths: "${JSON.stringify(a)}" vs ${JSON.stringify(b)}`)
     }
-    
+
     for (let i = 0; i < a.length; i++) {
         const cmp = strcmp(a[i], b[i])
         if (cmp !== 0) {

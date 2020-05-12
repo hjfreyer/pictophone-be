@@ -5,8 +5,8 @@ import { Key, keySuccessor } from './base';
 
 export type Range = {
     kind: 'bounded'
-    start:Key
-    end:Key
+    start: Key
+    end: Key
 } | {
     kind: 'unbounded'
     start: Key
@@ -63,7 +63,7 @@ export function rangeContains(range: Range, point: Key): boolean {
 export function rangeContainsRange(outer: Range, inner: Range): boolean {
     if (lexCompare(inner.start, outer.start) < 0) {
         return false;
-    }    
+    }
     return outer.kind === 'unbounded' || (inner.kind === 'bounded' && lexCompare(inner.end, outer.end) <= 0);
 }
 

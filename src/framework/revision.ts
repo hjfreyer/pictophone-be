@@ -10,9 +10,9 @@ export interface Result<ActionResponse, StateSpec> {
     changes: Changes<StateSpec>
 }
 
-export type GetAction<Revision> = Revision extends InitialRevision<infer A, infer _,infer _, infer _, infer _> ? A : never;
+export type GetAction<Revision> = Revision extends InitialRevision<infer A, infer _, infer _, infer _, infer _> ? A : never;
 
-export type GetState<Revision> = Revision extends InitialRevision<infer _,infer _, infer S, infer _, infer _> ? S : never;
+export type GetState<Revision> = Revision extends InitialRevision<infer _, infer _, infer S, infer _, infer _> ? S : never;
 
 export interface InitialRevision<Action, ActionResponse, StateSpec, IntermediateSpec, DerivedSpec> {
     derive(): DirectoryOp<StateSpec, DerivedSpec>

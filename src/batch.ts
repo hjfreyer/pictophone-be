@@ -24,7 +24,7 @@ export async function check(db: Firestore, cursor: BackwardsCheckCursor): Promis
             const space = enumerate(exportz[collectionId], stateReadables, {});
 
             for await (const diff of getDiffs(space, exportzReadables[collectionId])) {
-               throw new Error(JSON.stringify(diff))
+                throw new Error(JSON.stringify(diff))
             }
         }
     })

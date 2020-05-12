@@ -34,11 +34,11 @@ export type Diff<V> = {
 
 
 export interface Writeable<T> {
-    commit(changes : Change<T>[]): void
+    commit(changes: Change<T>[]): void
 }
 
-export interface ReadWrite<T> extends Readable<T>, Writeable<T> {} 
+export interface ReadWrite<T> extends Readable<T>, Writeable<T> { }
 
 export interface Database<Spec> {
-    
+
 }

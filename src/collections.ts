@@ -1,4 +1,4 @@
-import { DocumentData, Transaction, Firestore} from '@google-cloud/firestore'
+import { DocumentData, Transaction, Firestore } from '@google-cloud/firestore'
 import { Storage } from '@google-cloud/storage'
 import cors from 'cors'
 import express from 'express'
@@ -8,7 +8,7 @@ import uuid from 'uuid/v1'
 import batch from './batch'
 // import { COLLECTION_GRAPH, getCollections, InputType, INPUT_ID, INPUT_OP } from './collections'
 import GetConfig from './config'
-import {  DBHelper2, Dataspace } from './framework/db'
+import { DBHelper2, Dataspace } from './framework/db'
 import { getSchema, Op, Processor, Source, Diffs } from './framework/graph'
 import { Action1_1, AnyAction, Action1_0, Game1_0, TimestampedGame1_0 } from './model'
 import { validate as validateModel } from './model/index.validator'
@@ -35,7 +35,7 @@ type ExportSpec = {
     gamesByPlayer: TimestampedGame1_0
 }
 
-export function getStateReadables(db : Firestore, tx:Transaction): {[K in keyof StateSpec]: Dataspace<StateSpec[K]>} {
+export function getStateReadables(db: Firestore, tx: Transaction): { [K in keyof StateSpec]: Dataspace<StateSpec[K]> } {
     const helper = new DBHelper2(db, tx);
     return {
         games: helper.open({
@@ -45,7 +45,7 @@ export function getStateReadables(db : Firestore, tx:Transaction): {[K in keyof 
         })
     }
 }
-export function getExportsReadables(db : Firestore, tx:Transaction): {[K in keyof ExportSpec]: Dataspace<ExportSpec[K]>} {
+export function getExportsReadables(db: Firestore, tx: Transaction): { [K in keyof ExportSpec]: Dataspace<ExportSpec[K]> } {
     const helper = new DBHelper2(db, tx);
     return {
         gamesByPlayer: helper.open({

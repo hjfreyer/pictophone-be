@@ -22,7 +22,7 @@ export function derive(): DirectoryOp<StateSpec, IntermediateSpec, DerivedSpec> 
     };
 }
 
-export async function integrate(action: Action1_0, sources: Readables<StateSpec>,  intermediates: Readables<IntermediateSpec>): Promise<Result<{}, StateSpec>> {
+export async function integrate(action: Action1_0, sources: Readables<StateSpec>, intermediates: Readables<IntermediateSpec>): Promise<Result<{}, StateSpec>> {
     const game = await read.getOrDefault(sources.game, [action.gameId], defaultGame())
     const newGame = integrateHelper(action, game);
     return {

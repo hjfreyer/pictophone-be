@@ -29,12 +29,12 @@ export interface MapFn<I, O> {
 // }
 
 
-export type Op<InputSpec,  T> =
+export type Op<InputSpec, T> =
     LoadOp<InputSpec, T>
-    | MapOp<InputSpec,  T>
-    | TransposeOp<InputSpec,  T>
-    | ReschemaOp<InputSpec,  T>
-    // | SortOp<InputSpec,  T>
+    | MapOp<InputSpec, T>
+    | TransposeOp<InputSpec, T>
+    | ReschemaOp<InputSpec, T>
+// | SortOp<InputSpec,  T>
 // | ReduceOp<S, any, T>
 
 
@@ -45,15 +45,15 @@ interface LoadOp<InputSpec, T> {
         diff_cast: (t: Diff<InputSpec[K]>[]) => Diff<T>[]) => R): R
 }
 
-interface MapOp<InputSpec,  T> {
+interface MapOp<InputSpec, T> {
     kind: 'map'
-    visit<R>(go: <I>(input: Op<InputSpec,  I>, map: MapFn<I, T>) => R): R
+    visit<R>(go: <I>(input: Op<InputSpec, I>, map: MapFn<I, T>) => R): R
 }
 
-interface TransposeOp<InputSpec,  T> {
+interface TransposeOp<InputSpec, T> {
     kind: 'transpose'
     permutation: number[]
-    input: Op<InputSpec,  T>
+    input: Op<InputSpec, T>
 }
 
 // interface ReduceOp<S, I, O> {
@@ -63,10 +63,10 @@ interface TransposeOp<InputSpec,  T> {
 //     fn: ReduceFn<I, O>
 // }
 
-interface ReschemaOp<InputSpec,  T> {
+interface ReschemaOp<InputSpec, T> {
     kind: 'reschema'
     newSchema: string[]
-    input: Op<InputSpec,  T>
+    input: Op<InputSpec, T>
 }
 
 // interface SortOp<InputSpec,  T> {
@@ -80,7 +80,7 @@ export class Processor<InputSpec, IntermediateSpec> {
         private inputs: Source<InputSpec>,
         private intermediates: Source<IntermediateSpec>) { }
 
-    list<T>(op: Op<InputSpec,  T>, startAt: string[]): AsyncIterable<Item<T>> {
+    list<T>(op: Op<InputSpec, T>, startAt: string[]): AsyncIterable<Item<T>> {
         switch (op.kind) {
             case "load":
                 return op.visit((key, ii_cast, _) => {
@@ -104,10 +104,10 @@ export class Processor<InputSpec, IntermediateSpec> {
     }
 
 
-    enumerate<T>(op: Op<InputSpec,  T>): AsyncIterable<Item<T>> {
+    enumerate<T>(op: Op<InputSpec, T>): AsyncIterable<Item<T>> {
         return this.list(op, getSchema(op).map(() => ''))
     }
-    async get<T>(op: Op<InputSpec,  T>, key: string[]): Promise<T | null> {
+    async get<T>(op: Op<InputSpec, T>, key: string[]): Promise<T | null> {
         for await (const [k, value] of this.list(op, key)) {
             if (deepEqual(k, key)) {
                 return value
@@ -118,13 +118,13 @@ export class Processor<InputSpec, IntermediateSpec> {
         return null
     }
 
-    listWithPrefix<T>(op: Op<InputSpec,  T>, prefix: string[]): AsyncIterable<Item<T>> {
+    listWithPrefix<T>(op: Op<InputSpec, T>, prefix: string[]): AsyncIterable<Item<T>> {
         const extension = Array(getSchema(op).length - prefix.length).fill('')
         return streamTakeWhile(this.list(op, [...prefix, ...extension]),
             ([key,]) => keyStartsWith(key, prefix))
     }
 
-    async reactTo<T>(op: Op<InputSpec,  T>, diffs: Diffs<InputSpec>): Promise<Diff<T>[]> {
+    async reactTo<T>(op: Op<InputSpec, T>, diffs: Diffs<InputSpec>): Promise<Diff<T>[]> {
         switch (op.kind) {
             case "load":
                 return op.visit((key, _, diff_cast) => diff_cast(diffs[key]));
@@ -142,7 +142,7 @@ export class Processor<InputSpec, IntermediateSpec> {
     }
 
     // Map.
-    private async *mapList<I, O>(input: Op<InputSpec,  I>, fn: MapFn<I, O>, startAt: string[]): AsyncIterable<Item<O>> {
+    private async *mapList<I, O>(input: Op<InputSpec, I>, fn: MapFn<I, O>, startAt: string[]): AsyncIterable<Item<O>> {
         const inputStart = startAt.slice(0, getSchema(input).length)
         for await (const [inputKey, inputValue] of this.list(input, inputStart)) {
             const outputValues = fn.map(inputKey, inputValue)
@@ -157,7 +157,7 @@ export class Processor<InputSpec, IntermediateSpec> {
         }
     }
 
-    private async mapReact<I, O>(input: Op<InputSpec,  I>, fn: MapFn<I, O>, diffs: Diffs<InputSpec>): Promise<Diff<O>[]> {
+    private async mapReact<I, O>(input: Op<InputSpec, I>, fn: MapFn<I, O>, diffs: Diffs<InputSpec>): Promise<Diff<O>[]> {
         console.log('orig diffs', JSON.stringify(diffs));
         const inputDiffs = await this.reactTo(input, diffs)
         console.log('input diffs', JSON.stringify(inputDiffs));
@@ -284,14 +284,14 @@ export class Processor<InputSpec, IntermediateSpec> {
     // }
 
     // Transpose.
-    private async *transposeList<T>(op: TransposeOp<InputSpec,  T>, startAt: string[]): AsyncIterable<Item<T>> {
+    private async *transposeList<T>(op: TransposeOp<InputSpec, T>, startAt: string[]): AsyncIterable<Item<T>> {
         const inputStart = permute(invertPermutation(op.permutation), startAt)
         for await (const [inputPath, value] of this.list(op.input, inputStart)) {
             yield [permute(op.permutation, inputPath), value]
         }
     }
 
-    private async transposeReact<T>(op: TransposeOp<InputSpec,  T>, diffs: Diffs<InputSpec>): Promise<Diff<T>[]> {
+    private async transposeReact<T>(op: TransposeOp<InputSpec, T>, diffs: Diffs<InputSpec>): Promise<Diff<T>[]> {
         const inputDiffs = await this.reactTo(op.input, diffs)
         return inputDiffs.map(diff => ({
             ...diff,
@@ -423,7 +423,7 @@ async function* validateStream<T>(validator: (u: unknown) => T,
 //     }
 // }
 
-export function getSchema<InputSpec,  T>(op: Op<InputSpec,  T>): string[] {
+export function getSchema<InputSpec, T>(op: Op<InputSpec, T>): string[] {
     switch (op.kind) {
         case "load":
             return op.schema
@@ -440,10 +440,10 @@ export function getSchema<InputSpec,  T>(op: Op<InputSpec,  T>): string[] {
     }
 }
 
-export function getOrder<InputSpec,  T>(op: Op<InputSpec,  T>): number[] {
+export function getOrder<InputSpec, T>(op: Op<InputSpec, T>): number[] {
     switch (op.kind) {
         case "load":
-        // case "sort":
+            // case "sort":
             //        case "reduce":
             return getSchema(op).map((_, i) => i)
         case "map":

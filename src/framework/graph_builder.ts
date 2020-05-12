@@ -1,8 +1,8 @@
 
 
-import {Readable, Diff, ReadWrite} from './base';
-import {Op, getSchema, InputInfo, MapFn} from './graph';
-import {assertIsPermutation} from '../util';
+import { Readable, Diff, ReadWrite } from './base';
+import { Op, getSchema, InputInfo, MapFn } from './graph';
+import { assertIsPermutation } from '../util';
 
 export type DirectoryOp<StateSpec, DerivedSpec> = {
     [K in keyof DerivedSpec]: Op<StateSpec, DerivedSpec[K]>

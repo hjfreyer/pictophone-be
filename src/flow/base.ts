@@ -80,12 +80,12 @@ export type SliceIterable<T> = AsyncIterable<Slice<T>>
 // in lexicographic order. However, the order of the slices themselves
 // may or may not be mixed up.
 //
-// The slices returned from the iterator will always have disjoint ranges, 
+// The slices returned from the iterator will always have disjoint ranges,
 // though the union of these ranges won't necessarily cover all of key space.
 export interface ScrambledSpace<T> {
     schema: string[]
 
-    // Returns an iterator into the scrambled space starting from "key". 
+    // Returns an iterator into the scrambled space starting from "key".
     // If the first returned slice's range doesn't include `key`, then `key`
     // does not exist in the collection. If the slice does include `key`,
     // then its iterable will begin with the first element of the slice

@@ -37,12 +37,12 @@ class MapOp<I, O> implements MonoOp<I, O>{
             range: outputRange,
             iter: from(inputSlice.iter)
                 .pipe(
-//                   tap(i=> console.log('in map',i)),
+                    //                   tap(i=> console.log('in map',i)),
                     flatMap(([inputKey, inputValue]) => {
                         // console.log("here:", inputKey, inputValue)
-                    return from(this.fn(inputKey, inputValue))
-                        .pipe(iterMap(([extension, outputValue]): Item<O> => [[...inputKey, ...extension], outputValue]));
-                }),
+                        return from(this.fn(inputKey, inputValue))
+                            .pipe(iterMap(([extension, outputValue]): Item<O> => [[...inputKey, ...extension], outputValue]));
+                    }),
                 )
         })
     }
@@ -122,31 +122,31 @@ export function multiIndexBy<T>(field: string, extractor: (k: Key, t: T) => stri
 class TransposeOp<T> implements MonoOp<T, T>{
     constructor(private permutation: number[]) { }
 
-schema(inputSchema: string[]): string[] {
-    return permute(this.permutation, inputSchema)
-}
+    schema(inputSchema: string[]): string[] {
+        return permute(this.permutation, inputSchema)
+    }
 
-preimage(outputKey: Key): Key {
-return    permute(invertPermutation(this.permutation), outputKey)
-}
-getSmallestInputRange(inputKey : Key): Range {
-    return singleValue(inputKey);
-}
+    preimage(outputKey: Key): Key {
+        return permute(invertPermutation(this.permutation), outputKey)
+    }
+    getSmallestInputRange(inputKey: Key): Range {
+        return singleValue(inputKey);
+    }
 
     mapSlice(inputSlice: Slice<T>): SliceIterable<T> {
         return from(inputSlice.iter)
-                            .pipe(//
-                                iterMap(([inputKey, inputValue]): Slice<T> => {
-                                    const outputKey = permute(this.permutation, inputKey);
-                                    return {
-                                        // TODO: Can do better than splitting every 
-                                        // value into its own slice, under some circumstances.
-                                        range: singleValue(outputKey),
-                                        iter: of([outputKey, inputValue] as Item<T>)
-                                    }
-                                }),
-//                                tap(_=>console.log('foo'))
-                                );
+            .pipe(//
+                iterMap(([inputKey, inputValue]): Slice<T> => {
+                    const outputKey = permute(this.permutation, inputKey);
+                    return {
+                        // TODO: Can do better than splitting every 
+                        // value into its own slice, under some circumstances.
+                        range: singleValue(outputKey),
+                        iter: of([outputKey, inputValue] as Item<T>)
+                    }
+                }),
+                //                                tap(_=>console.log('foo'))
+            );
     }
 
     impactedOutputRange(key: Key): Range {
