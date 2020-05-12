@@ -8,7 +8,7 @@ import uuid from 'uuid/v1'
 import batch from './batch'
 import { getStateReadables, getExportsReadables } from './collections'
 import GetConfig from './config'
-import {  DBHelper2 } from './framework/db'
+import { DBHelper2 } from './framework/db'
 import { getSchema, Op, Processor, Source, Diffs } from './framework/graph'
 import { Action1_1, AnyAction, Action1_0, Game1_0, TimestampedGame1_0 } from './model'
 import { validate as validateModel } from './model/index.validator'
@@ -206,13 +206,15 @@ async function doAction2(action: Action1_0, readables: Readables<StateSpec>): Pr
     return {
         response: {},
         changes: {
-            games: [{ kind: 'set', key: [action.gameId], value: {
-                timestamp: {
-                    seconds: now.getTimeT(),
-                    nanoseconds: now.getNano(),
-                },
-                ...newGame
-             } }]
+            games: [{
+                kind: 'set', key: [action.gameId], value: {
+                    timestamp: {
+                        seconds: now.getTimeT(),
+                        nanoseconds: now.getNano(),
+                    },
+                    ...newGame
+                }
+            }]
         }
     }
 
@@ -223,26 +225,23 @@ async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise
     // // const action = upgradeAction(anyAction)
 
     await db.runTransaction(async (tx: Transaction): Promise<void> => {
-//        const helper2 = new DBHelper2(db, tx);
+        //        const helper2 = new DBHelper2(db, tx);
         const stateReadables = getStateReadables(db, tx);
         const response = await doAction2(anyAction, stateReadables);
-       const stateDiffs = await changesToDiffs(stateReadables, response.changes);
+        const stateDiffs = await changesToDiffs(stateReadables, response.changes);
 
         const exportzReadables = getExportsReadables(db, tx);
         const exportz = getExports();
         const [, exportDiffs] = await getDiffs(exportz, stateReadables, {}, stateDiffs);
 
-
-
         for (const untypedCollectionId in response.changes) {
             const collectionId = untypedCollectionId as keyof typeof response.changes;
             stateReadables[collectionId].commit(response.changes[collectionId]);
-        }       
+        }
         for (const untypedCollectionId in exportDiffs) {
             const collectionId = untypedCollectionId as keyof typeof exportDiffs;
-            console.log(exportDiffs[collectionId]);
             exportzReadables[collectionId].commit(exportDiffs[collectionId].map(diffToChange));
-        }       
+        }
 
 
 
@@ -314,10 +313,10 @@ async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise
 }
 
 async function changesToDiffs<Spec>(dbs: Readables<Spec>, changes: Changes<Spec>): Promise<Diffs<Spec>> {
- const diffsP : Partial<Diffs<Spec>> = {};
+    const diffsP: Partial<Diffs<Spec>> = {};
     for (const untypedCollectionId in changes) {
         const collectionId = untypedCollectionId as keyof typeof changes;
-        const diffs :Diff<Spec[typeof collectionId]>[] = [];
+        const diffs: Diff<Spec[typeof collectionId]>[] = [];
         for (const change of changes[collectionId]) {
             const maybeDiff = await changeToDiff(dbs[collectionId], change);
             if (maybeDiff !== null) {
@@ -326,7 +325,7 @@ async function changesToDiffs<Spec>(dbs: Readables<Spec>, changes: Changes<Spec>
         }
         diffsP[collectionId] = diffs;
     }
-return diffsP as Diffs<Spec>;
+    return diffsP as Diffs<Spec>;
 }
 
 async function changeToDiff<T>(db: Readable<T>, change: Change<T>): Promise<Diff<T> | null> {

@@ -1,7 +1,7 @@
 import { Item, Readable, Key, ScrambledSpace, ItemIterable, Slice } from "./base";
 import deepEqual from "deep-equal";
 import { Range, rangeContains, rangeContainsRange, singleValue, compareRangeEndpoints } from "./range";
-import { from, first, of, create } from "ix/asynciterable";
+import { from, first, of, create, empty } from "ix/asynciterable";
 import { filter, takeWhile, take, flatMap, tap } from "ix/asynciterable/operators";
 import { lexCompare } from "./util";
 
@@ -35,17 +35,25 @@ export function unsortedListAll<T>(source: ScrambledSpace<T>): ItemIterable<T> {
 }
 
 export async function* readRangeFromSingleSlice<T>(input: ScrambledSpace<T>, range: Range): ItemIterable<T> {
-    const containingSlice = await first(input.seekTo(range.start));
-    if (containingSlice === undefined) {
-        throw new Error("seekTo returned empty iterator");
+    const firstSlice = await first(input.seekTo(range.start));
+    if (firstSlice === undefined) {
+        // Past the last slice.
+        return empty();
     }
 
-    if (!rangeContainsRange(containingSlice.range, range)) {
+    if (!rangeContains(firstSlice.range, range.start)) {
+        // No range contains the starting value, so either there are no
+        // values in range, or the range spans multiple slices. Assume there 
+        // just aren't any values.
+        return empty();
+    }
+
+    if (!rangeContainsRange(firstSlice.range, range)) {
         throw new Error(`range spans multiple slices. range: ${JSON.stringify(range)}; 
-        first slice: ${JSON.stringify(containingSlice.range)}`)
+        first slice: ${JSON.stringify(firstSlice.range)}`)
     }
 
-    yield* from(containingSlice.iter)
+    yield* from(firstSlice.iter)
         .pipe(takeWhile(([key, _value]) => rangeContains(range, key)))
 }
 
@@ -71,18 +79,6 @@ export function subslice<T>(input: ScrambledSpace<T>, range: Range): Slice<T> {
 // }
 
 export async function getFromScrambledOrDefault<T, D>(input: ScrambledSpace<T>, key: Key, def: D): Promise<T | D> {
-    const slice = await first(input.seekTo(key));
-    if (slice === undefined) {
-        // return def;
-        throw new Error("seekTo returned empty iterator");
-    }
-    const firstItem = await first(slice.iter);
-    if (firstItem === undefined) {
-        return def;
-    }
-    const [firstKey, firstValue] = firstItem;
-    if (lexCompare(key, firstKey) !== 0) {
-        return def;
-    }
-    return firstValue;
+    const slice = await first(readRangeFromSingleSlice(input, singleValue(key)));
+    return slice !== undefined ? slice[1] : def;
 }

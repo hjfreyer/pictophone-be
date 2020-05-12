@@ -58,7 +58,7 @@ export function unscrambledSpace<T>(r: Readable<T>): ScrambledSpace<T> {
         schema: r.schema,
         seekTo(key: Key): SliceIterable<T> {
             return of({
-                range: { kind: 'unbounded', start: key },
+                range: { kind: 'unbounded', start: r.schema.map(_ => '') },
                 iter: r.seekTo(key)
             })
         }
@@ -72,6 +72,27 @@ export function keySuccessor(k: Key): Key {
     return [...k.slice(0, k.length - 1), stringSuccessor(k[k.length - 1])]
 }
 
+
+export type SliceIterable<T> = AsyncIterable<Slice<T>>
+
+// A somewhat ordered collection of (Key, value) pairs. Rows are grouped
+// into "Slices" which contain all the keys in some range of key space,
+// in lexicographic order. However, the order of the slices themselves
+// may or may not be mixed up.
+//
+// The slices returned from the iterator will always have disjoint ranges, 
+// though the union of these ranges won't necessarily cover all of key space.
+export interface ScrambledSpace<T> {
+    schema: string[]
+
+    // Returns an iterator into the scrambled space starting from "key". 
+    // If the first returned slice's range doesn't include `key`, then `key`
+    // does not exist in the collection. If the slice does include `key`,
+    // then its iterable will begin with the first element of the slice
+    // at or after `key`.
+    seekTo(key: Key): SliceIterable<T>
+}
+
 // An ordered slice of key space.
 export interface Slice<T> {
     range: Range
@@ -80,23 +101,15 @@ export interface Slice<T> {
     iter: ItemIterable<T>
 }
 
-export type SliceIterable<T> = AsyncIterable<Slice<T>>
-
-export interface ScrambledSpace<T> {
-    schema: string[]
-
-    // Returns an iterator into the scrambled space starting from "key".
-    seekTo(key: Key): SliceIterable<T>
-}
-
 export interface MonoOp<I, O> {
+    // Returns an input-space key such that a slice beginning with it
+    // will map onto a slice containing the output key.
+    preimage(outputKey: Key): Key
+
     schema(inputSchema: string[]): string[]
     // rewindInputKey(key: Key): Key
     // smallestImpactingInputKey(outputKey: Key): Key
 
-    // Returns an input-space key such that a slice beginning with it
-    // will map onto a slice containing the output key.
-    preimage(outputKey: Key): Key
     // impactedOutputRange(inputKey: Key): Range
     getSmallestInputRange(inputKey: Key): Range
     // apply(inputIter: ItemIterable<I>): ItemIterable<O>
@@ -259,7 +272,7 @@ export function enumerate<Inputs, Intermediates, T>(
 
 
                         return outputSliceIter.pipe(
-                            map((slice: Slice<T>, idx:number ): Slice<T> => {
+                            map((slice: Slice<T>, idx: number): Slice<T> => {
                                 if (idx !== 0) {
                                     return slice;
                                 }
@@ -277,10 +290,7 @@ export function enumerate<Inputs, Intermediates, T>(
 
 function seekSliceTo<T>(slice: Slice<T>, start: Key): Slice<T> {
     return {
-        range: {
-            ...slice.range,
-            start: start
-        },
+        range: slice.range,
         iter: from(slice.iter).pipe(
             skipWhile(([k,]) => lexCompare(k, start) < 0)
         )
@@ -497,22 +507,22 @@ async function* collectionDiffsOp<Inputs, Intermediates, I, O>(input: Collection
         const oldOutput = op.mapSlice(inputSlice);
         const newOutput = op.mapSlice(patchSlice(inputSlice, inputDiffs));
 
-        type AgedItem = {age: 'old' | 'new', key: Key, value: O};
+        type AgedItem = { age: 'old' | 'new', key: Key, value: O };
         const agedItemCmp: Comparator<AgedItem> =
             (a, b) => lexCompare(a.key, b.key);
-        const toTagged = async (age: 'old'| 'new', slices: SliceIterable<O>): Promise<AgedItem[]> => {
+        const toTagged = async (age: 'old' | 'new', slices: SliceIterable<O>): Promise<AgedItem[]> => {
             const items = from(slices)
-                .pipe(flatMap(slice => from(slice.iter).pipe(map(([key, value]) => ({age, key, value})))))
-                const itemArray = await toArray(items);
-                itemArray.sort(agedItemCmp)
-                return itemArray;
+                .pipe(flatMap(slice => from(slice.iter).pipe(map(([key, value]) => ({ age, key, value })))))
+            const itemArray = await toArray(items);
+            itemArray.sort(agedItemCmp)
+            return itemArray;
         }
 
         const oldItems = await toTagged('old', oldOutput);
         const newItems = await toTagged('new', newOutput);
 
         const merged = from(sortedMerge([of(...oldItems), of(...newItems)], agedItemCmp)).pipe(
-//            tap(([age, [key,]]) => console.log('TAP ', age, key))
+            //            tap(([age, [key,]]) => console.log('TAP ', age, key))
         );
         for await (const batch of batchStreamBy(merged, agedItemCmp)) {
             if (2 < batch.length) {
@@ -527,19 +537,19 @@ async function* collectionDiffsOp<Inputs, Intermediates, I, O>(input: Collection
                     console.log("  doing", {
                         kind: 'replace',
                         key,
-                        oldValue:  oldValue.value,
+                        oldValue: oldValue.value,
                         newValue: newValue.value,
                     })
                     yield {
                         kind: 'replace',
                         key,
-                        oldValue:  oldValue.value,
+                        oldValue: oldValue.value,
                         newValue: newValue.value,
                     }
                 }
             } else {
                 // Else, batch.length == 1.
-                const {age, key, value} = batch[0];
+                const { age, key, value } = batch[0];
                 console.log("  doing", {
                     kind: age === 'old' ? 'delete' : 'add',
                     key,

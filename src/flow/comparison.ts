@@ -1,4 +1,4 @@
-import { Diff , Item, ScrambledSpace} from "./base";
+import { Diff, Item, ScrambledSpace } from "./base";
 import * as read from './read';
 import deepEqual from "deep-equal";
 import { Readable } from "./base";
@@ -9,26 +9,26 @@ export function getDiffs<T>(expected: ScrambledSpace<T>, actual: Readable<T>): A
     const diffs = from(read.unsortedListAll(expected))
         .pipe(flatMap(async ([key, expectedValue]): Promise<AsyncIterable<Diff<T>>> => {
             const actualValue = await read.get(actual, key);
-        if (actualValue === null) {
-            return of({
-                kind: 'add',
-                key,
-                value: expectedValue,
-            })
-        } else if (!deepEqual(expectedValue, actualValue)) {
-            return of({
-                kind: 'replace',
-                key,
-                oldValue: actualValue,
-                newValue: expectedValue,
-            })
-        } else {
-            return of();
-        }
-    }));
+            if (actualValue === null) {
+                return of({
+                    kind: 'add',
+                    key,
+                    value: expectedValue,
+                })
+            } else if (!deepEqual(expectedValue, actualValue)) {
+                return of({
+                    kind: 'replace',
+                    key,
+                    oldValue: actualValue,
+                    newValue: expectedValue,
+                })
+            } else {
+                return of();
+            }
+        }));
 
     const orphans = from(read.readAll(actual))
-        .pipe(flatMap(async ([key, actualValue]):Promise<AsyncIterable<Diff<T>>> => {
+        .pipe(flatMap(async ([key, actualValue]): Promise<AsyncIterable<Diff<T>>> => {
             if (await read.getFromScrambledOrDefault(expected, key, null) === null) {
                 return of({
                     kind: 'delete',
@@ -38,7 +38,7 @@ export function getDiffs<T>(expected: ScrambledSpace<T>, actual: Readable<T>): A
             } else {
                 return of();
             }
-        } ));
+        }));
 
     return concat(diffs, orphans);
 }
