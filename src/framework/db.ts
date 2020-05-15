@@ -3,11 +3,11 @@ import { strict as assert } from "assert"
 import { basename, dirname, join } from "path"
 import { Diff, Item, Change } from './base'
 
-import { from } from 'ix/asynciterable';
 import { map, tap } from 'ix/asynciterable/operators';
 import { InputInfo } from './graph';
 import { ItemIterable, Readable, Key } from '../flow/base';
 import { Range } from '../flow/range';
+import * as ixa from "ix/asynciterable";
 
 
 interface Timestamped {
@@ -36,7 +36,7 @@ export class Dataspace<T> implements Readable<T> {
     }
 
     seekTo(startAt: Key): ItemIterable<T> {
-        return from(new DBHelper(this.db, this.tx, this.info.collectionId, this.info.schema).list(startAt))
+        return ixa.from(new DBHelper(this.db, this.tx, this.info.collectionId, this.info.schema).list(startAt))
             .pipe(map(([k, v]) => [k, this.info.validator(v)]));
     }
 

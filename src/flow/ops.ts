@@ -1,9 +1,10 @@
 import { MonoOp, Key, keySuccessor, ItemIterable, ScrambledSpace, SliceIterable, Slice, Item } from "./base";
 import { Range, isSingleValue, singleValue } from "./range";
 import _ from 'lodash';
-import { permute, lexCompare, invertPermutation } from "./util";
-import { from, of, first } from "ix/asynciterable";
+import { permute, lexCompare, invertPermutation, batchStreamBy } from "./util";
+import * as ixa from "ix/asynciterable";
 import { map as iterMap, flatMap, skipWhile, tap } from "ix/asynciterable/operators";
+import * as ixaop from "ix/asynciterable/operators";
 
 
 export type SortedStreamMapFn<I, O> = (key: Key, value: I) => Iterable<[Key, O]>;
@@ -33,14 +34,14 @@ class MapOp<I, O> implements MonoOp<I, O>{
                 end: [...inputSlice.range.end, ...this.subschema.map(_ => '')]
             }
             : { kind: 'unbounded', start: outputStart };
-        return of({
+        return ixa.of({
             range: outputRange,
-            iter: from(inputSlice.iter)
+            iter: ixa.from(inputSlice.iter)
                 .pipe(
                     //                   tap(i=> console.log('in map',i)),
                     flatMap(([inputKey, inputValue]) => {
                         // console.log("here:", inputKey, inputValue)
-                        return from(this.fn(inputKey, inputValue))
+                        return ixa.from(this.fn(inputKey, inputValue))
                             .pipe(iterMap(([extension, outputValue]): Item<O> => [[...inputKey, ...extension], outputValue]));
                     }),
                 )
@@ -74,7 +75,7 @@ class MapOp<I, O> implements MonoOp<I, O>{
             seekTo(outputKey: Key): SliceIterable<O> {
                 console.log('map got seek for', outputKey)
                 const inputKey = outputKey.slice(0, outputKey.length - self.subschema.length);
-                return from(input.seekTo(inputKey))
+                return ixa.from(input.seekTo(inputKey))
                     .pipe(iterMap((inputSlice: Slice<I>): Slice<O> => {
                         const outputStart = [...inputSlice.range.start, ...self.subschema.map(_ => '')]
                         const outputRange: Range = inputSlice.range.kind === 'bounded'
@@ -85,9 +86,9 @@ class MapOp<I, O> implements MonoOp<I, O>{
                             : { kind: 'unbounded', start: outputStart };
                         return {
                             range: outputRange,
-                            iter: from(inputSlice.iter)
+                            iter: ixa.from(inputSlice.iter)
                                 .pipe(flatMap(([inputKey, inputValue]) => {
-                                    return from(self.fn(inputKey, inputValue))
+                                    return ixa.from(self.fn(inputKey, inputValue))
                                         .pipe(iterMap(([extension, outputValue]): Item<O> => [[...inputKey, ...extension], outputValue]));
                                 }),
                                     tap(([k,]) => console.log("raw", k, outputKey)),
@@ -134,7 +135,7 @@ class TransposeOp<T> implements MonoOp<T, T>{
     }
 
     mapSlice(inputSlice: Slice<T>): SliceIterable<T> {
-        return from(inputSlice.iter)
+        return ixa.from(inputSlice.iter)
             .pipe(//
                 iterMap(([inputKey, inputValue]): Slice<T> => {
                     const outputKey = permute(this.permutation, inputKey);
@@ -142,7 +143,7 @@ class TransposeOp<T> implements MonoOp<T, T>{
                         // TODO: Can do better than splitting every 
                         // value into its own slice, under some circumstances.
                         range: singleValue(outputKey),
-                        iter: of([outputKey, inputValue] as Item<T>)
+                        iter: ixa.of([outputKey, inputValue] as Item<T>)
                     }
                 }),
                 //                                tap(_=>console.log('foo'))
@@ -161,9 +162,9 @@ class TransposeOp<T> implements MonoOp<T, T>{
             schema: outputSchema,
             seekTo(outputStartAt: Key): SliceIterable<T> {
                 const inputStartAt = permute(invertPermutation(self.permutation), outputStartAt);
-                return from(input.seekTo(inputStartAt))
+                return ixa.from(input.seekTo(inputStartAt))
                     .pipe(flatMap((inputSlice: Slice<T>): SliceIterable<T> => {
-                        return from(inputSlice.iter)
+                        return ixa.from(inputSlice.iter)
                             .pipe(
                                 // tap(([ik,]) => console.log("in transpose", outputStartAt, ik)),
                                 iterMap(([inputKey, inputValue]): Slice<T> => {
@@ -172,7 +173,7 @@ class TransposeOp<T> implements MonoOp<T, T>{
                                         // TODO: Can do better than splitting every 
                                         // value into its own slice, under some circumstances.
                                         range: singleValue(outputKey),
-                                        iter: of([outputKey, inputValue] as Item<T>)
+                                        iter: ixa.of([outputKey, inputValue] as Item<T>)
                                     }
                                 }));
                     }));
@@ -183,4 +184,68 @@ class TransposeOp<T> implements MonoOp<T, T>{
 
 export function transpose<T>(permutation: number[]): MonoOp<T, T> {
     return new TransposeOp(permutation);
+}
+
+export type AggregateFn<I, O> = (baseKey: Key, values: Item<I>[]) => O;
+
+class AggregateOp<I, O> implements MonoOp<I, O>{
+    constructor(private aggregateDims: number, private fn: AggregateFn<I, O>) { }
+
+    getSmallestInputRange(inputKey: Key): Range {
+        const base = inputKey.slice(0, inputKey.length - this.aggregateDims);
+        const pad = Array(this.aggregateDims).fill('');
+        return { kind: 'bounded', start: [...base, ...pad], end: [...keySuccessor(base), ...pad] };
+    }
+
+    preimage(outputKey: Key): Key {
+        return [...outputKey, ...Array(this.aggregateDims).fill('')];
+    }
+
+    schema(inputSchema: string[]): string[] {
+        return inputSchema.slice(0, inputSchema.length - this.aggregateDims);
+    }
+
+
+    mapSlice(inputSlice: Slice<I>): SliceIterable<O> {
+        const prefixLen = inputSlice.range.start.length - this.aggregateDims;
+        const isAligned = (key: Key) => key.slice(0, prefixLen).every(x => x === '');
+        if (!isAligned(inputSlice.range.start)) {
+            throw new Error("Slice given to aggregate must begin at boundary");
+        }
+
+        if (inputSlice.range.kind === 'bounded' && !isAligned(inputSlice.range.end)) {
+            throw new Error("Slice given to aggregate must end at boundary");
+        }
+        const rangeStart = inputSlice.range.start.slice(0, prefixLen);
+        const range: Range = inputSlice.range.kind === 'unbounded' ? {
+            kind: 'unbounded',
+            start: rangeStart,
+        } : {
+                kind: 'bounded',
+                start: rangeStart,
+                end: inputSlice.range.end.slice(0, prefixLen),
+            }
+
+        const batched = ixa.from(batchStreamBy(inputSlice.iter,
+            ([aKey,], [bKey,]) => lexCompare(aKey.slice(0, prefixLen), bKey.slice(0, prefixLen))));
+        const aggregated = batched
+            .pipe(ixaop.map((batch: Item<I>[]): Item<O> => {
+                const batchKey = batch[0][0].slice(0, prefixLen);
+                return [batchKey, this.fn(batchKey, batch.map(
+                    ([k, v]: Item<I>): Item<I> => [k.slice(prefixLen), v]
+                ))]
+            }));
+        return ixa.of({
+            range,
+            iter: aggregated,
+        })
+    }
+
+
+
+}
+
+
+export function aggregate<I, O>(levels: number, fn: AggregateFn<I, O>): MonoOp<I, O> {
+    return new AggregateOp(levels, fn);
 }

@@ -138,7 +138,6 @@ export function diffToChange<T>(d: Diff<T>): Change<T> {
             }
     }
 }
-
 export type Graph<Inputs, Intermediates, Outputs> = {
     [K in keyof Outputs]: Collection<Inputs, Intermediates, Outputs[K]>
 }

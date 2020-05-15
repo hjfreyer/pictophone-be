@@ -3,10 +3,11 @@ import * as read from './read';
 import deepEqual from "deep-equal";
 import { Readable } from "./base";
 import { map, flatMap, concatAll, tap } from "ix/asynciterable/operators";
-import { from, of, concat } from "ix/asynciterable";
+import { of, concat } from "ix/asynciterable";
+import * as ixa from "ix/asynciterable";
 
 export function getDiffs<T>(expected: ScrambledSpace<T>, actual: Readable<T>): AsyncIterable<Diff<T>> {
-    const diffs = from(read.unsortedListAll(expected))
+    const diffs = ixa.from(read.unsortedListAll(expected))
         .pipe(flatMap(async ([key, expectedValue]): Promise<AsyncIterable<Diff<T>>> => {
             const actualValue = await read.get(actual, key);
             if (actualValue === null) {
@@ -27,7 +28,7 @@ export function getDiffs<T>(expected: ScrambledSpace<T>, actual: Readable<T>): A
             }
         }));
 
-    const orphans = from(read.readAll(actual))
+    const orphans = ixa.from(read.readAll(actual))
         .pipe(flatMap(async ([key, actualValue]): Promise<AsyncIterable<Diff<T>>> => {
             if (await read.getFromScrambledOrDefault(expected, key, null) === null) {
                 return of({

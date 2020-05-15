@@ -1,9 +1,12 @@
 import { Item, Readable, Key, ScrambledSpace, ItemIterable, Slice } from "./base";
 import deepEqual from "deep-equal";
 import { Range, rangeContains, rangeContainsRange, singleValue, compareRangeEndpoints } from "./range";
-import { from, first, of, create, empty } from "ix/asynciterable";
+import { first, create, empty } from "ix/asynciterable";
 import { filter, takeWhile, take, flatMap, tap } from "ix/asynciterable/operators";
 import { lexCompare } from "./util";
+import * as ixa from "ix/asynciterable";
+
+
 
 export async function get<T>(source: Readable<T>, key: Key): Promise<T | null> {
     return getOrDefault(source, key, null)
@@ -21,7 +24,7 @@ export async function getOrDefault<T, D>(source: Readable<T>, key: Key, def: D):
 }
 
 export function list<T>(source: Readable<T>, range: Range): AsyncIterable<Item<T>> {
-    return from(source.seekTo(range.start))
+    return ixa.from(source.seekTo(range.start))
         .pipe(takeWhile(([key, _value]) => rangeContains(range, key)))
 }
 
@@ -30,7 +33,7 @@ export function readAll<T>(source: Readable<T>): AsyncIterable<Item<T>> {
 }
 
 export function unsortedListAll<T>(source: ScrambledSpace<T>): ItemIterable<T> {
-    return from(source.seekTo(source.schema.map(_ => '')))
+    return ixa.from(source.seekTo(source.schema.map(_ => '')))
         .pipe(flatMap(slice => slice.iter))
 }
 
@@ -53,7 +56,7 @@ export async function* readRangeFromSingleSlice<T>(input: ScrambledSpace<T>, ran
         first slice: ${JSON.stringify(firstSlice.range)}`)
     }
 
-    yield* from(firstSlice.iter)
+    yield* ixa.from(firstSlice.iter)
         .pipe(takeWhile(([key, _value]) => rangeContains(range, key)))
 }
 
