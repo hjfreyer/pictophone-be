@@ -1,6 +1,6 @@
 import { Option, sortedMerge, batchStreamBy, Comparator, stringSuccessor, Result } from "./util"
-import { from, of, toArray, first, single, concat } from "ix/asynciterable"
-import { map, filter, flatMap, tap, take, skip, skipWhile } from "ix/asynciterable/operators"
+import * as ixa from "ix/asynciterable"
+import * as ixaop from "ix/asynciterable/operators"
 import _ from 'lodash'
 import { Range, singleValue, rangeContains, rangeContainsRange } from './range'
 import { lexCompare } from "./util"
@@ -57,7 +57,7 @@ export function unscrambledSpace<T>(r: Readable<T>): ScrambledSpace<T> {
     return {
         schema: r.schema,
         seekTo(key: Key): SliceIterable<T> {
-            return of({
+            return ixa.of({
                 range: { kind: 'unbounded', start: r.schema.map(_ => '') },
                 iter: r.seekTo(key)
             })
@@ -139,20 +139,6 @@ export function diffToChange<T>(d: Diff<T>): Change<T> {
     }
 }
 
-// export interface SortedMonoOp<I, O> {
-//     schema: string[]
-//     image(inputRange: Range<Key>): Range<Key>
-//     preimage(outputRange: Range<Key>): Range<Key>
-//     applySorted(inputIter: CursorIterable<I>): CursorIterable<O>
-// }
-
-// export interface OrderNeedingMonoOp<I, O> {
-//     schema: string[]
-//     image(inputRange : Range<Key>): Range<Key>
-//     preimage(outputRange: Range<Key>): Range<Key>
-//     applyToOrdered(inputIter: ItemIterator<I>): ItemIterator<O>
-// }
-
 export type Graph<Inputs, Intermediates, Outputs> = {
     [K in keyof Outputs]: Collection<Inputs, Intermediates, Outputs[K]>
 }
@@ -172,12 +158,6 @@ interface OpNode<Inputs, Intermediates, O> {
     visit<R>(go: <I>(input: Collection<Inputs, Intermediates, I>, op: MonoOp<I, O>) => R): R
 }
 
-// export type SortedCollection<Inputs, Intermediates, T> =
-//     LoadNode<Inputs, T>
-//     | SortedOpNode<Inputs, Intermediates, T>
-//     | SortNode<Inputs, Intermediates, T>
-//     | MergeNode<Inputs, Intermediates, T>
-
 interface LoadNode<Inputs, T> {
     kind: 'load'
     schema: string[]
@@ -192,16 +172,6 @@ export function load<Inputs, Intermediates, K extends keyof Inputs>(k: K, schema
         visit: (go) => go(k, x => x)
     }
 }
-
-// interface SortedOpNode<Inputs, Intermediates, O> {
-//     kind: 'sorted_op'
-//     visit<R>(go: <I>(input: SortedCollection<Inputs, Intermediates, I>, op: SortedMonoOp<I, O>) => R): R
-// }
-
-// interface OpRequiresOrderNode<Inputs, Intermediates, O> {
-//     kind: 'op_requires_order'
-//     visit<R>(go: <I>(input: OrderedGraph<Inputs, Intermediates, I>, op : OrderPreservingMonoOp<I, O>) => R): R
-// }
 
 interface SortNode<Inputs, Intermediates, T> {
     kind: 'sort'
@@ -242,18 +212,15 @@ export function enumerate<Inputs, Intermediates, T>(
                 const readable = intermediates[key] as any as Readable<T>;
                 return unscrambledSpace(readable);
             })
-        case "merge":
-            throw "unimplemented";
-        // case "op":
-
-        //     return collection.visit((input, op) => {
-        //         const inputRange = op.preimage(range);
-        //         if (isEverything(inputRange)) {
-        //             throw "not doing a full DB scan";
-        //         }
-        //         return from(op.apply(query(input, inputs, intermediates, inputRange)))
-        //             .pipe(filter(([k, v]) => rangeContains(range, new OrderedKey(k))))
-        //     })
+        case "merge": {
+            const enumeratedInputs = collection.inputs.map(i => enumerate(i, inputs, intermediates));
+            for (const eInput of enumeratedInputs) {
+                if (!deepEqual(eInput.schema, enumeratedInputs[0].schema)) {
+                    throw new Error("merged spaces must have the same schema");
+                }
+            }
+            return new MergedScrambedSpace(enumeratedInputs);
+        }
         case "op":
             return collection.visit((input, op) => {
                 const enumeratedInput = enumerate(input, inputs, intermediates);
@@ -265,14 +232,14 @@ export function enumerate<Inputs, Intermediates, T>(
                         // console.log("seeking from:", outputStartAt, op)
                         const inputStartAt = op.preimage(outputStartAt);
                         const inputSliceIter = enumeratedInput.seekTo(inputStartAt);
-                        const outputSliceIter = from(inputSliceIter)
+                        const outputSliceIter = ixa.from(inputSliceIter)
                             .pipe(
                                 // tap(slice=> console.log("into op", slice.range, op)),
-                                flatMap(slice => op.mapSlice(slice)))
+                                ixaop.flatMap(slice => op.mapSlice(slice)))
 
 
                         return outputSliceIter.pipe(
-                            map((slice: Slice<T>, idx: number): Slice<T> => {
+                            ixaop.map((slice: Slice<T>, idx: number): Slice<T> => {
                                 if (idx !== 0) {
                                     return slice;
                                 }
@@ -291,60 +258,32 @@ export function enumerate<Inputs, Intermediates, T>(
 function seekSliceTo<T>(slice: Slice<T>, start: Key): Slice<T> {
     return {
         range: slice.range,
-        iter: from(slice.iter).pipe(
-            skipWhile(([k,]) => lexCompare(k, start) < 0)
+        iter: ixa.from(slice.iter).pipe(
+            ixaop.skipWhile(([k,]) => lexCompare(k, start) < 0)
         )
     }
 }
 
-// export function sortedList<Inputs, Intermediates, T>(
-//     collection: SortedCollection<Inputs, Intermediates, T>,
-//     inputs: Readables<Inputs>,
-//     intermediates: Readables<Intermediates>,
-//     startFromCursor: Bound<Key>): CursorIterable<T> {
-//     const inputRange: Range<Key> = {
-//         start: startFromCursor,
-//         end: { kind: 'unbounded' }
-//     };
-//     switch (collection.kind) {
-//         case "load":
-//             return collection.visit((key, _cast): CursorIterable<T> => {
-//                 // Assumes that _cast will be the identity function. I could change 
-//                 // this to explicitly cast each row.
-//                 const readable = inputs[key] as any as Readable<T>;
+class MergedScrambedSpace<T> implements ScrambledSpace<T> {
+    constructor(private inputs: ScrambledSpace<T>[]) { }
 
-//                 return from(readable.sortedList(inputRange)).pipe(
-//                     map(([key, value]): Cursor<T> => ({
-//                         key,
-//                         value,
-//                         cursor: { kind: 'exclusive', value: key },
-//                     }))
-//                 );
-//             })
-//         case "sort":
-//             return collection.visit((key, _cast): CursorIterable<T> => {
-//                 // Assumes that _cast will be the identity function. I could change 
-//                 // this to explicitly cast each row.
-//                 const readable = intermediates[key] as any as Readable<T>;
+    get schema(): string[] { return this.inputs[0].schema; }
 
-//                 return from(readable.sortedList(inputRange)).pipe(
-//                     map(([key, value]): Cursor<T> => ({
-//                         key,
-//                         value,
-//                         cursor: { kind: 'exclusive', value: key },
-//                     }))
-//                 );
-//             })
-
-//         case "sorted_op":
-//             return collection.visit((input, op) => {
-//                 return op.applySorted(sortedList(input, inputs, intermediates, startFromCursor));
-//             })
-
-//         case "merge":
-//             throw "not implemented"
-//     }
-// }
+    seekTo(key: Key): SliceIterable<T> {
+        return ixa.zip(...this.inputs.map(i => i.seekTo(key)))
+            .pipe(ixaop.map((slices: Slice<T>[]): Slice<T> => {
+                for (const slice of slices) {
+                    if (!deepEqual(slice.range, slices[0].range)) {
+                        throw new Error("merged spaces must emit identical slice ranges");
+                    }
+                }
+                return {
+                    range: slices[0].range,
+                    iter: sortedMerge(slices.map(slice => slice.iter), (a, b) => lexCompare(a[0], b[0]))
+                }
+            }))
+    }
+}
 
 export class CollectionBuilder<Inputs, Intermediates, T>{
     constructor(public collection: Collection<Inputs, Intermediates, T>) { }
@@ -356,44 +295,6 @@ export class CollectionBuilder<Inputs, Intermediates, T>{
         })
     }
 }
-
-
-// export function query<Inputs, Intermediates, T>(
-//     collection: Collection<Inputs, Intermediates, T>,
-//     inputs: Readables<Inputs>,
-//     intermediates: Readables<Intermediates>,
-//     range: Range): ItemIterable<T> {
-//     switch (collection.kind) {
-//         case "merge":
-//             throw "not implemented"
-//         case "load":
-//             return collection.visit((key, _cast): ItemIterable<T> => {
-//                 // Assumes that _cast will be the identity function. I could change 
-//                 // this to explicitly cast each row.
-//                 const readable = inputs[key] as any as Readable<T>;
-
-//                 return read.list(readable, range);
-//             });
-//         case "sort":
-//             return collection.visit((key, _cast): ItemIterable<T> => {
-//                 // Assumes that _cast will be the identity function. I could change 
-//                 // this to explicitly cast each row.
-//                 const readable = intermediates[key] as any as Readable<T>;
-
-//                 return read.list(readable, range);
-//             })
-//         case "op":
-
-//             return collection.visit((input, op) => {
-//                 const inputRange = op.preimage(range);
-//                 if (isEverything(inputRange)) {
-//                     throw "not doing a full DB scan";
-//                 }
-//                 return from(op.apply(query(input, inputs, intermediates, inputRange)))
-//                     .pipe(filter(([k, v]) => rangeContains(range, new OrderedKey(k))))
-//             })
-//     }
-// }
 
 export function getIntermediates<Inputs, Intermediates, Outputs>(
     graph: Graph<Inputs, Intermediates, Outputs>): IntermediateCollections<Inputs, Intermediates> {
@@ -431,9 +332,7 @@ function getIntermediatesForCollection<Inputs, Intermediates, T>(
             }
             return res;
         case "op":
-            return collection.visit((input, _op) => getIntermediatesForCollection(input)
-            )
-
+            return collection.visit((input, _op) => getIntermediatesForCollection(input))
     }
 }
 
@@ -476,7 +375,7 @@ async function collectionDiffs<Inputs, Intermediates, T>(
         case "merge":
             return _.flatten(await Promise.all(collection.inputs.map(i => collectionDiffs(i, inputs, intermediates, inputDiffs))));
         case "op":
-            return toArray(collection.visit((input, op) => collectionDiffsOp(input, op, inputs, intermediates, inputDiffs)))
+            return ixa.toArray(collection.visit((input, op) => collectionDiffsOp(input, op, inputs, intermediates, inputDiffs)))
     }
 }
 
@@ -511,9 +410,9 @@ async function* collectionDiffsOp<Inputs, Intermediates, I, O>(input: Collection
         const agedItemCmp: Comparator<AgedItem> =
             (a, b) => lexCompare(a.key, b.key);
         const toTagged = async (age: 'old' | 'new', slices: SliceIterable<O>): Promise<AgedItem[]> => {
-            const items = from(slices)
-                .pipe(flatMap(slice => from(slice.iter).pipe(map(([key, value]) => ({ age, key, value })))))
-            const itemArray = await toArray(items);
+            const items = ixa.from(slices)
+                .pipe(ixaop.flatMap(slice => ixa.from(slice.iter).pipe(ixaop.map(([key, value]) => ({ age, key, value })))))
+            const itemArray = await ixa.toArray(items);
             itemArray.sort(agedItemCmp)
             return itemArray;
         }
@@ -521,12 +420,12 @@ async function* collectionDiffsOp<Inputs, Intermediates, I, O>(input: Collection
         const oldItems = await toTagged('old', oldOutput);
         const newItems = await toTagged('new', newOutput);
 
-        const merged = from(sortedMerge([of(...oldItems), of(...newItems)], agedItemCmp)).pipe(
+        const merged = ixa.from(sortedMerge([ixa.of(...oldItems), ixa.of(...newItems)], agedItemCmp)).pipe(
             //            tap(([age, [key,]]) => console.log('TAP ', age, key))
         );
         for await (const batch of batchStreamBy(merged, agedItemCmp)) {
             if (2 < batch.length) {
-                throw "batch too big!"
+                throw new Error("batch too big!")
             }
             if (batch.length == 2) {
                 const oldValue = batch[0].age === 'old' ? batch[0] : batch[1];
