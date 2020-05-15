@@ -10,7 +10,7 @@ import batch from './batch'
 import GetConfig from './config'
 import { DBHelper2, Dataspace } from './framework/db'
 import { getSchema, Op, Processor, Source, Diffs } from './framework/graph'
-import { Action1_1, AnyAction, Action1_0, Game1_0, TimestampedGame1_0 } from './model'
+import { Action1_1, AnyAction, Action1_0, Game1_0, TaggedGame1_0 } from './model'
 import { validate as validateModel } from './model/index.validator'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
@@ -26,13 +26,13 @@ import { multiIndexBy, transpose } from './flow/ops'
 
 
 type StateSpec = {
-    games: TimestampedGame1_0
+    games: TaggedGame1_0
 }
 
 type SideSpec = {}
 
 type ExportSpec = {
-    gamesByPlayer: TimestampedGame1_0
+    gamesByPlayer: TaggedGame1_0
 }
 
 export function getStateReadables(db: Firestore, tx: Transaction): { [K in keyof StateSpec]: Dataspace<StateSpec[K]> } {
@@ -41,7 +41,7 @@ export function getStateReadables(db: Firestore, tx: Transaction): { [K in keyof
         games: helper.open({
             schema: ["game"],
             collectionId: "state-2.0",
-            validator: validateModel("TimestampedGame1_0")
+            validator: validateModel("TaggedGame1_0")
         })
     }
 }
@@ -51,7 +51,7 @@ export function getExportsReadables(db: Firestore, tx: Transaction): { [K in key
         gamesByPlayer: helper.open({
             schema: ["player", "game"],
             collectionId: "exports-2.0",
-            validator: validateModel("TimestampedGame1_0")
+            validator: validateModel("TaggedGame1_0")
         })
     }
 }

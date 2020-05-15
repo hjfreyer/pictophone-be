@@ -23,7 +23,16 @@ export type Action1_0 = JoinGameAction1_0
 export interface Game1_0 {
     players: string[]
 }
-export type TimestampedGame1_0 = Game1_0 & Timestamped
+export type TaggedGame1_0 = Game1_0 & { actionId: string }
+
+export type SavedAction = {
+    parents: string[]
+    action: Action1_0
+}
+
+export type SavedState = {
+    action: Game1_0
+}
 
 // v1.1
 

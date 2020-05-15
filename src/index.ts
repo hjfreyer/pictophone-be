@@ -10,7 +10,7 @@ import { getStateReadables, getExportsReadables } from './collections'
 import GetConfig from './config'
 import { DBHelper2 } from './framework/db'
 import { getSchema, Op, Processor, Source, Diffs } from './framework/graph'
-import { Action1_1, AnyAction, Action1_0, Game1_0, TimestampedGame1_0 } from './model'
+import { Action1_1, AnyAction, Action1_0, Game1_0, TaggedGame1_0, SavedAction } from './model'
 import { validate as validateModel } from './model/index.validator'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
@@ -27,6 +27,8 @@ import timestamp from 'timestamp-nano';
 
 import { interval, from, of, toArray, first, single, concat } from "ix/asynciterable"
 import { map, filter, flatMap, tap, take, skip, skipWhile } from "ix/asynciterable/operators"
+import { sha256 } from 'js-sha256';
+import _ from 'lodash';
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -44,6 +46,41 @@ const port = process.env.PORT || 3000
 app.listen(port, function() {
     console.log(`Example app listening on port ${port}!`)
 })
+
+
+const HASH_HEX_CHARS_LEN = (32 / 8) * 2;  // 32 bits of hash
+function serializeActionId(date: Date, hashHex: string): string {
+    return `0${date.toISOString()}${hashHex.slice(0, HASH_HEX_CHARS_LEN)}`
+}
+
+function parseActionId(serialized: string): [Date, string] {
+    if (serialized[0] !== '0') {
+        throw new Error('unknown action ID format');
+    }
+
+    const dateStr = serialized.slice(1, serialized.length - HASH_HEX_CHARS_LEN);
+    const hashStr = serialized.slice(serialized.length - HASH_HEX_CHARS_LEN);
+
+    return [new Date(dateStr), hashStr]
+}
+
+function actionId(action: SavedAction): string {
+    // TODO: JSON.stringify isn't deterministic, so what's saved in the DB
+    // should really be a particular serialization, but I'm not worrying
+    // about that at the moment.
+    const hashHex = sha256.hex(JSON.stringify(action));
+    const maxDate = _.max(action.parents.map(id => parseActionId(id)[0]));
+
+    let now = new Date();
+
+    // TODO: just fake the date rather than waiting.
+    while (maxDate !== undefined && now < maxDate) {
+        now = new Date();
+    }
+    return serializeActionId(now, hashHex);
+}
+
+const ROOT_ACTION_ID = serializeActionId(new Date(0), sha256.hex(''));
 
 // export type ActionType = Action1_1
 
@@ -125,13 +162,13 @@ app.listen(port, function() {
 // }
 
 export type StateSpec = {
-    games: TimestampedGame1_0
+    games: TaggedGame1_0
 }
 
 type SideSpec = {}
 
 export type ExportSpec = {
-    gamesByPlayer: TimestampedGame1_0
+    gamesByPlayer: TaggedGame1_0
 }
 
 type Keys<Spec> = {
@@ -146,6 +183,8 @@ interface ActionResponse { }
 
 type IntegrateResponse<R, ChangeSpec> = {
     response: R
+    actionId: string
+    savedAction: SavedAction,
     changes: Changes<ChangeSpec>
 }
 
@@ -163,6 +202,7 @@ interface Database {
 }
 
 
+
 function placeholders(): Graph<StateSpec, {}, StateSpec> {
     return {
         games: load('games', ['game'])
@@ -178,17 +218,18 @@ export function getExports(): Graph<StateSpec, {}, ExportSpec> {
     return { gamesByPlayer }
 }
 
-function defaultGame(): Game1_0 {
+function defaultGame(): TaggedGame1_0 {
     return {
+        actionId: ROOT_ACTION_ID,
         players: [],
     }
 }
 
-function integrateHelper(a: Action1_0, game: Game1_0): Game1_0 {
+function integrateHelper(a: Action1_0, game: Game1_0): (Game1_0 | null) {
     switch (a.kind) {
         case 'join_game':
             if (game.players.indexOf(a.playerId) !== -1) {
-                return game
+                return null
             }
             return {
                 ...game,
@@ -202,29 +243,41 @@ async function doAction2(action: Action1_0, readables: Readables<StateSpec>): Pr
     IntegrateResponse<ActionResponse, StateSpec>> {
     const game = await read.getOrDefault(readables.games, [action.gameId], defaultGame())
     const newGame = integrateHelper(action, game);
-    const now = timestamp.fromDate(new Date());
-    return {
-        response: {},
-        changes: {
-            games: [{
-                kind: 'set', key: [action.gameId], value: {
-                    timestamp: {
-                        seconds: now.getTimeT(),
-                        nanoseconds: now.getNano(),
-                    },
-                    ...newGame
-                }
-            }]
+
+    const savedAction: SavedAction = {
+        parents: [game.actionId],
+        action,
+    }
+    const id = actionId(savedAction)
+
+    if (newGame === null) {
+        return {
+            response: {},
+            actionId: id,
+            savedAction,
+            changes: { games: [] }
+        }
+    } else {
+        return {
+            response: {},
+            actionId: id,
+            savedAction,
+            changes: {
+                games: [{
+                    kind: 'set', key: [action.gameId], value: {
+                        ...newGame, actionId: id
+                    }
+                }]
+            }
         }
     }
-
 }
 
-async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise<void> {
+function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise<ActionResponse> {
     const anyAction = validateModel('Action1_0')(body)
     // // const action = upgradeAction(anyAction)
 
-    await db.runTransaction(async (tx: Transaction): Promise<void> => {
+    return db.runTransaction(async (tx: Transaction): Promise<ActionResponse> => {
         //        const helper2 = new DBHelper2(db, tx);
         const stateReadables = getStateReadables(db, tx);
         const response = await doAction2(anyAction, stateReadables);
@@ -233,6 +286,8 @@ async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise
         const exportzReadables = getExportsReadables(db, tx);
         const exportz = getExports();
         const [, exportDiffs] = await getDiffs(exportz, stateReadables, {}, stateDiffs);
+
+        tx.set(db.collection('actions').doc(response.actionId), response.savedAction);
 
         for (const untypedCollectionId in response.changes) {
             const collectionId = untypedCollectionId as keyof typeof response.changes;
@@ -243,7 +298,7 @@ async function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise
             exportzReadables[collectionId].commit(exportDiffs[collectionId].map(diffToChange));
         }
 
-
+        return response.response;
 
         //     const stateConfig: Source<rev0.StateSpec> = {
         //         game: {
@@ -387,9 +442,9 @@ function numPoints(drawing: Drawing): number {
 
 app.options('/action', cors())
 app.post('/action', cors(), function(req: Request<Dictionary<string>>, res, next) {
-    doAction(db, req.body).then(() => {
+    doAction(db, req.body).then((resp) => {
         res.status(200)
-        res.json({})
+        res.json(resp)
     }).catch(next)
 })
 

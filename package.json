@@ -52,6 +52,7 @@
     "firebase-admin": "^8.4.0",
     "immer": "^3.2.0",
     "ix": "^3.0.2",
+    "js-sha256": "^0.9.0",
     "lodash": "^4.17.15",
     "rxjs": "^6.5.4",
     "timestamp-nano": "^1.0.0",
