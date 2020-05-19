@@ -1,27 +1,8 @@
 import { Timestamp } from '@google-cloud/firestore'
-import { Readable } from '../flow/base'
+import { Readable, Change } from '../flow/base'
 
-export type Item<V> = [string[], V]
+export { Diff, Change, Item } from '../flow/base'
 
-export type Change<V> = {
-    key: string[]
-    kind: 'set'
-    value: V
-} | {
-    key: string[]
-    kind: 'delete'
-}
-
-export type Diff<V> = {
-    key: string[]
-    kind: 'add' | 'delete'
-    value: V
-} | {
-    key: string[]
-    kind: 'replace'
-    oldValue: V
-    newValue: V
-}
 
 // export interface Readable<T> {
 //     schema: string[]

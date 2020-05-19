@@ -4,7 +4,7 @@ import { Request, Router } from 'express'
 import { getStateReadables, getExportsReadables } from './collections'
 import { } from './framework/db'
 import { getSchema, Op, Processor } from './framework/graph'
-import { getExports } from '.'
+import { getExports } from './collections'
 import { enumerate, isKeyExpected, diffToChange } from './flow/base'
 import { getDiffs } from './flow/comparison'
 import { from, of, first, toArray } from "ix/asynciterable";
@@ -21,9 +21,9 @@ export async function check(db: Firestore, cursor: BackwardsCheckCursor): Promis
         for (const untypedCollectionId in exportz) {
             const collectionId = untypedCollectionId as keyof typeof exportz;
             console.log('checking:', collectionId)
-            const space = enumerate(exportz[collectionId], stateReadables, {});
+            const space = enumerate(exportz[collectionId] as any, stateReadables);
 
-            for await (const diff of getDiffs(space, exportzReadables[collectionId])) {
+            for await (const diff of getDiffs(space, exportzReadables[collectionId] as any)) {
                 throw new Error(JSON.stringify(diff))
             }
         }
@@ -42,12 +42,12 @@ export async function backfill(db: Firestore, cursor: BackwardsCheckCursor): Pro
             const collectionId = untypedCollectionId as keyof typeof exportz;
             console.log('correcting:', collectionId)
 
-            const space = enumerate(exportz[collectionId], stateReadables, {});
+            const space = enumerate(exportz[collectionId] as any, stateReadables);
 
-            const diffs = await toArray(getDiffs(space, exportzReadables[collectionId]));
+            const diffs = await toArray(getDiffs(space, exportzReadables[collectionId] as any));
             for (const diff of diffs) {
                 console.log('applying:', JSON.stringify(diff))
-                exportzReadables[collectionId].commit([diffToChange(diff)]);
+                exportzReadables[collectionId].commit([diffToChange(diff) as any]);
             }
         }
     })

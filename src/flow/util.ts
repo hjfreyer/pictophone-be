@@ -1,5 +1,6 @@
 import _ from 'lodash'
-import { from, last } from 'ix/iterable'
+import { from, last, IterableX } from 'ix/iterable'
+import { OperatorFunction } from 'ix/interfaces'
 import { minBy, takeLast, filter, flatMap, tap, map } from 'ix/iterable/operators'
 import { strict as assert } from 'assert';
 
@@ -125,4 +126,29 @@ export function assertIsPermutation(permutation: number[]): void {
         }
         nums.add(p);
     }
+}
+
+class NarrowIterable<TSource, TResult extends TSource> extends IterableX<TResult> {
+    constructor(
+        private source: Iterable<TSource>,
+        private predicate: (value: TSource, index: number) => value is TResult) {
+        super();
+    }
+
+    *[Symbol.iterator]() {
+        let i = 0;
+        for (const item of this.source) {
+            if (this.predicate(item, i++)) {
+                yield item;
+            }
+        }
+    }
+}
+
+export function narrow<TSource, TResult extends TSource>(
+    selector: (value: TSource, index: number) => value is TResult
+): OperatorFunction<TSource, TResult> {
+    return function narrowOperatorFunction(source: Iterable<TSource>): IterableX<TResult> {
+        return new NarrowIterable<TSource, TResult>(source, selector);
+    };
 }

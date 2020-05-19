@@ -1,10 +1,13 @@
-import { MonoOp, Key, keySuccessor, ItemIterable, ScrambledSpace, SliceIterable, Slice, Item } from "./base";
+import { MonoOp, Key, keySuccessor, Mutation, ItemIterable, ScrambledSpace, SliceIterable, Slice, Item } from "./base";
 import { Range, isSingleValue, singleValue } from "./range";
 import _ from 'lodash';
 import { permute, lexCompare, invertPermutation, batchStreamBy } from "./util";
+import * as ix from "ix/iterable";
 import * as ixa from "ix/asynciterable";
 import { map as iterMap, flatMap, skipWhile, tap } from "ix/asynciterable/operators";
 import * as ixaop from "ix/asynciterable/operators";
+import * as ixop from "ix/iterable/operators";
+import { Mutations } from "../collections";
 
 
 export type SortedStreamMapFn<I, O> = (key: Key, value: I) => Iterable<[Key, O]>;
@@ -39,14 +42,32 @@ class MapOp<I, O> implements MonoOp<I, O>{
             iter: ixa.from(inputSlice.iter)
                 .pipe(
                     //                   tap(i=> console.log('in map',i)),
-                    flatMap(([inputKey, inputValue]) => {
-                        // console.log("here:", inputKey, inputValue)
-                        return ixa.from(this.fn(inputKey, inputValue))
-                            .pipe(iterMap(([extension, outputValue]): Item<O> => [[...inputKey, ...extension], outputValue]));
-                    }),
+                    flatMap(item => this.mapItem(item))
                 )
         })
     }
+
+    mapItem([key, value]: Item<I>): Item<O>[] {
+        return ix.toArray(ix.from(this.fn(key, value))
+            .pipe(ixop.map(([extension, outputValue]): Item<O> => [[...key, ...extension], outputValue])))
+    }
+
+    //     mapMutations(input: Mutation<I>[]): Mutation<O>[] {
+    //         return ix.from(input).pipe(
+    //             ixop.flatMap((mutation) : Mutation<O>[] => {
+    //                 switch (mutation.kind) {
+    //                     case 'add':
+    //                     case 'delete':
+    //                         this.mapItem([mutation.key, mutation.value])
+    //                 }
+
+    // return ix.from(this.fn(inputKey, inputValue))
+    //                             .pipe(iterMap(([extension, outputValue]): Item<O> => [[...inputKey, ...extension], outputValue]));
+
+    //             })
+    //         )
+
+    //     }
 
 
 

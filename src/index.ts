@@ -6,11 +6,11 @@ import { Dictionary, Request } from 'express-serve-static-core'
 import admin from 'firebase-admin'
 import uuid from 'uuid/v1'
 import batch from './batch'
-import { getStateReadables, getExportsReadables } from './collections'
+import { getStateReadables, getExportsReadables, doAction3, Bindings, StateSpec, getExports, Dynamics, Persisted, IntegrationInputs, Mutations, Integrated, Scrambles, ROOT_ACTION_ID, Integrateable, getIntegrateable, getDPLInfos } from './collections'
 import GetConfig from './config'
-import { DBHelper2 } from './framework/db'
+import { DBHelper2, Database } from './framework/db'
 import { getSchema, Op, Processor, Source, Diffs } from './framework/graph'
-import { Action1_1, AnyAction, Action1_0, Game1_0, TaggedGame1_0, SavedAction } from './model'
+import { Action1_1, AnyAction, Action1_0, Game1_0, TaggedGame1_0, TaggedGame1_1, SavedAction } from './model'
 import { validate as validateModel } from './model/index.validator'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
@@ -21,7 +21,7 @@ import * as read from './flow/read';
 import { ReadWrite, Change, Diff } from './framework/base'
 import deepEqual from 'deep-equal'
 import { DBs } from './framework/graph_builder'
-import { Graph, load, CollectionBuilder, Readables, Readable, getDiffs, diffToChange } from './flow/base'
+import { Graph, load, CollectionBuilder, Readables, Readable, getDiffs, diffToChange, Key, Collection, unscrambledSpace, Mutation, newDiff } from './flow/base'
 import { multiIndexBy, transpose } from './flow/ops'
 import timestamp from 'timestamp-nano';
 
@@ -29,6 +29,9 @@ import { interval, from, of, toArray, first, single, concat } from "ix/asynciter
 import { map, filter, flatMap, tap, take, skip, skipWhile } from "ix/asynciterable/operators"
 import { sha256 } from 'js-sha256';
 import _ from 'lodash';
+import * as ix from "ix/iterable"
+import { narrow } from './flow/util'
+
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -47,40 +50,6 @@ app.listen(port, function() {
     console.log(`Example app listening on port ${port}!`)
 })
 
-
-const HASH_HEX_CHARS_LEN = (32 / 8) * 2;  // 32 bits of hash
-function serializeActionId(date: Date, hashHex: string): string {
-    return `0${date.toISOString()}${hashHex.slice(0, HASH_HEX_CHARS_LEN)}`
-}
-
-function parseActionId(serialized: string): [Date, string] {
-    if (serialized[0] !== '0') {
-        throw new Error('unknown action ID format');
-    }
-
-    const dateStr = serialized.slice(1, serialized.length - HASH_HEX_CHARS_LEN);
-    const hashStr = serialized.slice(serialized.length - HASH_HEX_CHARS_LEN);
-
-    return [new Date(dateStr), hashStr]
-}
-
-function actionId(action: SavedAction): string {
-    // TODO: JSON.stringify isn't deterministic, so what's saved in the DB
-    // should really be a particular serialization, but I'm not worrying
-    // about that at the moment.
-    const hashHex = sha256.hex(JSON.stringify(action));
-    const maxDate = _.max(action.parents.map(id => parseActionId(id)[0]));
-
-    let now = new Date();
-
-    // TODO: just fake the date rather than waiting.
-    while (maxDate !== undefined && now < maxDate) {
-        now = new Date();
-    }
-    return serializeActionId(now, hashHex);
-}
-
-const ROOT_ACTION_ID = serializeActionId(new Date(0), sha256.hex(''));
 
 // export type ActionType = Action1_1
 
@@ -161,21 +130,11 @@ const ROOT_ACTION_ID = serializeActionId(new Date(0), sha256.hex(''));
 //     }
 // }
 
-export type StateSpec = {
-    games: TaggedGame1_0
-}
-
-type SideSpec = {}
-
-export type ExportSpec = {
-    gamesByPlayer: TaggedGame1_0
-}
-
 type Keys<Spec> = {
-    [K in keyof Spec]: string[][]
+    [K in keyof Spec]: Key[]
 }
 type Values<Spec> = {
-    [K in keyof Spec]: Spec[K][]
+    [K in keyof Spec]: (Spec[K] | null)[]
 }
 
 
@@ -197,31 +156,49 @@ class IntegrateContinue {
 // }
 
 
-interface Database {
+class Dynamics1_0 implements Dynamics {
+    // transformInputs(input : Readables<Persisted>): Scrambles<IntegrationInputs> {
+    //     return {
+    //         games1_0: unscrambledSpace(input.games1_0)
+    //     }
+    // }
+    // getInterest(a : Action1_0): Keys<IntegrationInputs> {
+    //     return {
+    //         games1_0: [[a.gameId]]
+    //     }
+    // }
+    async integrate(a: Action1_0, input: Readables<Persisted>): Promise<Diffs<Integrated>> {
+        const oldGame = await read.getOrDefault(input.games1_0, [a.gameId], null);
+        const newGame = integrateHelper(a, oldGame || defaultGame());
+        if (newGame === null) {
+            // Null game response means don't change the DB.
+            return { games1_0: [] };
+        }
+        const diff = newDiff([a.gameId], oldGame, newGame);
+
+        return {
+            games1_0: ix.toArray(ix.of(diff).pipe(narrow((x): x is Diff<Game1_0> => x !== null)))
+        }
+    }
+
+    deriveDiffs(input: Readables<Integrated>,
+        integratedDiffs: Diffs<Integrated>): Promise<Diffs<Integrateable>> {
+        return getDiffs(getIntegrateable(), input, integratedDiffs)
+    }
 
 }
 
 
 
-function placeholders(): Graph<StateSpec, {}, StateSpec> {
+function defaultGame(): Game1_0 {
     return {
-        games: load('games', ['game'])
+        players: [],
     }
 }
 
-export function getExports(): Graph<StateSpec, {}, ExportSpec> {
-    const ph = placeholders();
-    const gamesByPlayer = new CollectionBuilder(ph.games)
-        .pipe(multiIndexBy('player', (_, g) => g.players))
-        .pipe(transpose([1, 0])).collection;
-
-    return { gamesByPlayer }
-}
-
-function defaultGame(): TaggedGame1_0 {
+function interest1_0(a: Action1_0): Keys<StateSpec> {
     return {
-        actionId: ROOT_ACTION_ID,
-        players: [],
+        games: [[a.gameId]]
     }
 }
 
@@ -239,66 +216,150 @@ function integrateHelper(a: Action1_0, game: Game1_0): (Game1_0 | null) {
 }
 
 
-async function doAction2(action: Action1_0, readables: Readables<StateSpec>): Promise<
-    IntegrateResponse<ActionResponse, StateSpec>> {
-    const game = await read.getOrDefault(readables.games, [action.gameId], defaultGame())
-    const newGame = integrateHelper(action, game);
+// async function doAction2(action: Action1_0, readables: Readables<Persisted>): Promise<
+//     IntegrateResponse<ActionResponse, StateSpec>> {
+// doAction(dynamics: Dynamics, action: Action1_0, 
+//     db: Dataspaces<Persisted>, bindings: Bindings)
 
-    const savedAction: SavedAction = {
-        parents: [game.actionId],
-        action,
-    }
-    const id = actionId(savedAction)
+//     // const values :Values<StateSpec> = {
+//     //     games: [await read.get(readables.games, interest1_0(action).games[0])],
+//     // };
+//     // // const game = await read.getOrDefault(readables.games, [action.gameId], defaultGame())
+//     // const newGame = integrateHelper(action, values);
 
-    if (newGame === null) {
-        return {
-            response: {},
-            actionId: id,
-            savedAction,
-            changes: { games: [] }
-        }
-    } else {
-        return {
-            response: {},
-            actionId: id,
-            savedAction,
-            changes: {
-                games: [{
-                    kind: 'set', key: [action.gameId], value: {
-                        ...newGame, actionId: id
-                    }
-                }]
-            }
-        }
+//     // const savedAction: SavedAction = {
+//     //     parents: [(values.games[0] || defaultGame()).actionId],
+//     //     action,
+//     // }
+//     // const id = actionId(savedAction)
+
+//     // if (newGame === null) {
+//     //     return {
+//     //         response: {},
+//     //         actionId: id,
+//     //         savedAction,
+//     //         changes: { games: [] }
+//     //     }
+//     // } else {
+//     //     return {
+//     //         response: {},
+//     //         actionId: id,
+//     //         savedAction,
+//     //         changes: {
+//     //             games: [{
+//     //                 kind: 'set', key: [action.gameId], value: {
+//     //                     ...newGame, actionId: id
+//     //                 }
+//     //             }]
+//     //         }
+//     //     }
+//     // }
+// }
+
+// Derived Collections
+// - Source(s)
+// - Op.
+// Integrated Collections.
+// - Source(s)
+// - Action -> Source -> Keys of interest.
+// - Action -> Values of interest -> Changes.
+//   - Changes must be to records with matching action IDs (or must be commutative... or something)
+
+// interface IntegratedCollection 
+
+// interface IntegrationOp<Inputs, Action, T> {
+//     interest(a : Action): Keys<Inputs>
+//     integrate(a : Action, values: Values<Inputs>): Change<T>[]
+// } 
+
+// export type DynamicCollection<Sources, Action, T> =
+//     DynamicLoadNode<Sources, T>
+//     | IntegrationOpNode<Sources, Action, T>
+//     | CollectionOpNode<Sources, Action, T>;
+
+
+// interface DynamicLoadNode<Sources, T> {
+//     kind: 'load'
+//     // schema: string[]
+//     visit<R>(go: <K extends keyof Sources>(k: K, cast: (t: Sources[K]) => T) => R): R
+// }
+
+// interface IntegrationOpNode<Sources, Action, T> {
+//     kind: 'op'
+//     visit<R>(go: <InputSpec>(inputs: {
+//         [I in keyof InputSpec]: DynamicCollection<Sources, Action, Intermediates, InputSpec[I]>,
+
+//     ops: {
+//         [O in keyof Outputs]: IntegrationOp<InputSpec, Action, O>
+//     }) => R): R
+// }
+
+// interface  CollectionsNode<Sources, Intermediates, Outputs> {
+//     kind: 'collections'
+//     collections: {
+//         [K in keyof Outputs]: Collection<Sources, Intermediates, Outputs[K]>
+//     }
+// }
+
+// type CollectionRegistry = {
+//     games1_0Integrated: TaggedGame1_0
+//     games1_0Downgraded: TaggedGame1_0
+//     games1_1Upgraded: TaggedGame1_1
+//     games1_1Integrated: TaggedGame1_1
+//     games1_0byPlayer: TaggedGame1_1
+// }
+
+
+
+
+const BINDINGS: Bindings = {
+    games1_0: {
+        integrationPrimary: 'games1_0',
+        integrationSecondary: [],
+        derivationPrimary: null,
+        derivationSecondary: [],
+    },
+    gamesByPlayer1_0: {
+        integrationPrimary: 'gamesByPlayer1_0',
+        integrationSecondary: [],
+        derivationPrimary: 'gamesByPlayer1_0',
+        derivationSecondary: [],
     }
 }
+// SortedCollection<Inputs, Intermediates, T> | 
+
+
+// Ultimate sources must be integrated collections.
+// Other collections must be derived, but can also be integrated.
 
 function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise<ActionResponse> {
     const anyAction = validateModel('Action1_0')(body)
     // // const action = upgradeAction(anyAction)
 
     return db.runTransaction(async (tx: Transaction): Promise<ActionResponse> => {
-        //        const helper2 = new DBHelper2(db, tx);
-        const stateReadables = getStateReadables(db, tx);
-        const response = await doAction2(anyAction, stateReadables);
-        const stateDiffs = await changesToDiffs(stateReadables, response.changes);
+        const database = new Database(db, tx);
+        const dpl = getDPLInfos();
+        await doAction3(new Dynamics1_0(), anyAction, database, dpl, BINDINGS)
+        return {}
+        // const response = await doAction2(anyAction, stateReadables);
+        // const stateDiffs = await changesToDiffs(stateReadables, response.changes);
 
-        const exportzReadables = getExportsReadables(db, tx);
-        const exportz = getExports();
-        const [, exportDiffs] = await getDiffs(exportz, stateReadables, {}, stateDiffs);
+        // const exportzReadables = getExportsReadables(db, tx);
+        // const exportz = getExports();
+        // const [, exportDiffs] = await getDiffs(exportz, stateReadables, {}, stateDiffs);
 
-        tx.set(db.collection('actions').doc(response.actionId), response.savedAction);
+        // tx.set(db.collection('actions').doc(response.actionId), response.savedAction);
 
-        for (const untypedCollectionId in response.changes) {
-            const collectionId = untypedCollectionId as keyof typeof response.changes;
-            stateReadables[collectionId].commit(response.changes[collectionId]);
-        }
-        for (const untypedCollectionId in exportDiffs) {
-            const collectionId = untypedCollectionId as keyof typeof exportDiffs;
-            exportzReadables[collectionId].commit(exportDiffs[collectionId].map(diffToChange));
-        }
+        // for (const untypedCollectionId in response.changes) {
+        //     const collectionId = untypedCollectionId as keyof typeof response.changes;
+        //     stateReadables[collectionId].commit(response.changes[collectionId]);
+        // }
+        // for (const untypedCollectionId in exportDiffs) {
+        //     const collectionId = untypedCollectionId as keyof typeof exportDiffs;
+        //     (exportzReadables[collectionId] as any).commit((exportDiffs[collectionId] as any).map(diffToChange));
+        // }
 
-        return response.response;
+        // return response.response;
 
         //     const stateConfig: Source<rev0.StateSpec> = {
         //         game: {
