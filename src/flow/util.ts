@@ -152,3 +152,8 @@ export function narrow<TSource, TResult extends TSource>(
         return new NarrowIterable<TSource, TResult>(source, selector);
     };
 }
+
+
+export function drop_null<TSource>(): OperatorFunction<TSource | null, TSource> {
+    return narrow((x: TSource | null, _idx: number): x is TSource => x !== null);
+}

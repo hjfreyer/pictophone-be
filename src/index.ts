@@ -6,7 +6,11 @@ import { Dictionary, Request } from 'express-serve-static-core'
 import admin from 'firebase-admin'
 import uuid from 'uuid/v1'
 import batch from './batch'
-import { getStateReadables, getExportsReadables, doAction3, Bindings, StateSpec, getExports, Dynamics, Persisted, IntegrationInputs, Mutations, Integrated, Scrambles, ROOT_ACTION_ID, Integrateable, getIntegrateable, getDPLInfos } from './collections'
+import {
+    doAction3,
+    Bindings, Dynamics, Persisted,
+    IntegrationInputs, Mutations, Integrated, Scrambles, ROOT_ACTION_ID, getDPLInfos, getDerived, Derived
+} from './collections'
 import GetConfig from './config'
 import { DBHelper2, Database } from './framework/db'
 import { getSchema, Op, Processor, Source, Diffs } from './framework/graph'
@@ -30,7 +34,7 @@ import { map, filter, flatMap, tap, take, skip, skipWhile } from "ix/asynciterab
 import { sha256 } from 'js-sha256';
 import _ from 'lodash';
 import * as ix from "ix/iterable"
-import { narrow } from './flow/util'
+import { narrow, drop_null } from './flow/util'
 
 
 admin.initializeApp({
@@ -177,13 +181,13 @@ class Dynamics1_0 implements Dynamics {
         const diff = newDiff([a.gameId], oldGame, newGame);
 
         return {
-            games1_0: ix.toArray(ix.of(diff).pipe(narrow((x): x is Diff<Game1_0> => x !== null)))
+            games1_0: Array.from(ix.of(diff).pipe(drop_null()))
         }
     }
 
-    deriveDiffs(input: Readables<Integrated>,
-        integratedDiffs: Diffs<Integrated>): Promise<Diffs<Integrateable>> {
-        return getDiffs(getIntegrateable(), input, integratedDiffs)
+    deriveDiffs(input: Readables<Persisted>,
+        integratedDiffs: Diffs<Persisted>): Promise<Diffs<Derived>> {
+        return getDiffs(getDerived(), input, integratedDiffs)
     }
 
 }
@@ -196,11 +200,11 @@ function defaultGame(): Game1_0 {
     }
 }
 
-function interest1_0(a: Action1_0): Keys<StateSpec> {
-    return {
-        games: [[a.gameId]]
-    }
-}
+// function interest1_0(a: Action1_0): Keys<StateSpec> {
+//     return {
+//         games: [[a.gameId]]
+//     }
+// }
 
 function integrateHelper(a: Action1_0, game: Game1_0): (Game1_0 | null) {
     switch (a.kind) {
@@ -312,20 +316,26 @@ function integrateHelper(a: Action1_0, game: Game1_0): (Game1_0 | null) {
 
 
 
-const BINDINGS: Bindings = {
-    games1_0: {
-        integrationPrimary: 'games1_0',
-        integrationSecondary: [],
-        derivationPrimary: null,
-        derivationSecondary: [],
-    },
-    gamesByPlayer1_0: {
-        integrationPrimary: 'gamesByPlayer1_0',
-        integrationSecondary: [],
-        derivationPrimary: 'gamesByPlayer1_0',
-        derivationSecondary: [],
-    }
+export const BINDINGS: Bindings = {
+    games1_0: [{ kind: 'integration', collection: 'games1_0' }],
+    gamesByPlayer1_0: [{ kind: 'derivation', collection: 'gamesByPlayer1_0' }],
 }
+
+
+// const BINDINGS: Bindings = {
+//     games1_0: {
+//         integrationPrimary: 'games1_0',
+//         integrationSecondary: [],
+//         derivationPrimary: null,
+//         derivationSecondary: [],
+//     },
+//     gamesByPlayer1_0: {
+//         integrationPrimary: 'gamesByPlayer1_0',
+//         integrationSecondary: [],
+//         derivationPrimary: 'gamesByPlayer1_0',
+//         derivationSecondary: [],
+//     }
+// }
 // SortedCollection<Inputs, Intermediates, T> | 
 
 

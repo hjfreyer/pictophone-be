@@ -7,7 +7,7 @@
     "test": "jest",
     "tsc": "tsc",
     "dev": "gcloud config set project pictophone-app && FIRESTORE_EMULATOR_HOST=localhost:8181 ts-node-dev --respawn --transpileOnly ./src/index.ts",
-    "test-live": "gcloud config set project pictophone-test && ts-node-dev --respawn --transpileOnly ./src/index.ts",
+    "test-live": "gcloud config set project pictophone-test && ts-node-dev --respawn  ./src/index.ts",
     "prod-live": "gcloud config set project pictophone-app && ts-node-dev --respawn --transpileOnly ./src/index.ts",
     "prod": "tsc && node ./dist/index.js",
     "gen": "npm-run-all gen:*",

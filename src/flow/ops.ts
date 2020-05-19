@@ -42,7 +42,7 @@ class MapOp<I, O> implements MonoOp<I, O>{
             iter: ixa.from(inputSlice.iter)
                 .pipe(
                     //                   tap(i=> console.log('in map',i)),
-                    flatMap(item => this.mapItem(item))
+                    flatMap(item => ixa.from(this.mapItem(item)))
                 )
         })
     }

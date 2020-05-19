@@ -21,7 +21,7 @@ import * as read from './flow/read';
 import { ReadWrite, Change, Diff } from './framework/base'
 import deepEqual from 'deep-equal'
 import { DBs } from './framework/graph_builder'
-import { Graph, load, CollectionBuilder, Readables, Key, ScrambledSpace, Mutation } from './flow/base'
+import { Graph, load, CollectionBuilder, Readables, Key, ScrambledSpace, Mutation, Collection } from './flow/base'
 import { multiIndexBy, transpose, map } from './flow/ops'
 import { lexCompare } from './flow/util'
 import { sha256 } from 'js-sha256'
@@ -96,9 +96,9 @@ export type Integrated = {
 }
 
 
-export type Integrateable = {
-    gamesByPlayer1_0: Game1_0
-}
+// export type Integrateable = {
+//     gamesByPlayer1_0: Game1_0
+// }
 
 export type Derived = {
     gamesByPlayer1_0: Game1_0
@@ -141,16 +141,24 @@ export type InputSpecs<Spec> = {
 //     (input : Scrambles<Persisted>): Scrambles<Derived>
 // }
 
-
 export type Binding = {
-    integrationPrimary: keyof (Integrated & Integrateable)
-    integrationSecondary: (keyof (Integrated & Integrateable))[]
-    derivationPrimary: (keyof Derived) | null
-    derivationSecondary: (keyof Derived)[]
+    kind: 'integration'
+    collection: keyof Integrated
+} | {
+    kind: 'derivation'
+    collection: keyof Derived
 }
 
+
+// export type Binding = {
+//     integrationPrimary: keyof (Integrated & Integrateable)
+//     integrationSecondary: (keyof (Integrated & Integrateable))[]
+//     derivationPrimary: (keyof Derived) | null
+//     derivationSecondary: (keyof Derived)[]
+// }
+
 export type Bindings = {
-    [K in keyof Persisted]: Binding
+    [K in keyof Persisted]: Binding[]
 }
 
 
@@ -163,7 +171,16 @@ export interface Dynamics {
     // getInterest(a : Action1_0): Keys<IntegrationInputs>
     integrate(a: Action1_0, input: Readables<Persisted>): Promise<Diffs<Integrated>>
     deriveDiffs(input: Readables<Persisted>,
-        integratedDiffs: Diffs<Integrated>): Promise<Diffs<Integrateable>>
+        integratedDiffs: Diffs<Persisted>): Promise<Diffs<Derived>>
+}
+
+export function openAll<Spec>(db: Database, infos: InputSpecs<Spec>): Dataspaces<Spec> {
+    const res: Partial<Dataspaces<Spec>> = {}
+    for (const untypedCollectionId in infos) {
+        const collectionId = untypedCollectionId as keyof typeof infos;
+        res[collectionId] = db.open(infos[collectionId]);
+    }
+    return res as Dataspaces<Spec>;
 }
 
 export async function doAction3(dynamics: Dynamics, action: Action1_0,
@@ -193,40 +210,49 @@ export async function doAction3(dynamics: Dynamics, action: Action1_0,
 
     // const values = valuesP as Values<IntegrationInputs>;
 
-    const dsP: Partial<Dataspaces<Persisted>> = {}
-    for (const untypedCollectionId in inputs) {
-        const collectionId = untypedCollectionId as keyof typeof inputs;
-        dsP[collectionId] = db.open(inputs[collectionId]);
-    }
-    const ds = dsP as Dataspaces<Persisted>;
+    const ds = openAll(db, inputs);
+
+    const nullDiffs = ((): Diffs<Persisted> => {
+        const res: Partial<Diffs<Persisted>> = {};
+        for (const untypedCollectionId in inputs) {
+            const collectionId = untypedCollectionId as keyof typeof inputs;
+            res[collectionId] = [];
+        }
+        return res as Diffs<Persisted>
+    })();
 
     const integratedDiffs = await dynamics.integrate(action, ds);
     db.freezeParents();
 
-    const integrateableDiffs = await dynamics.deriveDiffs(ds, integratedDiffs);
+    const derivedDiffs = await dynamics.deriveDiffs(ds, { ...nullDiffs, ...integratedDiffs });
 
-    const allDiffs: Diffs<Integrated & Integrateable> = {
-        ...integratedDiffs,
-        ...integrateableDiffs,
-    }
+    // const allDiffs: Diffs<Integrated & Integrateable> = {
+    //     ...integratedDiffs,
+    //     ...integrateableDiffs,
+    // }
 
     for (const untypedPersistedId in bindings) {
         const persistedId = untypedPersistedId as keyof typeof bindings;
         const b = bindings[persistedId];
 
-        const canonicalMutations = allDiffs[b.integrationPrimary]
-        canonicalMutations.sort((a, b) => lexCompare(a.key, b.key))
-        for (const secondarySource of b.integrationSecondary) {
-            const secondaryMutations = allDiffs[secondarySource];
-            secondaryMutations.sort((a, b) => lexCompare(a.key, b.key))
+        const canonicalDiffs = b[0].kind === 'integration'
+            ? integratedDiffs[b[0].collection]
+            : derivedDiffs[b[0].collection];
 
-            if (!deepEqual(canonicalMutations, secondaryMutations)) {
+        canonicalDiffs.sort((a, b) => lexCompare(a.key, b.key))
+        for (const secondarySource of b.slice(1)) {
+            const secondaryDiffs = secondarySource.kind === 'integration'
+                ? integratedDiffs[secondarySource.collection]
+                : derivedDiffs[secondarySource.collection];
+            secondaryDiffs.sort((a, b) => lexCompare(a.key, b.key))
+
+            if (!deepEqual(canonicalDiffs, secondaryDiffs)) {
                 // TODO: this should just report, not fail.
                 throw new Error("secondary fail, yo");
             }
         }
 
-        for (const mutation of canonicalMutations) {
+        for (const mutation of canonicalDiffs) {
             ds[persistedId].enqueue(mutation);
         }
     }
@@ -241,27 +267,27 @@ export async function doAction3(dynamics: Dynamics, action: Action1_0,
     // }
 }
 
-export type StateSpec = {
-    games: TaggedGame1_0
-}
+// // export type StateSpec = {
+// //     games: TaggedGame1_0
+// // }
 
-export type SideSpec = {}
+// // export type SideSpec = {}
 
-export type ExportSpec = {
-    gamesByPlayer: TaggedGame1_0
-    games1_1: TaggedGame1_1
-}
+// // export type ExportSpec = {
+// //     gamesByPlayer: TaggedGame1_0
+// //     games1_1: TaggedGame1_1
+// // }
 
-export function getStateReadables(db: Firestore, tx: Transaction): { [K in keyof StateSpec]: Dataspace<StateSpec[K]> } {
-    const helper = new DBHelper2(db, tx);
-    return {
-        games: helper.open({
-            schema: ["game"],
-            collectionId: "state-2.0",
-            validator: validateModel("TaggedGame1_0")
-        })
-    }
-}
+// export function getStateReadables(db: Firestore, tx: Transaction): { [K in keyof StateSpec]: Dataspace<StateSpec[K]> } {
+//     const helper = new DBHelper2(db, tx);
+//     return {
+//         games: helper.open({
+//             schema: ["game"],
+//             collectionId: "state-2.0",
+//             validator: validateModel("TaggedGame1_0")
+//         })
+//     }
+// }
 
 
 // export function getDPL(db: Firestore, tx: Transaction): Dataspaces<Persisted> {
@@ -295,57 +321,57 @@ export function getDPLInfos(): InputSpecs<Persisted> {
     }
 }
 
-export function getExportsReadables(db: Firestore, tx: Transaction): { [K in keyof ExportSpec]: Dataspace<ExportSpec[K]> } {
-    const helper = new DBHelper2(db, tx);
-    return {
-        gamesByPlayer: helper.open({
-            schema: ["player", "game"],
-            collectionId: "exports-1.0",
-            validator: validateModel("TaggedGame1_0")
-        }),
-        games1_1: helper.open({
-            schema: ["game"],
-            collectionId: "state-1.1",
-            validator: validateModel("TaggedGame1_1")
-        })
-    }
-}
+// export function getExportsReadables(db: Firestore, tx: Transaction): { [K in keyof ExportSpec]: Dataspace<ExportSpec[K]> } {
+//     const helper = new DBHelper2(db, tx);
+//     return {
+//         gamesByPlayer: helper.open({
+//             schema: ["player", "game"],
+//             collectionId: "exports-1.0",
+//             validator: validateModel("TaggedGame1_0")
+//         }),
+//         games1_1: helper.open({
+//             schema: ["game"],
+//             collectionId: "state-1.1",
+//             validator: validateModel("TaggedGame1_1")
+//         })
+//     }
+// }
 
 
-function placeholders(): Graph<StateSpec, StateSpec> {
-    return {
-        games: load('games', ['game'])
-    }
-}
-function placeholders2(): Graph<Integrated, Integrated> {
-    return {
-        games1_0: load('games1_0', ['game'])
-    }
-}
+// function placeholders(): Graph<StateSpec, StateSpec> {
+//     return {
+//         games: load('games', ['game'])
+//     }
+// }
+// function placeholders2(): Graph<Integrated, Integrated> {
+//     return {
+//         games1_0: load('games1_0', ['game'])
+//     }
+// }
 
-export function getExports(): Graph<StateSpec, ExportSpec> {
-    const ph = placeholders();
-    const gamesByPlayer = new CollectionBuilder(ph.games)
-        .pipe(multiIndexBy('player', (_, g) => g.players))
-        .pipe(transpose([1, 0])).collection;
+// export function getExports(): Graph<StateSpec, ExportSpec> {
+//     const ph = placeholders();
+//     const gamesByPlayer = new CollectionBuilder(ph.games)
+//         .pipe(multiIndexBy('player', (_, g) => g.players))
+//         .pipe(transpose([1, 0])).collection;
 
-    const games1_1 =
-        new CollectionBuilder(ph.games)
-            .pipe(map((k: Key, old: TaggedGame1_0): TaggedGame1_1 => {
-                return {
-                    ...old,
-                    state: 'CREATED',
-                    shortCode: '',
-                }
-            }))
-            .collection;
+//     const games1_1 =
+//         new CollectionBuilder(ph.games)
+//             .pipe(map((k: Key, old: TaggedGame1_0): TaggedGame1_1 => {
+//                 return {
+//                     ...old,
+//                     state: 'CREATED',
+//                     shortCode: '',
+//                 }
+//             }))
+//             .collection;
 
-    return { gamesByPlayer, games1_1 }
-}
+//     return { gamesByPlayer, games1_1 }
+// }
 
-export function getIntegrateable(): Graph<Integrated, Integrateable> {
-    const ph = placeholders2();
-    const gamesByPlayer1_0 = new CollectionBuilder(ph.games1_0)
+export function getDerived(): Graph<Persisted, Derived> {
+    const games1_0: Collection<Persisted, Game1_0> = load('games1_0', ['game']);
+    const gamesByPlayer1_0 = new CollectionBuilder(games1_0)
         .pipe(multiIndexBy('player', (_, g) => g.players))
         .pipe(transpose([1, 0])).collection;
 
