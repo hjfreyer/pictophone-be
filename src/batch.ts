@@ -1,7 +1,7 @@
 import { DocumentData, Firestore } from '@google-cloud/firestore'
 import { diff } from 'deep-diff'
 import { Request, Router } from 'express'
-import { getDPLInfos, getDerived, openAll } from './collections'
+import { getDPLInfos, getDerived, openAll, Persisted } from './collections'
 import { Database } from './framework/db'
 import { getSchema, Op, Processor } from './framework/graph'
 import { enumerate, isKeyExpected, diffToChange } from './flow/base'
@@ -14,7 +14,7 @@ type BackwardsCheckCursor = {}
 
 export async function check(db: Firestore, cursor: BackwardsCheckCursor): Promise<BackwardsCheckCursor> {
     await db.runTransaction(async (tx) => {
-        const database = new Database(db, tx);
+        const database = new Database(db, tx, new Set());
         const bindings = BINDINGS;
 
         const spaces = openAll(database, getDPLInfos());
@@ -41,6 +41,33 @@ export async function check(db: Firestore, cursor: BackwardsCheckCursor): Promis
     console.log("done")
     return {}
 }
+
+type ReplayRequest = {
+    collectionId: string
+}
+
+export async function replay(db: Firestore, req: ReplayRequest): Promise<{}> {
+    await db.runTransaction(async (tx) => {
+        console.log("replaying:", req.collectionId)
+        // const database = new Database(db, tx);
+        const info = getDPLInfos()[req.collectionId as keyof Persisted];
+        const collectionGroup = `${info.schema[info.schema.length - 1]}-${info.collectionId}`
+        let q = db.collectionGroup(collectionGroup)
+            .select('actionId')
+            .orderBy('actionId', 'desc')
+            .limit(1)
+
+        const subDocs = await tx.get(q)
+        const cursor: string = subDocs.empty ? '' : subDocs.docs[0].data().actionId;
+        console.log(cursor)
+
+    });
+
+
+    return {}
+}
+
+
 
 // export async function backfill(db: Firestore, cursor: BackwardsCheckCursor): Promise<BackwardsCheckCursor> {
 //     await db.runTransaction(async (tx) => {
@@ -99,6 +126,13 @@ function batch(db: Firestore): Router {
     res.post('/check', function(_req: Request<{}>, res, next) {
         const cursor = _req.body as BackwardsCheckCursor
         check(db, cursor).then(result => {
+            res.status(200)
+            res.json(result)
+        }).catch(next)
+    })
+
+    res.post('/replay/:collectionId', function(req: Request<ReplayRequest>, res, next) {
+        replay(db, req.params).then(result => {
             res.status(200)
             res.json(result)
         }).catch(next)

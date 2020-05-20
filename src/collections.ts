@@ -84,6 +84,7 @@ export const ROOT_ACTION_ID = serializeActionId(new Date(0), sha256.hex(''));
 
 export type Persisted = {
     games1_0: Game1_0
+    games1_0_1: Game1_0
     gamesByPlayer1_0: Game1_0
 }
 
@@ -93,6 +94,7 @@ export type IntegrationInputs = {
 
 export type Integrated = {
     games1_0: Game1_0
+    games1_0_1: Game1_0
 }
 
 
@@ -311,6 +313,11 @@ export function getDPLInfos(): InputSpecs<Persisted> {
         games1_0: {
             schema: ["game"],
             collectionId: "state-1.0",
+            validator: validateModel("TaggedGame1_0")
+        },
+        games1_0_1: {
+            schema: ["game"],
+            collectionId: "state-1.0.1",
             validator: validateModel("TaggedGame1_0")
         },
         gamesByPlayer1_0: {

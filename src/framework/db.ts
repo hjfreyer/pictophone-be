@@ -36,7 +36,7 @@ export class Database {
     private frozenParents: string[] = [];
     private committers: Committer[] = [];
 
-    constructor(private db: Firestore, private tx: Transaction) { }
+    constructor(private db: Firestore, private tx: Transaction, private allowedActionIds: Set<string>) { }
 
     open<T>(info: InputInfo<T & HasId>): Dataspace2<T> {
         const self = this;
@@ -68,6 +68,10 @@ export class Database {
                     .pipe(
                         ixaop.map(([k, v]) => {
                             const validated = info.validator(v);
+                            if (0 < self.allowedActionIds.size && !self.allowedActionIds.has(validated.actionId)) {
+                                throw new Error(`record ${k} with actionId "${validated.actionId}" doesn't match
+                                allowed list: ${Array.from(self.allowedActionIds)}`)
+                            }
                             self.accessedActionIds.add(validated.actionId)
                             return [k, validated]
                         })

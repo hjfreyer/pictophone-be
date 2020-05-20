@@ -327,6 +327,8 @@ export function newDiff<T>(key: Key, oldValue: T | null, newValue: T | null): Di
     }
     if (oldValue !== null && newValue !== null) {
         if (deepEqual(oldValue, newValue, { strict: true })) {
+            return null
+        } else {
             return {
                 key,
                 kind: 'replace',

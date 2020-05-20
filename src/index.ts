@@ -172,16 +172,27 @@ class Dynamics1_0 implements Dynamics {
     //     }
     // }
     async integrate(a: Action1_0, input: Readables<Persisted>): Promise<Diffs<Integrated>> {
-        const oldGame = await read.getOrDefault(input.games1_0, [a.gameId], null);
-        const newGame = integrateHelper(a, oldGame || defaultGame());
-        if (newGame === null) {
-            // Null game response means don't change the DB.
-            return { games1_0: [] };
-        }
-        const diff = newDiff([a.gameId], oldGame, newGame);
-
         return {
-            games1_0: Array.from(ix.of(diff).pipe(drop_null()))
+            games1_0: await (async (): Promise<Diff<Game1_0>[]> => {
+                const oldGame = await read.getOrDefault(input.games1_0, [a.gameId], null);
+                const newGame = integrateHelper(a, oldGame || defaultGame());
+                if (newGame === null) {
+                    // Null game response means don't change the DB.
+                    return [];
+                }
+                const diff = newDiff([a.gameId], oldGame, newGame);
+                return Array.from(ix.of(diff).pipe(drop_null()))
+            })(),
+            games1_0_1: await (async (): Promise<Diff<Game1_0>[]> => {
+                const oldGame = await read.getOrDefault(input.games1_0_1, [a.gameId], null);
+                const newGame = integrateHelper(a, oldGame || defaultGame());
+                if (newGame === null) {
+                    // Null game response means don't change the DB.
+                    return [];
+                }
+                const diff = newDiff([a.gameId], oldGame, newGame);
+                return Array.from(ix.of(diff).pipe(drop_null()))
+            })(),
         }
     }
 
@@ -318,6 +329,7 @@ function integrateHelper(a: Action1_0, game: Game1_0): (Game1_0 | null) {
 
 export const BINDINGS: Bindings = {
     games1_0: [{ kind: 'integration', collection: 'games1_0' }],
+    games1_0_1: [{ kind: 'integration', collection: 'games1_0_1' }],
     gamesByPlayer1_0: [{ kind: 'derivation', collection: 'gamesByPlayer1_0' }],
 }
 
@@ -347,7 +359,7 @@ function doAction(db: FirebaseFirestore.Firestore, body: unknown): Promise<Actio
     // // const action = upgradeAction(anyAction)
 
     return db.runTransaction(async (tx: Transaction): Promise<ActionResponse> => {
-        const database = new Database(db, tx);
+        const database = new Database(db, tx, new Set());
         const dpl = getDPLInfos();
         await doAction3(new Dynamics1_0(), anyAction, database, dpl, BINDINGS)
         return {}
