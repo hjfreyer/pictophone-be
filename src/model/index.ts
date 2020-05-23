@@ -14,6 +14,11 @@ export interface NumberValue {
     value: number
 }
 
+export interface Symlink {
+    actionId: string
+    value: any
+}
+
 // v1.0
 
 export interface JoinGameAction1_0 {

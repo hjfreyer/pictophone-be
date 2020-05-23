@@ -161,7 +161,7 @@ export class Database2 {
                 //             return change
                 //     }
                 // })
-            new DBHelper(self.db, self.tx, info.collectionId, info.schema).commit(changes)
+                new DBHelper(self.db, self.tx, info.collectionId, info.schema).commit(changes)
             }
 
             // enqueue(diff: Diff<T>): void {

@@ -1,6 +1,12 @@
 
 import { strict as assert } from 'assert';
 
+import * as ix from "ix/iterable"
+import * as ixop from "ix/iterable/operators"
+
+
+export type Comparator<T> = (a: T, b: T) => number
+
 export function mapValues<V1, V2>(obj: { [k: string]: V1 },
     fn: (k: string, v: V1) => V2): { [k: string]: V2 } {
     return Object.assign({}, ...Object.entries(obj).map(([k, v]) => {
@@ -42,16 +48,24 @@ export function keyStartsWith(key: string[], prefix: string[]): boolean {
     return true
 }
 
-export async function* toStream<T>(v: T[]): AsyncIterable<T> {
-    yield* v
-}
+export async function* sortedMerge<T>(
+    streams: AsyncIterable<T>[],
+    cmp: Comparator<T>): AsyncIterable<T> {
+    const iters = streams.map(s => s[Symbol.asyncIterator]());
 
-export async function toArray<T>(v: AsyncIterable<T>): Promise<T[]> {
-    const res: T[] = []
-    for await (const i of v) {
-        res.push(i)
+    const entries = await Promise.all(iters.map(i => i.next()));
+    while (entries.some(e => !e.done)) {
+        const minned = ix.from(entries).pipe(
+            ixop.map((entry, idx) => [idx, entry] as [number, IteratorResult<T>]),
+            ixop.flatMap(([idx, e]): [number, T][] => e.done ? [] : [[idx, e.value]]),
+            ixop.minBy((([_idx, e]) => e), cmp)
+        );
+
+        let [minIdx, minVal] = ix.last(minned)!;
+
+        yield minVal;
+        entries[minIdx] = await iters[minIdx].next();
     }
-    return res
 }
 
 export async function* streamTakeWhile<T>(

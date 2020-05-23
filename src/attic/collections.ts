@@ -262,7 +262,7 @@ export async function doAction3(dynamics: Dynamics, action: Action1_0,
         if (b.length === 0) {
             continue;
         }
-const canonicalDiffs = integratedDiffs[b[0].collection];
+        const canonicalDiffs = integratedDiffs[b[0].collection];
         canonicalDiffs.sort((a, b) => lexCompare(a.key, b.key))
         // for (const secondarySource of b.slice(1)) {
         //     const secondaryDiffs = secondarySource.kind === 'integration'

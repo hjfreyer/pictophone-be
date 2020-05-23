@@ -4,12 +4,12 @@ import { Request, Router } from 'express'
 import { getDPLInfos, getDerived, openAll, openAll2, Persisted } from './collections'
 import { Database, Database2 } from './framework/db'
 import { getSchema, Op, Processor } from './framework/graph'
-import { enumerate, isKeyExpected, diffToChange, newReadableTapes , Change} from './flow/base'
+import { enumerate, isKeyExpected, diffToChange, newReadableTapes, Change } from './flow/base'
 import { getDiffs } from './flow/comparison'
 import { from, of, first, toArray } from "ix/asynciterable";
 import * as read from './flow/read'
 import { BINDINGS, integrateGame } from '.'
-import { SavedAction,TaggedGame1_0 } from './model'
+import { SavedAction, TaggedGame1_0 } from './model'
 
 type BackwardsCheckCursor = {}
 
@@ -53,13 +53,13 @@ export async function replay(db: Firestore, req: ReplayRequest): Promise<{}> {
     let cursor = '';
     while (
         await db.runTransaction(async (tx): Promise<boolean> => {
-            const infos 
+            const infos
             const info = getDPLInfos()[req.collectionId as keyof Persisted];
             const collectionGroup = `${info.schema[info.schema.length - 1]}-${info.collectionId}`
-            let q : Query = db.collection('actions')
-               .orderBy(FieldPath.documentId());
-            if (0 < cursor.length ) {
-                q=q.startAfter(cursor)
+            let q: Query = db.collection('actions')
+                .orderBy(FieldPath.documentId());
+            if (0 < cursor.length) {
+                q = q.startAfter(cursor)
             }
             q = q.limit(1)
             const actions = await tx.get(q);
