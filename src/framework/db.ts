@@ -6,7 +6,7 @@ import { Diff, Item, Change } from './base'
 import * as ixaop from 'ix/asynciterable/operators';
 import { InputInfo } from './graph';
 import { ItemIterable, Readable, Key, Mutation, diffToChange } from '../flow/base';
-import { Range } from '../flow/range';
+import { Range, rangeContains } from '../flow/range';
 import * as ixa from "ix/asynciterable";
 import * as read from '../flow/read'
 import { NumberValue, SavedAction, AnyAction } from '../model';
@@ -100,6 +100,87 @@ export class Database {
             cb(actionId);
         }
     }
+}
+
+export interface Dataspace3<T> {
+    schema: string[]
+    read(range: Range): ItemIterable<T>
+    commit(...changes: Change<T>[]): void
+}
+
+export class Database2 {
+    constructor(private db: Firestore, private tx: Transaction) { }
+
+    open<T>(info: InputInfo<T>): Dataspace3<T> {
+        const self = this;
+        // const diffs: Diff<T>[] = [];
+        // this.committers.push((actionId: string) => {
+        //     const changes: Change<T & HasId>[] = diffs
+        //         .map(diffToChange)
+        //         .map((change): Change<T & HasId> => {
+        //             switch (change.kind) {
+        //                 case 'set':
+        //                     return {
+        //                         ...change,
+        //                         value: {
+        //                             ...change.value,
+        //                             actionId,
+        //                         }
+        //                     }
+        //                 case 'delete':
+        //                     return change
+        //             }
+        //         })
+        //     new DBHelper(self.db, self.tx, info.collectionId, info.schema).commit(changes)
+        // })
+        return {
+            schema: info.schema,
+
+            read(range: Range): ItemIterable<T> {
+                return ixa.from(new DBHelper(self.db, self.tx, info.collectionId, info.schema).list(range.start))
+                    .pipe(
+                        ixaop.takeWhile(([key, _value]) => rangeContains(range, key)),
+                        ixaop.map(([k, v]) => [k, info.validator(v)])
+                    )
+            },
+
+            commit(...changes: Change<T>[]): void {
+                //  const changes: Change<T>[] = diffs
+                // .map(diffToChange)
+                // .map((change): Change<T & HasId> => {
+                //     switch (change.kind) {
+                //         case 'set':
+                //             return {
+                //                 ...change,
+                //                 value: {
+                //                     ...change.value,
+                //                     actionId,
+                //                 }
+                //             }
+                //         case 'delete':
+                //             return change
+                //     }
+                // })
+            new DBHelper(self.db, self.tx, info.collectionId, info.schema).commit(changes)
+            }
+
+            // enqueue(diff: Diff<T>): void {
+            //     diffs.push(diff);
+            // }
+        };
+    }
+
+    // commit(action: AnyAction): void {
+    //     const savedAction: SavedAction = {
+    //         parents: this.frozenParents,
+    //         action,
+    //     }
+    //     const actionId = getActionId(savedAction);
+    //     this.tx.set(this.db.collection('actions').doc(actionId), savedAction);
+    //     for (const cb of this.committers) {
+    //         cb(actionId);
+    //     }
+    // }
 }
 
 export class DBHelper2 {

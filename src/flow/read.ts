@@ -1,4 +1,4 @@
-import { Item, Readable, Key, ScrambledSpace, ItemIterable, Slice } from "./base";
+import { Item, Readable, Key, ScrambledSpace, ItemIterable, Readable2, Slice } from "./base";
 import deepEqual from "deep-equal";
 import { Range, rangeContains, rangeContainsRange, singleValue, compareRangeEndpoints } from "./range";
 import { first, create, empty } from "ix/asynciterable";
@@ -19,6 +19,13 @@ export async function getOrDefault<T, D>(source: Readable<T>, key: Key, def: D):
         } else {
             return def
         }
+    }
+    return def
+}
+
+export async function getOrDefault2<T, D>(source: Readable2<T>, key: Key, def: D): Promise<T | D> {
+    for await (const [k, value] of source.read(singleValue(key))) {
+        return value
     }
     return def
 }

@@ -8,7 +8,7 @@ import uuid from 'uuid/v1'
 import batch from './batch'
 // import { COLLECTION_GRAPH, getCollections, InputType, INPUT_ID, INPUT_OP } from './collections'
 import GetConfig from './config'
-import { DBHelper2, Dataspace, Database, Dataspace2, HasId } from './framework/db'
+import { DBHelper2, Dataspace, Database, Dataspace2, Database2, Dataspace3, HasId } from './framework/db'
 import { getSchema, Op, Processor, Source, Diffs, InputInfo } from './framework/graph'
 import { Action1_1, AnyAction, Action1_0, Game1_0, TaggedGame1_0, TaggedGame1_1, SavedAction } from './model'
 import { validate as validateModel } from './model/index.validator'
@@ -82,19 +82,23 @@ export const ROOT_ACTION_ID = serializeActionId(new Date(0), sha256.hex(''));
 //   compared to each other. The operations should be acyclic, i.e., a collection
 //   should never be derived from a persisted version of itself.
 
+
+
+
 export type Persisted = {
-    games1_0: Game1_0
-    games1_0_1: Game1_0
-    gamesByPlayer1_0: Game1_0
+    state1_0_0_games: TaggedGame1_0
+    state1_0_1_replay_games: TaggedGame1_0
+    state1_0_1_replay_gamesByPlayer: TaggedGame1_0
 }
+
+
 
 export type IntegrationInputs = {
     games1_0: TaggedGame1_0
 }
 
 export type Integrated = {
-    games1_0: Game1_0
-    games1_0_1: Game1_0
+    state1_0_0_games: Game1_0
 }
 
 
@@ -102,9 +106,9 @@ export type Integrated = {
 //     gamesByPlayer1_0: Game1_0
 // }
 
-export type Derived = {
-    gamesByPlayer1_0: Game1_0
-}
+// export type Derived = {
+//     // gamesByPlayer1_0: Game1_0
+// }
 
 export type Scrambles<Spec> = {
     [K in keyof Spec]: ScrambledSpace<Spec[K]>
@@ -146,10 +150,11 @@ export type InputSpecs<Spec> = {
 export type Binding = {
     kind: 'integration'
     collection: keyof Integrated
-} | {
-    kind: 'derivation'
-    collection: keyof Derived
 }
+//  | {
+//     kind: 'derivation'
+//     collection: keyof Derived
+// }
 
 
 // export type Binding = {
@@ -168,12 +173,16 @@ type Dataspaces<Spec> = {
     [K in keyof Spec]: Dataspace2<Spec[K]>
 }
 
+type Dataspaces2<Spec> = {
+    [K in keyof Spec]: Dataspace3<Spec[K]>
+}
+
 export interface Dynamics {
     // transformInputs(input : Readables<Persisted>): Scrambles<IntegrationInputs>
     // getInterest(a : Action1_0): Keys<IntegrationInputs>
     integrate(a: Action1_0, input: Readables<Persisted>): Promise<Diffs<Integrated>>
-    deriveDiffs(input: Readables<Persisted>,
-        integratedDiffs: Diffs<Persisted>): Promise<Diffs<Derived>>
+    // deriveDiffs(input: Readables<Persisted>,
+    //     integratedDiffs: Diffs<Persisted>): Promise<Diffs<Derived>>
 }
 
 export function openAll<Spec>(db: Database, infos: InputSpecs<Spec>): Dataspaces<Spec> {
@@ -183,6 +192,16 @@ export function openAll<Spec>(db: Database, infos: InputSpecs<Spec>): Dataspaces
         res[collectionId] = db.open(infos[collectionId]);
     }
     return res as Dataspaces<Spec>;
+}
+
+
+export function openAll2<Spec>(db: Database2, infos: InputSpecs<Spec>): Dataspaces2<Spec> {
+    const res: Partial<Dataspaces2<Spec>> = {}
+    for (const untypedCollectionId in infos) {
+        const collectionId = untypedCollectionId as keyof typeof infos;
+        res[collectionId] = db.open(infos[collectionId]);
+    }
+    return res as Dataspaces2<Spec>;
 }
 
 export async function doAction3(dynamics: Dynamics, action: Action1_0,
@@ -226,7 +245,7 @@ export async function doAction3(dynamics: Dynamics, action: Action1_0,
     const integratedDiffs = await dynamics.integrate(action, ds);
     db.freezeParents();
 
-    const derivedDiffs = await dynamics.deriveDiffs(ds, { ...nullDiffs, ...integratedDiffs });
+    // const derivedDiffs = await dynamics.deriveDiffs(ds, { ...nullDiffs, ...integratedDiffs });
 
     // const allDiffs: Diffs<Integrated & Integrateable> = {
     //     ...integratedDiffs,
@@ -237,25 +256,28 @@ export async function doAction3(dynamics: Dynamics, action: Action1_0,
         const persistedId = untypedPersistedId as keyof typeof bindings;
         const b = bindings[persistedId];
 
-        const canonicalDiffs = b[0].kind === 'integration'
-            ? integratedDiffs[b[0].collection]
-            : derivedDiffs[b[0].collection];
-
-        canonicalDiffs.sort((a, b) => lexCompare(a.key, b.key))
-        for (const secondarySource of b.slice(1)) {
-            const secondaryDiffs = secondarySource.kind === 'integration'
-                ? integratedDiffs[secondarySource.collection]
-                : derivedDiffs[secondarySource.collection];
-            secondaryDiffs.sort((a, b) => lexCompare(a.key, b.key))
-
-            if (!deepEqual(canonicalDiffs, secondaryDiffs)) {
-                // TODO: this should just report, not fail.
-                throw new Error("secondary fail, yo");
-            }
+        // const canonicalDiffs = b[0].kind === 'integration'
+        //     ? integratedDiffs[b[0].collection]
+        //     : derivedDiffs[b[0].collection];
+        if (b.length === 0) {
+            continue;
         }
+const canonicalDiffs = integratedDiffs[b[0].collection];
+        canonicalDiffs.sort((a, b) => lexCompare(a.key, b.key))
+        // for (const secondarySource of b.slice(1)) {
+        //     const secondaryDiffs = secondarySource.kind === 'integration'
+        //         ? integratedDiffs[secondarySource.collection]
+        //         : derivedDiffs[secondarySource.collection];
+        //     secondaryDiffs.sort((a, b) => lexCompare(a.key, b.key))
+
+        //     if (!deepEqual(canonicalDiffs, secondaryDiffs)) {
+        //         // TODO: this should just report, not fail.
+        //         throw new Error("secondary fail, yo");
+        //     }
+        // }
 
         for (const mutation of canonicalDiffs) {
-            ds[persistedId].enqueue(mutation);
+            ds[persistedId].enqueue(mutation as any);
         }
     }
     db.commit(action);
@@ -310,19 +332,19 @@ export async function doAction3(dynamics: Dynamics, action: Action1_0,
 
 export function getDPLInfos(): InputSpecs<Persisted> {
     return {
-        games1_0: {
+        state1_0_0_games: {
             schema: ["game"],
-            collectionId: "state-1.0",
+            collectionId: "state-1.0.0",
             validator: validateModel("TaggedGame1_0")
         },
-        games1_0_1: {
+        state1_0_1_replay_games: {
             schema: ["game"],
-            collectionId: "state-1.0.1",
+            collectionId: "state-1.0.1-replay",
             validator: validateModel("TaggedGame1_0")
         },
-        gamesByPlayer1_0: {
+        state1_0_1_replay_gamesByPlayer: {
             schema: ["player", "game"],
-            collectionId: "exports-1.0",
+            collectionId: "state-1.0.1-replay",
             validator: validateModel("TaggedGame1_0")
         }
     }

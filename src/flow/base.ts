@@ -89,8 +89,53 @@ export interface Readable<T> {
     seekTo(startAt: Key): ItemIterable<T>
 }
 
+export interface Readable2<T> {
+    schema: string[]
+    read(range: Range): ItemIterable<T>
+}
+
+export function upgradeReadable<T>(readable: Readable<T>): Readable2<T> {
+    return {
+        schema: readable.schema,
+        read(range: Range): ItemIterable<T> {
+            return ixa.from(readable.seekTo(range.start))
+                .pipe(ixaop.takeWhile(([key, _value]) => rangeContains(range, key)))
+        }
+    }
+}
+
+export class ReadableTape<T> implements Readable2<T> {
+    public items: Item<T>[] = []
+
+    constructor(private source: Readable2<T>) { }
+
+    get schema(): string[] {
+        return this.source.schema
+    }
+
+    read(range: Range): ItemIterable<T> {
+        return ixa.from(this.source.read(range))
+            .pipe(ixaop.tap(item => this.items.push(item)))
+    }
+}
+
 export type Readables<Spec> = {
     [K in keyof Spec]: Readable<Spec[K]>
+}
+export type Readables2<Spec> = {
+    [K in keyof Spec]: Readable2<Spec[K]>
+}
+export type ReadableTapes<Spec> = {
+    [K in keyof Spec]: ReadableTape<Spec[K]>
+}
+
+export function newReadableTapes<Spec>(readables: Readables2<Spec>): ReadableTapes<Spec> {
+    const res: Partial<ReadableTapes<Spec>> = {};
+    for (const untypedCollectionId in readables) {
+        const collectionId = untypedCollectionId as keyof typeof readables;
+        res[collectionId] = new ReadableTape(readables[collectionId]);
+    }
+    return res as ReadableTapes<Spec>;
 }
 
 export function unscrambledSpace<T>(r: Readable<T>): ScrambledSpace<T> {

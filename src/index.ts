@@ -9,7 +9,7 @@ import batch from './batch'
 import {
     doAction3,
     Bindings, Dynamics, Persisted,
-    IntegrationInputs, Mutations, Integrated, Scrambles, ROOT_ACTION_ID, getDPLInfos, getDerived, Derived
+    IntegrationInputs, Mutations, Integrated, Scrambles, ROOT_ACTION_ID, getDPLInfos, getDerived, // Derived
 } from './collections'
 import GetConfig from './config'
 import { DBHelper2, Database } from './framework/db'
@@ -25,7 +25,7 @@ import * as read from './flow/read';
 import { ReadWrite, Change, Diff } from './framework/base'
 import deepEqual from 'deep-equal'
 import { DBs } from './framework/graph_builder'
-import { Graph, load, CollectionBuilder, Readables, Readable, getDiffs, diffToChange, Key, Collection, unscrambledSpace, Mutation, newDiff } from './flow/base'
+import { Graph, load, CollectionBuilder, Readables, Readables2, Readable2, Readable, getDiffs, diffToChange, Key, Collection, unscrambledSpace, Mutation, newDiff } from './flow/base'
 import { multiIndexBy, transpose } from './flow/ops'
 import timestamp from 'timestamp-nano';
 
@@ -160,6 +160,17 @@ class IntegrateContinue {
 // }
 
 
+export async function integrateGame(a: Action1_0, input: Readable2<TaggedGame1_0>): Promise<Diff<Game1_0>[]> {
+    const oldGame = await read.getOrDefault2(input, [a.gameId], null);
+    const newGame = integrateHelper(a, oldGame || defaultGame());
+    if (newGame === null) {
+        // Null game response means don't change the DB.
+        return [];
+    }
+    const diff = newDiff([a.gameId], oldGame, newGame);
+    return Array.from(ix.of(diff).pipe(drop_null()))
+}
+
 class Dynamics1_0 implements Dynamics {
     // transformInputs(input : Readables<Persisted>): Scrambles<IntegrationInputs> {
     //     return {
@@ -173,18 +184,8 @@ class Dynamics1_0 implements Dynamics {
     // }
     async integrate(a: Action1_0, input: Readables<Persisted>): Promise<Diffs<Integrated>> {
         return {
-            games1_0: await (async (): Promise<Diff<Game1_0>[]> => {
-                const oldGame = await read.getOrDefault(input.games1_0, [a.gameId], null);
-                const newGame = integrateHelper(a, oldGame || defaultGame());
-                if (newGame === null) {
-                    // Null game response means don't change the DB.
-                    return [];
-                }
-                const diff = newDiff([a.gameId], oldGame, newGame);
-                return Array.from(ix.of(diff).pipe(drop_null()))
-            })(),
-            games1_0_1: await (async (): Promise<Diff<Game1_0>[]> => {
-                const oldGame = await read.getOrDefault(input.games1_0_1, [a.gameId], null);
+            state1_0_0_games: await (async (): Promise<Diff<Game1_0>[]> => {
+                const oldGame = await read.getOrDefault(input.state1_0_0_games, [a.gameId], null);
                 const newGame = integrateHelper(a, oldGame || defaultGame());
                 if (newGame === null) {
                     // Null game response means don't change the DB.
@@ -196,10 +197,11 @@ class Dynamics1_0 implements Dynamics {
         }
     }
 
-    deriveDiffs(input: Readables<Persisted>,
-        integratedDiffs: Diffs<Persisted>): Promise<Diffs<Derived>> {
-        return getDiffs(getDerived(), input, integratedDiffs)
-    }
+    // async deriveDiffs(input: Readables<Persisted>,
+    //     integratedDiffs: Diffs<Persisted>): Promise<Diffs<Derived>> {
+    //         return {}
+    //     // return getDiffs(getDerived(), input, integratedDiffs)
+    // }
 
 }
 
@@ -328,9 +330,12 @@ function integrateHelper(a: Action1_0, game: Game1_0): (Game1_0 | null) {
 
 
 export const BINDINGS: Bindings = {
-    games1_0: [{ kind: 'integration', collection: 'games1_0' }],
-    games1_0_1: [{ kind: 'integration', collection: 'games1_0_1' }],
-    gamesByPlayer1_0: [{ kind: 'derivation', collection: 'gamesByPlayer1_0' }],
+    state1_0_0_games: [{ kind: 'integration', collection: 'state1_0_0_games' }],
+    state1_0_1_replay_games: [
+        // { kind: 'integration', collection: 'games1_0_1' }
+    ],
+    state1_0_1_replay_gamesByPlayer: [],
+//    gamesByPlayer1_0: [{ kind: 'derivation', collection: 'gamesByPlayer1_0' }],
 }
 
 
