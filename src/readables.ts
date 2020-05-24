@@ -3,12 +3,25 @@ import { Readable, ItemIterable, Range, Key } from './interfaces'
 import * as ranges from './ranges';
 import * as ixa from "ix/asynciterable"
 import * as ixaop from "ix/asynciterable/operators"
+import * as util from './util'
 
-function merge<T>(...readables: Readable<T>[]): Readable<T> {
+export function empty<T>(schema: string[]): Readable<T> {
     return {
-        schema: readables[0].schema,
-        read(rng: Range): ItemIterable<T> {
-            throw "unimpl"
+        schema,
+        read(range: Range): ItemIterable<T> {
+            return ixa.empty()
+        }
+    }
+}
+
+export function merge<T>(schema: string[], readables: Readable<T>[]): Readable<T> {
+    if (readables.length === 0) {
+        return empty(schema)
+    }
+    return {
+        schema,
+        read(range: Range): ItemIterable<T> {
+            return util.sortedMerge(readables.map(r => r.read(range)), ([ka,], [kb,]) => util.lexCompare(ka, kb))
         }
     }
 }

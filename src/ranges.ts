@@ -28,6 +28,13 @@ export function unbounded(start: Key): Range {
         start,
     };
 }
+export function bounded(start: Key, end: Key): Range {
+    return {
+        kind: 'bounded',
+        start,
+        end,
+    };
+}
 
 
 // export function isSingleValue(r: Range): Option<Key> {

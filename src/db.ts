@@ -21,11 +21,18 @@ export class Database {
     constructor(private db: Firestore, private tx: Transaction) { }
 
     open<T>(spec: TableSpec<T>): Table<T> {
-        return new Table(this.db, this.tx, spec.schema, spec.validator);
+        return new FSTable(this.db, this.tx, spec.schema, spec.validator);
     }
 }
 
-export class Table<T> {
+export interface Table<T> {
+    schema: string[]
+    read(range: Range): ItemIterable<T>
+    set(key: Key, value: T): void
+    delete(key: Key): void
+}
+
+class FSTable<T> {
     constructor(private db: Firestore, private tx: Transaction,
         public schema: string[], private validator: (u: unknown) => T) { }
 

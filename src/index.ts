@@ -24,7 +24,7 @@ import * as ixaop from "ix/asynciterable/operators"
 import * as db from './db'
 import * as readables from './readables'
 import * as ranges from './ranges'
-import { Readable, Diff, ItemIterable, Key } from './interfaces'
+import { Readable, Diff, ItemIterable, Range, Key } from './interfaces'
 
 
 admin.initializeApp({
@@ -138,6 +138,7 @@ type Tables = {
     actions: db.Table<SavedAction>
     state1_0_0_games: db.Table<Game1_0>
     state1_0_0_games_symlinks: db.Table<Symlink>
+    state1_1_0_games: db.Table<Game1_1>
 }
 
 function openAll(db: db.Database): Tables {
@@ -153,7 +154,38 @@ function openAll(db: db.Database): Tables {
         state1_0_0_games_symlinks: db.open({
             schema: ['state-1.0.0-games-symlinks'],
             validator: validateModel('Symlink')
-        })
+        }),
+        state1_1_0_games: db.open({
+            schema: ['actions', 'state-1.1.0-games'],
+            validator: validateModel('Game1_1')
+        }),
+    }
+}
+
+function nestedActionTable<T>(table: db.Table<T>, actionId: string): db.Table<T> {
+    return {
+        schema: table.schema.slice(1),
+        read(innerRange: Range): ItemIterable<T> {
+            const outerRange = ((): Range => {
+                if (innerRange.kind == 'bounded') {
+                    return ranges.bounded([actionId, ...innerRange.start], [actionId, ...innerRange.end])
+                } else {
+                    return ranges.bounded([actionId, ...innerRange.start],
+                        [...ranges.keySuccessor([actionId]), ...table.schema.slice(1).map(() => '')])
+                }
+            })();
+
+            return ixa.from(table.read(outerRange))
+                .pipe(ixaop.map(([k, v]) => [k.slice(1), v]))
+        },
+
+        set(key: Key, value: T): void {
+            throw "unimpl"
+        },
+
+        delete(key: Key): void {
+            throw "unimpl"
+        }
     }
 }
 
@@ -203,9 +235,15 @@ function openAll(db: db.Database): Tables {
 // }
 
 
-function defaultGame(): Game1_0 {
+function defaultGame1_0(): Game1_0 {
     return {
         players: [],
+    }
+}
+
+function defaultGame1_1(): Game1_1 {
+    return {
+        state: 'UNCREATED'
     }
 }
 
@@ -223,7 +261,7 @@ function integrate1_0Helper(a: Action1_0, game: Game1_0): (Game1_0 | null) {
 }
 
 
-function action1_0Upgrade(a: Action1_0): Action1_1 {
+function upgradeAction1_0(a: Action1_0): Action1_1 {
     switch (a.kind) {
         case 'join_game':
             return {
@@ -236,33 +274,41 @@ function action1_0Upgrade(a: Action1_0): Action1_1 {
     }
 }
 
-
-
-// function integrate1_1Helper(a: Action1_1, game: Game1_1): (Game1_1 | null) {
-//     switch (a.kind) {
-//         case 'join_game':
-//             if (game.state === 'UNCREATED') {
-//                 if (a.createIfNecessary) {
-//                     return {
-//                         state: 'CREATED',
-//                         players: [a.playerId],
-//                     }
-//                 } else {
-//                     return null
-//                 }
-//             }
-//             if (game.players.indexOf(a.playerId) !== -1) {
-//                 return null
-//             }
-//             return {
-//                 ...game,
-//                 players: [...game.players, a.playerId],
-//             }
-//         case 'create_game';
-
-//     }
-// }
-
+function integrate1_1Helper(a: Action1_1, game: Game1_1, shortCodeUseCount: number): (Game1_1 | null) {
+    switch (a.kind) {
+        case 'join_game':
+            if (game.state === 'UNCREATED') {
+                if (a.createIfNecessary) {
+                    return {
+                        state: 'CREATED',
+                        players: [a.playerId],
+                        shortCode: '',
+                    }
+                } else {
+                    return null
+                }
+            }
+            if (game.players.indexOf(a.playerId) !== -1) {
+                return null
+            }
+            return {
+                ...game,
+                players: [...game.players, a.playerId],
+            }
+        case 'create_game':
+            if (game.state !== 'UNCREATED') {
+                return null
+            }
+            if (shortCodeUseCount !== 0) {
+                return null
+            }
+            return {
+                state: 'CREATED',
+                players: [],
+                shortCode: a.shortCode
+            }
+    }
+}
 
 async function replayIntegration1_0_0(actionId: string, savedAction: SavedAction, ts: Tables): Promise<void> {
     // Get readable union for state1_0_0_games subtable.
@@ -270,10 +316,10 @@ async function replayIntegration1_0_0(actionId: string, savedAction: SavedAction
     // Get game from that. If none, use default.
     let oldGame: Game1_0;
     if (savedAction.parents.length === 0) {
-        oldGame = defaultGame();
+        oldGame = defaultGame1_0();
     } else {
         oldGame = await readables.get(ts.state1_0_0_games,
-            [savedAction.parents[0], savedAction.action.gameId], defaultGame());
+            [savedAction.parents[0], savedAction.action.gameId], defaultGame1_0());
     }
     // Insert player into game.
     const newGame = integrate1_0Helper(savedAction.action, oldGame);
@@ -285,23 +331,56 @@ async function replayIntegration1_0_0(actionId: string, savedAction: SavedAction
     ts.state1_0_0_games.set([actionId, savedAction.action.gameId], newGame);
 }
 
+async function replayIntegration1_1_0(actionId: string, savedAction: SavedAction, ts: Tables): Promise<void> {
+    let oldGame: Game1_1;
+    if (savedAction.parents.length === 0) {
+        oldGame = defaultGame1_1();
+    } else {
+        oldGame = await readables.get(ts.state1_1_0_games,
+            [savedAction.parents[0], savedAction.action.gameId], defaultGame1_1());
+    }
+    // Insert player into game.
+    const newGame = integrate1_1Helper(upgradeAction1_0(savedAction.action), oldGame, 0);
+    if (newGame === null) {
+        return
+    }
+
+    // Persist under "actionId".
+    ts.state1_1_0_games.set([actionId, savedAction.action.gameId], newGame);
+}
+
 async function replay(): Promise<{}> {
-    let cursor: Key | null = [''];
+    let cursor: Key = [''];
     console.log('REPLAY')
-    while (cursor !== null) {
+    while (true) {
         console.log('  cursor:', cursor)
-        cursor = await db.runTransaction(fsDb,
-            async (db: db.Database): Promise<Key | null> => {
+        const nextAction = await db.runTransaction(fsDb,
+            async (db: db.Database): Promise<string | null> => {
                 const tables = openAll(db);
                 const first = await ixa.first(ixa.from(readables.readAllAfter(tables.actions, cursor!)));
                 if (first === undefined) {
                     return null;
                 }
-                const [[actionId], savedAction] = first;
-                await replayIntegration1_0_0(actionId, savedAction, tables);
-                return [actionId];
+                const [[actionId],] = first;
+                return actionId;
             }
         );
+        if (nextAction === null) {
+            break;
+        }
+
+        for (const integrator of [replayIntegration1_0_0, replayIntegration1_1_0]) {
+            await db.runTransaction(fsDb, async (db: db.Database): Promise<void> => {
+                const tables = openAll(db);
+                const savedAction = (await readables.get(tables.actions, [nextAction], null));
+                if (savedAction === null) {
+                    throw new Error('wut');
+                }
+
+                await integrator(nextAction, savedAction, tables);
+            });
+        }
+        cursor = [nextAction];
     }
     console.log('DONE')
     return {}
