@@ -110,8 +110,8 @@ function doAction(fsDb: FirebaseFirestore.Firestore, body: unknown): Promise<voi
 
     return db.runTransaction(fsDb, async (db: db.Database): Promise<void> => {
         const ts = openAll(db);
-        const [actionId, savedAction] = await doLiveIntegration1_0_0(anyAction, ts);
-        await replayIntegration1_1_0(actionId, savedAction, ts)
+        const [actionId, savedAction] = await doLiveIntegration1_1_0(anyAction, ts);
+        await replayIntegration1_0_0(actionId, savedAction, ts)
     })
 }
 
@@ -325,14 +325,14 @@ function integrate1_1Helper(a: Action1_1, game: Game1_1, shortCodeUseCount: numb
     }
 }
 
-async function doLiveIntegration1_0_0(action: Action1_0, ts: Tables): Promise<[string, SavedAction]> {
-    const oldGameSymlink = await readables.get(ts.state1_0_0_games_symlinks, [action.gameId], null);
-    const [parents, oldGame] = await (async (): Promise<[string[], Game1_0]> => {
+async function doLiveIntegration1_1_0(action: Action1_0, ts: Tables): Promise<[string, SavedAction]> {
+    const oldGameSymlink = await readables.get(ts.state1_1_0_games_symlinks, [action.gameId], null);
+    const [parents, oldGame] = await (async (): Promise<[string[], Game1_1]> => {
         if (oldGameSymlink === null) {
-            return [[], defaultGame1_0()];
+            return [[], defaultGame1_1()];
         }
 
-        const res = await readables.get(ts.state1_0_0_games,
+        const res = await readables.get(ts.state1_1_0_games,
             [oldGameSymlink.actionId, action.gameId], null);
         if (res === null) {
             throw new Error('wut')
@@ -343,17 +343,17 @@ async function doLiveIntegration1_0_0(action: Action1_0, ts: Tables): Promise<[s
     const savedAction: SavedAction = { parents, action }
     const actionId = getActionId(savedAction)
 
-    // Insert player into game.
-    const newGame = integrate1_0Helper(action, oldGame);
+    // Do the action
+    const newGame = integrate1_1Helper(upgradeAction1_0(action), oldGame, 0);
 
     // Save the action.
     ts.actions.set([actionId], savedAction);
-    ts.actionTableMetadata.set([actionId, 'state-1.0.0'], { valid: true });
+    ts.actionTableMetadata.set([actionId, 'state-1.1.0'], { valid: true });
 
     if (newGame !== null) {
         // Persist under "actionId".
-        ts.state1_0_0_games.set([actionId, action.gameId], newGame);
-        ts.state1_0_0_games_symlinks.set([action.gameId], { actionId, value: newGame });
+        ts.state1_1_0_games.set([actionId, action.gameId], newGame);
+        ts.state1_1_0_games_symlinks.set([action.gameId], { actionId, value: newGame });
     }
     return [actionId, savedAction]
 }
