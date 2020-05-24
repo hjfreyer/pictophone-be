@@ -19,6 +19,10 @@ export interface Symlink {
     value: any
 }
 
+export interface ActionTableMetadata {
+    valid: boolean
+}
+
 // v1.0
 
 export interface JoinGameAction1_0 {

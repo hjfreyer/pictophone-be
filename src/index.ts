@@ -6,7 +6,7 @@ import { Dictionary, Request } from 'express-serve-static-core'
 import admin from 'firebase-admin'
 import uuid from 'uuid/v1'
 import GetConfig from './config'
-import { Action1_1, AnyAction, Action1_0, Game1_0, Game1_1, TaggedGame1_0, TaggedGame1_1, SavedAction, Symlink } from './model'
+import { Action1_1, AnyAction, Action1_0, Game1_0, Game1_1, TaggedGame1_0, TaggedGame1_1, SavedAction, Symlink, ActionTableMetadata } from './model'
 import { validate as validateModel } from './model/index.validator'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
@@ -137,9 +137,12 @@ app.use('/batch', batch())
 
 type Tables = {
     actions: db.Table<SavedAction>
+    actionTableMetadata: db.Table<ActionTableMetadata>
     state1_0_0_games: db.Table<Game1_0>
     state1_0_0_games_symlinks: db.Table<Symlink>
     state1_1_0_games: db.Table<Game1_1>
+    state1_1_0_games_symlinks: db.Table<Symlink>
+
 }
 
 function openAll(db: db.Database): Tables {
@@ -147,6 +150,10 @@ function openAll(db: db.Database): Tables {
         actions: db.open({
             schema: ['actions'],
             validator: validateModel('SavedAction')
+        }),
+        actionTableMetadata: db.open({
+            schema: ['actions', '_META_'],
+            validator: validateModel('ActionTableMetadata')
         }),
         state1_0_0_games: db.open({
             schema: ['actions', 'state-1.0.0-games'],
@@ -159,6 +166,10 @@ function openAll(db: db.Database): Tables {
         state1_1_0_games: db.open({
             schema: ['actions', 'state-1.1.0-games'],
             validator: validateModel('Game1_1')
+        }),
+        state1_1_0_games_symlinks: db.open({
+            schema: ['state-1.1.0-games-symlinks'],
+            validator: validateModel('Symlink')
         }),
     }
 }
@@ -247,6 +258,9 @@ function defaultGame1_1(): Game1_1 {
         state: 'UNCREATED'
     }
 }
+function defaultMetadata(): ActionTableMetadata {
+    return { valid: false }
+}
 
 function integrate1_0Helper(a: Action1_0, game: Game1_0): (Game1_0 | null) {
     switch (a.kind) {
@@ -334,6 +348,7 @@ async function doLiveIntegration1_0_0(action: Action1_0, ts: Tables): Promise<[s
 
     // Save the action.
     ts.actions.set([actionId], savedAction);
+    ts.actionTableMetadata.set([actionId, 'state-1.0.0'], { valid: true });
 
     if (newGame !== null) {
         // Persist under "actionId".
@@ -343,7 +358,15 @@ async function doLiveIntegration1_0_0(action: Action1_0, ts: Tables): Promise<[s
     return [actionId, savedAction]
 }
 
+
+// TODO: these replays need to delete any errant orphans.
 async function replayIntegration1_0_0(actionId: string, savedAction: SavedAction, ts: Tables): Promise<void> {
+    const meta = await readables.get(ts.actionTableMetadata, [actionId, 'state-1.0.0'], defaultMetadata());
+    if (meta.valid) {
+        // Already done.
+        return;
+    }
+
     // Get readable union for state1_0_0_games subtable.
     // For now, each should only have one parent, so cheat.
     // Get game from that. If none, use default.
@@ -351,11 +374,17 @@ async function replayIntegration1_0_0(actionId: string, savedAction: SavedAction
     if (savedAction.parents.length === 0) {
         oldGame = defaultGame1_0();
     } else {
+        const meta = await readables.get(ts.actionTableMetadata, [savedAction.parents[0], 'state-1.0.0'], defaultMetadata());
+        if (!meta.valid) {
+            return
+        }
+
         oldGame = await readables.get(ts.state1_0_0_games,
             [savedAction.parents[0], savedAction.action.gameId], defaultGame1_0());
     }
     // Insert player into game.
     const newGame = integrate1_0Helper(savedAction.action, oldGame);
+    ts.actionTableMetadata.set([actionId, 'state-1.0.0'], { valid: true });
     if (newGame === null) {
         return
     }
@@ -366,21 +395,33 @@ async function replayIntegration1_0_0(actionId: string, savedAction: SavedAction
 }
 
 async function replayIntegration1_1_0(actionId: string, savedAction: SavedAction, ts: Tables): Promise<void> {
+    const meta = await readables.get(ts.actionTableMetadata, [actionId, 'state-1.1.0'], defaultMetadata());
+    if (meta.valid) {
+        // Already done.
+        return;
+    }
+
     let oldGame: Game1_1;
     if (savedAction.parents.length === 0) {
         oldGame = defaultGame1_1();
     } else {
+        const meta = await readables.get(ts.actionTableMetadata, [savedAction.parents[0], 'state-1.1.0'], defaultMetadata());
+        if (!meta.valid) {
+            return
+        }
         oldGame = await readables.get(ts.state1_1_0_games,
             [savedAction.parents[0], savedAction.action.gameId], defaultGame1_1());
     }
     // Insert player into game.
     const newGame = integrate1_1Helper(upgradeAction1_0(savedAction.action), oldGame, 0);
+    ts.actionTableMetadata.set([actionId, 'state-1.1.0'], { valid: true });
     if (newGame === null) {
         return
     }
 
     // Persist under "actionId".
     ts.state1_1_0_games.set([actionId, savedAction.action.gameId], newGame);
+    ts.state1_1_0_games_symlinks.set([savedAction.action.gameId], { actionId, value: newGame });
 }
 
 async function replay(): Promise<{}> {
@@ -439,6 +480,20 @@ async function deleteTable({ tableId }: DeleteRequest): Promise<void> {
         }
     })
 }
+type DeleteMetaRequest = {
+    collectionId: string
+}
+
+async function deleteMeta({ collectionId }: DeleteMetaRequest): Promise<void> {
+    await db.runTransaction(fsDb, async (db: db.Database): Promise<void> => {
+        const ts = openAll(db);
+        for await (const [k,] of readables.readAll(ts.actionTableMetadata)) {
+            if (k[k.length - 1] === collectionId) {
+                ts.actionTableMetadata.delete(k)
+            }
+        }
+    })
+}
 
 function batch(): Router {
     const res = Router()
@@ -468,6 +523,12 @@ function batch(): Router {
 
     res.post('/delete/:tableId', function(req: Request<DeleteRequest>, res, next) {
         deleteTable(req.params).then(result => {
+            res.status(200)
+            res.json(result)
+        }).catch(next)
+    })
+    res.post('/delete-meta/:collectionId', function(req: Request<DeleteMetaRequest>, res, next) {
+        deleteMeta(req.params).then(result => {
             res.status(200)
             res.json(result)
         }).catch(next)
