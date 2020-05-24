@@ -10,7 +10,6 @@ export interface Timestamped {
 }
 
 export interface NumberValue {
-    actionId: string
     value: number
 }
 
@@ -41,7 +40,7 @@ export type TaggedGame1_0 = Game1_0 & { actionId: string }
 
 export type SavedAction = {
     parents: string[]
-    action: Action1_0
+    action: AnyAction
 }
 
 export type SavedState = {
@@ -81,5 +80,4 @@ export interface CreatedGame1_1 {
 export type Game1_1 = UncreatedGame1_1 | CreatedGame1_1
 export type TaggedGame1_1 = Game1_1 & { actionId: string }
 
-export type AnyAction = Action1_0 // | Action1_1
-export type TimestampedAction = AnyAction & Timestamped
+export type AnyAction = Action1_0 | Action1_1

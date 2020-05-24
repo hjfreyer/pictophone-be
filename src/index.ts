@@ -6,11 +6,11 @@ import { Dictionary, Request } from 'express-serve-static-core'
 import admin from 'firebase-admin'
 import uuid from 'uuid/v1'
 import GetConfig from './config'
-import { Action1_1, AnyAction, Action1_0, Game1_0, Game1_1, TaggedGame1_0, TaggedGame1_1, SavedAction, Symlink, ActionTableMetadata } from './model'
+import { Action1_1, AnyAction, Action1_0, Game1_0, Game1_1, TaggedGame1_0, TaggedGame1_1, SavedAction, Symlink, ActionTableMetadata, NumberValue } from './model'
 import { validate as validateModel } from './model/index.validator'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
-import { mapValues } from './util'
+import * as util from './util'
 import deepEqual from 'deep-equal'
 import timestamp from 'timestamp-nano';
 
@@ -101,17 +101,24 @@ function numPoints(drawing: Drawing): number {
     return res
 }
 
+function upgradeAction(action: AnyAction): Action1_1 {
+    switch (action.version) {
+        case '1.0':
+            action = upgradeAction1_0(action);
+        case '1.1':
+            return action;
+    }
+}
 
 
 
 function doAction(fsDb: FirebaseFirestore.Firestore, body: unknown): Promise<void> {
-    const anyAction = validateModel('Action1_0')(body)
+    const anyAction = validateModel('AnyAction')(body)
     // // const action = upgradeAction(anyAction)
 
     return db.runTransaction(fsDb, async (db: db.Database): Promise<void> => {
         const ts = openAll(db);
-        const [actionId, savedAction] = await doLiveIntegration1_1_0(anyAction, ts);
-        await replayIntegration1_0_0(actionId, savedAction, ts)
+        const [actionId, savedAction] = await doLiveIntegration1_1_0(upgradeAction(anyAction), ts);
     })
 }
 
@@ -142,7 +149,8 @@ type Tables = {
     state1_0_0_games_symlinks: db.Table<Symlink>
     state1_1_0_games: db.Table<Game1_1>
     state1_1_0_games_symlinks: db.Table<Symlink>
-
+    state1_1_0_shortCodeUsageCount: db.Table<NumberValue>
+    state1_1_0_shortCodeUsageCount_symlinks: db.Table<Symlink>
 }
 
 function openAll(db: db.Database): Tables {
@@ -169,6 +177,14 @@ function openAll(db: db.Database): Tables {
         }),
         state1_1_0_games_symlinks: db.open({
             schema: ['state-1.1.0-games-symlinks'],
+            validator: validateModel('Symlink')
+        }),
+        state1_1_0_shortCodeUsageCount: db.open({
+            schema: ['actions', 'state-1.1.0-scuc'],
+            validator: validateModel('NumberValue')
+        }),
+        state1_1_0_shortCodeUsageCount_symlinks: db.open({
+            schema: ['state-1.1.0-scuc-symlinks'],
             validator: validateModel('Symlink')
         }),
     }
@@ -289,16 +305,22 @@ function upgradeAction1_0(a: Action1_0): Action1_1 {
     }
 }
 
-function integrate1_1Helper(a: Action1_1, game: Game1_1, shortCodeUseCount: number): (Game1_1 | null) {
+type Inputs1_1 = {
+    games: Readable<Game1_1>
+    shortCodeUsageCount: Readable<NumberValue>
+}
+
+async function integrate1_1Helper(a: Action1_1, inputs: Inputs1_1): Promise<[Key, Game1_1, Game1_1] | null> {
+    const game = await readables.get(inputs.games, [a.gameId], defaultGame1_1());
     switch (a.kind) {
         case 'join_game':
             if (game.state === 'UNCREATED') {
                 if (a.createIfNecessary) {
-                    return {
+                    return [[a.gameId], game, {
                         state: 'CREATED',
                         players: [a.playerId],
                         shortCode: '',
-                    }
+                    }]
                 } else {
                     return null
                 }
@@ -306,93 +328,104 @@ function integrate1_1Helper(a: Action1_1, game: Game1_1, shortCodeUseCount: numb
             if (game.players.indexOf(a.playerId) !== -1) {
                 return null
             }
-            return {
+            return [[a.gameId], game, {
                 ...game,
                 players: [...game.players, a.playerId],
-            }
+            }]
         case 'create_game':
             if (game.state !== 'UNCREATED') {
                 return null
             }
-            if (shortCodeUseCount !== 0) {
+            if (a.shortCode === '') {
                 return null
             }
-            return {
+            const scCount = await readables.get(inputs.shortCodeUsageCount, [a.shortCode], { value: 0 });
+            if (scCount.value !== 0) {
+                return null
+            }
+            return [[a.gameId], game, {
                 state: 'CREATED',
                 players: [],
                 shortCode: a.shortCode
-            }
+            }]
     }
 }
 
-async function doLiveIntegration1_1_0(action: Action1_0, ts: Tables): Promise<[string, SavedAction]> {
-    const oldGameSymlink = await readables.get(ts.state1_1_0_games_symlinks, [action.gameId], null);
-    const [parents, oldGame] = await (async (): Promise<[string[], Game1_1]> => {
-        if (oldGameSymlink === null) {
-            return [[], defaultGame1_1()];
-        }
+// Not general.
+function shortCodeDiff(oldGame: Game1_1, newGame: Game1_1): ([string, number] | null) {
+    if (oldGame.state === 'CREATED') {
+        return null
+    }
+    if (newGame.state === 'UNCREATED' || newGame.shortCode === '') {
+        return null
+    }
+    return [newGame.shortCode, 1]
+}
 
-        const res = await readables.get(ts.state1_1_0_games,
-            [oldGameSymlink.actionId, action.gameId], null);
-        if (res === null) {
-            throw new Error('wut')
+async function doLiveIntegration1_1_0(action: Action1_1, ts: Tables): Promise<[string, SavedAction]> {
+    const parentSet = new Set<string>();
+    const inputs: Inputs1_1 = {
+        games: {
+            schema: ['state-1.1.0-games'],
+            read(range: Range): ItemIterable<Game1_1> {
+                const links = ixa.from(ts.state1_1_0_games_symlinks.read(range))
+                return links.pipe(
+                    ixaop.tap(([, link]) => { parentSet.add(link.actionId) }),
+                    ixaop.flatMap(([key, link]) =>
+                        ts.state1_1_0_games.read(ranges.singleValue([link.actionId, ...key])))
+                )
+            }
+        },
+        shortCodeUsageCount: {
+            schema: ['state-1.1.0-scuc'],
+            read(range: Range): ItemIterable<NumberValue> {
+                const links = ixa.from(ts.state1_1_0_shortCodeUsageCount_symlinks.read(range))
+                return links.pipe(
+                    ixaop.tap(([, link]) => { parentSet.add(link.actionId) }),
+                    ixaop.flatMap(([key, link]) =>
+                        ts.state1_1_0_shortCodeUsageCount.read(ranges.singleValue([link.actionId, ...key])))
+                )
+            }
         }
-        return [[oldGameSymlink.actionId], res];
-    })();
+    }
 
-    const savedAction: SavedAction = { parents, action }
+    // Integrate the action.
+    const result = await integrate1_1Helper(action, inputs);
+    const scUpdate = await (async (): Promise<[Key, NumberValue] | null> => {
+        if (result === null) {
+            return null
+        }
+        const [key, oldGame, newGame] = result;
+        const scDiff = shortCodeDiff(oldGame, newGame)
+        if (scDiff === null) {
+            return null
+        }
+        const [scKey, scDelta] = scDiff;
+        const scCount = await readables.get(inputs.shortCodeUsageCount, [scKey], { value: 0 });
+        return [[scKey], { value: scCount.value + scDelta }];
+    })()
+
+    // Save the action and metadata.
+    const savedAction: SavedAction = { parents: util.sorted(parentSet), action }
     const actionId = getActionId(savedAction)
 
-    // Do the action
-    const newGame = integrate1_1Helper(upgradeAction1_0(action), oldGame, 0);
-
-    // Save the action.
     ts.actions.set([actionId], savedAction);
     ts.actionTableMetadata.set([actionId, 'state-1.1.0'], { valid: true });
-
-    if (newGame !== null) {
-        // Persist under "actionId".
-        ts.state1_1_0_games.set([actionId, action.gameId], newGame);
-        ts.state1_1_0_games_symlinks.set([action.gameId], { actionId, value: newGame });
+    if (result !== null) {
+        const [key, , newGame] = result;
+        ts.state1_1_0_games.set([actionId, ...key], newGame);
+        ts.state1_1_0_games_symlinks.set(key, { actionId, value: newGame });
+    }
+    if (scUpdate !== null) {
+        const [scKey, newCount] = scUpdate;
+        ts.state1_1_0_shortCodeUsageCount.set([actionId, ...scKey], newCount);
+        ts.state1_1_0_shortCodeUsageCount_symlinks.set(scKey, { actionId, value: newCount });
     }
     return [actionId, savedAction]
 }
 
 
 // TODO: these replays need to delete any errant orphans.
-async function replayIntegration1_0_0(actionId: string, savedAction: SavedAction, ts: Tables): Promise<void> {
-    const meta = await readables.get(ts.actionTableMetadata, [actionId, 'state-1.0.0'], defaultMetadata());
-    if (meta.valid) {
-        // Already done.
-        return;
-    }
-
-    // Get readable union for state1_0_0_games subtable.
-    // For now, each should only have one parent, so cheat.
-    // Get game from that. If none, use default.
-    let oldGame: Game1_0;
-    if (savedAction.parents.length === 0) {
-        oldGame = defaultGame1_0();
-    } else {
-        const meta = await readables.get(ts.actionTableMetadata, [savedAction.parents[0], 'state-1.0.0'], defaultMetadata());
-        if (!meta.valid) {
-            return
-        }
-
-        oldGame = await readables.get(ts.state1_0_0_games,
-            [savedAction.parents[0], savedAction.action.gameId], defaultGame1_0());
-    }
-    // Insert player into game.
-    const newGame = integrate1_0Helper(savedAction.action, oldGame);
-    ts.actionTableMetadata.set([actionId, 'state-1.0.0'], { valid: true });
-    if (newGame === null) {
-        return
-    }
-
-    // Persist under "actionId".
-    ts.state1_0_0_games.set([actionId, savedAction.action.gameId], newGame);
-    ts.state1_0_0_games_symlinks.set([savedAction.action.gameId], { actionId, value: newGame });
-}
 
 async function replayIntegration1_1_0(actionId: string, savedAction: SavedAction, ts: Tables): Promise<void> {
     const meta = await readables.get(ts.actionTableMetadata, [actionId, 'state-1.1.0'], defaultMetadata());
@@ -401,27 +434,52 @@ async function replayIntegration1_1_0(actionId: string, savedAction: SavedAction
         return;
     }
 
-    let oldGame: Game1_1;
-    if (savedAction.parents.length === 0) {
-        oldGame = defaultGame1_1();
-    } else {
-        const meta = await readables.get(ts.actionTableMetadata, [savedAction.parents[0], 'state-1.1.0'], defaultMetadata());
-        if (!meta.valid) {
-            return
-        }
-        oldGame = await readables.get(ts.state1_1_0_games,
-            [savedAction.parents[0], savedAction.action.gameId], defaultGame1_1());
-    }
-    // Insert player into game.
-    const newGame = integrate1_1Helper(upgradeAction1_0(savedAction.action), oldGame, 0);
-    ts.actionTableMetadata.set([actionId, 'state-1.1.0'], { valid: true });
-    if (newGame === null) {
-        return
+    const parentMetas = ixa.from(savedAction.parents).pipe(
+        ixaop.map(p => readables.get(ts.actionTableMetadata, [p, 'state-1.1.0'], defaultMetadata())),
+    )
+
+    if (await ixa.some(parentMetas, meta => !meta.valid)) {
+        return;
     }
 
-    // Persist under "actionId".
-    ts.state1_1_0_games.set([actionId, savedAction.action.gameId], newGame);
-    ts.state1_1_0_games_symlinks.set([savedAction.action.gameId], { actionId, value: newGame });
+    const parentsGames = savedAction.parents.map(p => nestedActionTable(ts.state1_1_0_games, p))
+    const parentsScuc = savedAction.parents.map(p => nestedActionTable(ts.state1_1_0_shortCodeUsageCount, p))
+
+    const inputs: Inputs1_1 = {
+        games: readables.merge(['state-1.1.0-games'], parentsGames),
+        shortCodeUsageCount: readables.merge(['state-1.1.0-scuc'], parentsScuc),
+    }
+
+    // Integrate the action.
+    const result = await integrate1_1Helper(upgradeAction(savedAction.action), inputs);
+    const scUpdate = await (async (): Promise<[Key, NumberValue] | null> => {
+        if (result === null) {
+            return null
+        }
+        const [key, oldGame, newGame] = result;
+        const scDiff = shortCodeDiff(oldGame, newGame)
+        if (scDiff === null) {
+            return null
+        }
+        const [scKey, scDelta] = scDiff;
+        const scCount = await readables.get(inputs.shortCodeUsageCount, [scKey], { value: 0 });
+        return [[scKey], { value: scCount.value + scDelta }];
+    })()
+
+    // Save the metadata.
+    ts.actionTableMetadata.set([actionId, 'state-1.1.0'], { valid: true });
+
+    // ... and the data.
+    if (result !== null) {
+        const [key, , newGame] = result;
+        ts.state1_1_0_games.set([actionId, ...key], newGame);
+        ts.state1_1_0_games_symlinks.set(key, { actionId, value: newGame });
+    }
+    if (scUpdate !== null) {
+        const [scKey, newCount] = scUpdate;
+        ts.state1_1_0_shortCodeUsageCount.set([actionId, ...scKey], newCount);
+        ts.state1_1_0_shortCodeUsageCount_symlinks.set(scKey, { actionId, value: newCount });
+    }
 }
 
 async function replay(): Promise<{}> {
@@ -444,7 +502,7 @@ async function replay(): Promise<{}> {
             break;
         }
 
-        for (const integrator of [replayIntegration1_0_0, replayIntegration1_1_0]) {
+        for (const integrator of [replayIntegration1_1_0]) {
             await db.runTransaction(fsDb, async (db: db.Database): Promise<void> => {
                 const tables = openAll(db);
                 const savedAction = (await readables.get(tables.actions, [nextAction], null));

@@ -134,3 +134,9 @@ export function assertIsPermutation(permutation: number[]): void {
         nums.add(p);
     }
 }
+
+export function sorted<T>(i: Iterable<T>, cmp?: Comparator<T>): T[] {
+    const res = Array.from(i)
+    res.sort(cmp)
+    return res
+}
