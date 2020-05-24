@@ -1,5 +1,5 @@
 
-import { Readable, ItemIterable, Range, Key } from './interfaces'
+import { Readable, ItemIterable, Range, Key, Item } from './interfaces'
 import * as ranges from './ranges';
 import * as ixa from "ix/asynciterable"
 import * as ixaop from "ix/asynciterable/operators"
@@ -40,3 +40,20 @@ export function readAll<T>(source: Readable<T>): ItemIterable<T> {
 export function readAllAfter<T>(source: Readable<T>, startAfter: Key): ItemIterable<T> {
     return source.read(ranges.unbounded(ranges.keySuccessor(startAfter)))
 }
+
+
+
+// export class Tape<T> implements Readable<T> {
+//     public items: Item<T>[] = []
+
+//     constructor(private source: Readable<T>) { }
+
+//     get schema(): string[] {
+//         return this.source.schema
+//     }
+
+//     read(range: Range): ItemIterable<T> {
+//         return ixa.from(this.source.read(range))
+//             .pipe(ixaop.tap(item => this.items.push(item)))
+//     }
+// }

@@ -25,6 +25,7 @@ import * as db from './db'
 import * as readables from './readables'
 import * as ranges from './ranges'
 import { Readable, Diff, ItemIterable, Range, Key } from './interfaces'
+import {strict as assert} from 'assert';
 
 
 admin.initializeApp({
@@ -107,10 +108,8 @@ function doAction(fsDb: FirebaseFirestore.Firestore, body: unknown): Promise<voi
     const anyAction = validateModel('Action1_0')(body)
     // // const action = upgradeAction(anyAction)
 
-    return fsDb.runTransaction(async (tx: Transaction): Promise<void> => {
-        const database = new db.Database(fsDb, tx);
-        // const dpl = getDPLInfos();
-        // await doAction3(new Dynamics1_0(), anyAction, database, dpl, BINDINGS)
+    return db.runTransaction(fsDb, async (db: db.Database): Promise<void> => {
+        const [actionId, savedAction] = await doLiveIntegration1_0_0(anyAction, openAll(db));
     })
 }
 
@@ -310,6 +309,38 @@ function integrate1_1Helper(a: Action1_1, game: Game1_1, shortCodeUseCount: numb
     }
 }
 
+async function doLiveIntegration1_0_0(action: Action1_0, ts: Tables): Promise<[string, SavedAction]> {
+    const oldGameSymlink = await readables.get(ts.state1_0_0_games_symlinks, [action.gameId], null);
+    const [parents, oldGame] = await (async (): Promise<[string[], Game1_0]> => {
+        if (oldGameSymlink === null) {
+            return [[], defaultGame1_0()];
+        }
+
+        const res = await readables.get(ts.state1_0_0_games,
+            [oldGameSymlink.actionId, action.gameId], null);
+            if (res === null) {
+                throw new Error('wut')
+            }
+        return [[oldGameSymlink.actionId], res];
+    })();
+
+    const savedAction : SavedAction = {        parents,       action    }
+    const actionId = getActionId(savedAction)
+    
+    // Insert player into game.
+    const newGame = integrate1_0Helper(action, oldGame);
+
+    // Save the action.
+    ts.actions.set([actionId], savedAction);
+
+    if (newGame !== null) {   
+         // Persist under "actionId".
+        ts.state1_0_0_games.set([actionId, action.gameId], newGame);
+        ts.state1_0_0_games_symlinks.set([action.gameId], {actionId, value: newGame});
+    }
+    return [ actionId, savedAction]
+}
+
 async function replayIntegration1_0_0(actionId: string, savedAction: SavedAction, ts: Tables): Promise<void> {
     // Get readable union for state1_0_0_games subtable.
     // For now, each should only have one parent, so cheat.
@@ -329,6 +360,7 @@ async function replayIntegration1_0_0(actionId: string, savedAction: SavedAction
 
     // Persist under "actionId".
     ts.state1_0_0_games.set([actionId, savedAction.action.gameId], newGame);
+    ts.state1_0_0_games_symlinks.set([savedAction.action.gameId], {actionId, value: newGame});
 }
 
 async function replayIntegration1_1_0(actionId: string, savedAction: SavedAction, ts: Tables): Promise<void> {
