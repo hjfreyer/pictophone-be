@@ -25,7 +25,7 @@ import * as db from './db'
 import * as readables from './readables'
 import * as ranges from './ranges'
 import { Readable, Diff, ItemIterable, Range, Key } from './interfaces'
-import {strict as assert} from 'assert';
+import { strict as assert } from 'assert';
 
 
 admin.initializeApp({
@@ -109,7 +109,9 @@ function doAction(fsDb: FirebaseFirestore.Firestore, body: unknown): Promise<voi
     // // const action = upgradeAction(anyAction)
 
     return db.runTransaction(fsDb, async (db: db.Database): Promise<void> => {
-        const [actionId, savedAction] = await doLiveIntegration1_0_0(anyAction, openAll(db));
+        const ts = openAll(db);
+        const [actionId, savedAction] = await doLiveIntegration1_0_0(anyAction, ts);
+        await replayIntegration1_1_0(actionId, savedAction, ts)
     })
 }
 
@@ -318,27 +320,27 @@ async function doLiveIntegration1_0_0(action: Action1_0, ts: Tables): Promise<[s
 
         const res = await readables.get(ts.state1_0_0_games,
             [oldGameSymlink.actionId, action.gameId], null);
-            if (res === null) {
-                throw new Error('wut')
-            }
+        if (res === null) {
+            throw new Error('wut')
+        }
         return [[oldGameSymlink.actionId], res];
     })();
 
-    const savedAction : SavedAction = {        parents,       action    }
+    const savedAction: SavedAction = { parents, action }
     const actionId = getActionId(savedAction)
-    
+
     // Insert player into game.
     const newGame = integrate1_0Helper(action, oldGame);
 
     // Save the action.
     ts.actions.set([actionId], savedAction);
 
-    if (newGame !== null) {   
-         // Persist under "actionId".
+    if (newGame !== null) {
+        // Persist under "actionId".
         ts.state1_0_0_games.set([actionId, action.gameId], newGame);
-        ts.state1_0_0_games_symlinks.set([action.gameId], {actionId, value: newGame});
+        ts.state1_0_0_games_symlinks.set([action.gameId], { actionId, value: newGame });
     }
-    return [ actionId, savedAction]
+    return [actionId, savedAction]
 }
 
 async function replayIntegration1_0_0(actionId: string, savedAction: SavedAction, ts: Tables): Promise<void> {
@@ -360,7 +362,7 @@ async function replayIntegration1_0_0(actionId: string, savedAction: SavedAction
 
     // Persist under "actionId".
     ts.state1_0_0_games.set([actionId, savedAction.action.gameId], newGame);
-    ts.state1_0_0_games_symlinks.set([savedAction.action.gameId], {actionId, value: newGame});
+    ts.state1_0_0_games_symlinks.set([savedAction.action.gameId], { actionId, value: newGame });
 }
 
 async function replayIntegration1_1_0(actionId: string, savedAction: SavedAction, ts: Tables): Promise<void> {
@@ -418,6 +420,26 @@ async function replay(): Promise<{}> {
     return {}
 }
 
+type DeleteRequest = {
+    tableId: string
+}
+
+async function deleteTable({ tableId }: DeleteRequest): Promise<void> {
+    if (tableId === 'actions') {
+        throw new Error('nope')
+    }
+    await db.runTransaction(fsDb, async (db: db.Database): Promise<void> => {
+        const ts = openAll(db);
+        if (!(tableId in ts)) {
+            throw new Error(`no such table: "${tableId}"`)
+        }
+        const table: db.Table<unknown> = ts[tableId as keyof typeof ts];
+        for await (const [k,] of readables.readAll(table)) {
+            table.delete(k)
+        }
+    })
+}
+
 function batch(): Router {
     const res = Router()
 
@@ -444,12 +466,12 @@ function batch(): Router {
     //     }).catch(next)
     // })
 
-    // res.post('/delete-collection/:collectionId', function(req: Request<DeleteRequest>, res, next) {
-    //     deleteCollection(db, req.params).then(result => {
-    //         res.status(200)
-    //         res.json(result)
-    //     }).catch(next)
-    // })
+    res.post('/delete/:tableId', function(req: Request<DeleteRequest>, res, next) {
+        deleteTable(req.params).then(result => {
+            res.status(200)
+            res.json(result)
+        }).catch(next)
+    })
 
     return res
 }

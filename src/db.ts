@@ -14,14 +14,29 @@ export interface TableSpec<T> {
 }
 
 export function runTransaction<R>(fsDb: Firestore, cb: (db: Database) => Promise<R>): Promise<R> {
-    return fsDb.runTransaction((tx) => cb(new Database(fsDb, tx)));
+    return fsDb.runTransaction(async (tx) => {
+        const db = new Database(fsDb, tx);
+        const res = await cb(db);
+        db.commit();
+        return res
+    });
 }
 
 export class Database {
+    private committers: (() => void)[] = []
+
     constructor(private db: Firestore, private tx: Transaction) { }
 
     open<T>(spec: TableSpec<T>): Table<T> {
-        return new FSTable(this.db, this.tx, spec.schema, spec.validator);
+        const res = new FSTable(this.db, this.tx, spec.schema, spec.validator);
+        this.committers.push(() => res.commit());
+        return res;
+    }
+
+    commit(): void {
+        for (const c of this.committers) {
+            c();
+        }
     }
 }
 
@@ -33,6 +48,8 @@ export interface Table<T> {
 }
 
 class FSTable<T> {
+    private committers: (() => void)[] = []
+
     constructor(private db: Firestore, private tx: Transaction,
         public schema: string[], private validator: (u: unknown) => T) { }
 
@@ -52,11 +69,17 @@ class FSTable<T> {
     }
 
     set(key: Key, value: T): void {
-        this.tx.set(this.getDocReference(key), value)
+        this.committers.push(() => { this.tx.set(this.getDocReference(key), value) })
     }
 
     delete(key: Key): void {
-        this.tx.delete(this.getDocReference(key))
+        this.committers.push(() => { this.tx.delete(this.getDocReference(key)) })
+    }
+
+    commit(): void {
+        for (const c of this.committers) {
+            c();
+        }
     }
 
     private getDocReference(key: Key): DocumentReference {
