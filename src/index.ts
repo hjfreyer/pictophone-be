@@ -14,17 +14,16 @@ import * as util from './util'
 import deepEqual from 'deep-equal'
 import timestamp from 'timestamp-nano';
 
-import { interval, from, of, toArray, first, single, concat } from "ix/asynciterable"
-import { map, filter, flatMap, tap, take, skip, skipWhile } from "ix/asynciterable/operators"
 import { sha256 } from 'js-sha256';
 import _ from 'lodash';
 import * as ix from "ix/iterable"
+import * as ixop from "ix/iterable/operators"
 import * as ixa from "ix/asynciterable"
 import * as ixaop from "ix/asynciterable/operators"
 import * as db from './db'
 import * as readables from './readables'
 import * as ranges from './ranges'
-import { Readable, Diff, ItemIterable, Range, Key } from './interfaces'
+import { Readable, Diff, ItemIterable, Range, Key, Item } from './interfaces'
 import { strict as assert } from 'assert';
 
 
@@ -310,59 +309,171 @@ type Inputs1_1 = {
     shortCodeUsageCount: Readable<NumberValue>
 }
 
-async function integrate1_1Helper(a: Action1_1, inputs: Inputs1_1): Promise<[Key, Game1_1, Game1_1] | null> {
+type Outputs1_1 = {
+    games: Change<Game1_1>[]
+    shortCodeUsageCount: Change<NumberValue>[]
+}
+
+async function integrate1_1MiddleHelper(a: Action1_1, inputs: Inputs1_1): Promise<Outputs1_1> {
+    // Action1_1 + Game state + scuc state => Diffs of Games
+    const gameDiffs = await integrate1_1Helper(a, inputs);
+
+    // Diffs of games => Diffs of numbers indexed by short code.
+    const indexedShortCodeDiffs = Array.from(ix.from(gameDiffs).pipe(
+        ixop.flatMap(diff => {
+            if (diff.kind !== 'replace') {
+                throw new Error('wtf')
+            }
+            return shortCodeDiff2(diff.oldValue, diff.newValue)
+        })));
+
+    // Diff of numbers indexed by short code => effective change
+    // to count of each short code.
+    const aggregatedShortCodeDeltas = shortCodeDiffAggregate(indexedShortCodeDiffs)
+
+    // Effective change + scuc state = scuc diffs.
+    const aggregatedShortCodeDiffs = await integrate1_1SCUCs(aggregatedShortCodeDeltas, inputs)
+
+    return {
+        games: gameDiffs.map(diffToChange),
+        shortCodeUsageCount: aggregatedShortCodeDiffs.map(diffToChange),
+    }
+}
+
+async function integrate1_1Helper(a: Action1_1, inputs: Inputs1_1): Promise<Diff<Game1_1>[]> {
     const game = await readables.get(inputs.games, [a.gameId], defaultGame1_1());
     switch (a.kind) {
         case 'join_game':
             if (game.state === 'UNCREATED') {
                 if (a.createIfNecessary) {
-                    return [[a.gameId], game, {
-                        state: 'CREATED',
-                        players: [a.playerId],
-                        shortCode: '',
+                    return [{
+                        kind: 'replace',
+                        key: [a.gameId],
+                        oldValue: game,
+                        newValue: {
+                            state: 'CREATED',
+                            players: [a.playerId],
+                            shortCode: '',
+                        }
                     }]
                 } else {
-                    return null
+                    return []
                 }
             }
             if (game.players.indexOf(a.playerId) !== -1) {
-                return null
+                return []
             }
-            return [[a.gameId], game, {
-                ...game,
-                players: [...game.players, a.playerId],
+            return [{
+                kind: 'replace',
+                key: [a.gameId],
+                oldValue: game,
+                newValue: {
+                    ...game,
+                    players: [...game.players, a.playerId],
+
+                }
             }]
+
         case 'create_game':
             if (game.state !== 'UNCREATED') {
-                return null
+                return []
             }
             if (a.shortCode === '') {
-                return null
+                return []
             }
             const scCount = await readables.get(inputs.shortCodeUsageCount, [a.shortCode], { value: 0 });
             if (scCount.value !== 0) {
-                return null
+                return []
             }
-            return [[a.gameId], game, {
-                state: 'CREATED',
-                players: [],
-                shortCode: a.shortCode
+            return [{
+                kind: 'replace',
+                key: [a.gameId],
+                oldValue: game,
+                newValue: {
+                    state: 'CREATED',
+                    players: [],
+                    shortCode: a.shortCode
+                }
             }]
     }
 }
 
-// Not general.
-function shortCodeDiff(oldGame: Game1_1, newGame: Game1_1): ([string, number] | null) {
-    if (oldGame.state === 'CREATED') {
-        return null
+function integrate1_1SCUCs(as: Item<NumberValue>[], inputs: Inputs1_1): Promise<Diff<NumberValue>[]> {
+    return ixa.toArray(ixa.from(as).pipe(
+        ixaop.map(async ([key, delta]): Promise<Diff<NumberValue>> => {
+            const oldValue = await readables.get(inputs.shortCodeUsageCount, key, { value: 0 });
+            const newValue = { value: oldValue.value + delta.value };
+            return {
+                kind: 'replace',
+                key,
+                oldValue,
+                newValue
+            }
+        })
+    ))
+}
+
+function mapShortCode(game: Game1_1): Item<NumberValue>[] {
+    if (game.state !== 'CREATED') {
+        return []
     }
-    if (newGame.state === 'UNCREATED' || newGame.shortCode === '') {
-        return null
+    return [[[game.shortCode], { value: 1 }]]
+}
+
+function shortCodeDiff2(oldGame: Game1_1, newGame: Game1_1): Diff<NumberValue>[] {
+    // Each array must have 0 or 1 items
+    const olds = mapShortCode(oldGame);
+    const news = mapShortCode(newGame);
+    if (olds.length === 0 && news.length === 0) {
+        return []
     }
-    return [newGame.shortCode, 1]
+    if (olds.length === 0 && news.length !== 0) {
+        const [key, value] = news[0]
+        return [{ kind: 'add', key, value }]
+    }
+    if (olds.length !== 0 && news.length === 0) {
+        const [key, value] = olds[0]
+        return [{ kind: 'delete', key, value }]
+    }
+    // i.e, olds.length !== 0 && news.length !== 0
+    const [oldKey, oldValue] = olds[0];
+    const [newKey, newValue] = news[0];
+    if (util.lexCompare(oldKey, newKey) === 0) {
+        if (deepEqual(oldValue, newValue)) {
+            return []
+        } else {
+            return [{ kind: 'replace', key: oldKey, oldValue, newValue }]
+        }
+    } else {
+        return [
+            { kind: 'delete', key: oldKey, value: oldValue },
+            { kind: 'add', key: newKey, value: newValue }
+        ]
+
+    }
+}
+
+function shortCodeDiffAggregate(diffs: Diff<NumberValue>[]): Item<NumberValue>[] {
+    return Array.from(ix.from(diffs).pipe(
+        ixop.map((diff: Diff<NumberValue>): [string, number] => {
+            const sc = diff.key[0]
+            switch (diff.kind) {
+                case 'add':
+                    return [sc, diff.value.value]
+                case 'delete':
+                    return [sc, -diff.value.value]
+                case 'replace':
+                    return [sc, diff.newValue.value - diff.oldValue.value]
+            }
+        }),
+        ixop.groupBy(([sc,]) => sc, ([, delta]) => delta,
+            (sc, deltas): Item<NumberValue> => [[sc], { value: ix.sum(deltas) }]),
+        ixop.filter(([, delta]) => delta.value !== 0),
+    ))
 }
 
 async function doLiveIntegration1_1_0(action: Action1_1, ts: Tables): Promise<[string, SavedAction]> {
+    // Set up inputs.
     const parentSet = new Set<string>();
     const inputs: Inputs1_1 = {
         games: {
@@ -389,21 +500,7 @@ async function doLiveIntegration1_1_0(action: Action1_1, ts: Tables): Promise<[s
         }
     }
 
-    // Integrate the action.
-    const result = await integrate1_1Helper(action, inputs);
-    const scUpdate = await (async (): Promise<[Key, NumberValue] | null> => {
-        if (result === null) {
-            return null
-        }
-        const [key, oldGame, newGame] = result;
-        const scDiff = shortCodeDiff(oldGame, newGame)
-        if (scDiff === null) {
-            return null
-        }
-        const [scKey, scDelta] = scDiff;
-        const scCount = await readables.get(inputs.shortCodeUsageCount, [scKey], { value: 0 });
-        return [[scKey], { value: scCount.value + scDelta }];
-    })()
+    const outputs = await integrate1_1MiddleHelper(action, inputs)
 
     // Save the action and metadata.
     const savedAction: SavedAction = { parents: util.sorted(parentSet), action }
@@ -411,17 +508,65 @@ async function doLiveIntegration1_1_0(action: Action1_1, ts: Tables): Promise<[s
 
     ts.actions.set([actionId], savedAction);
     ts.actionTableMetadata.set([actionId, 'state-1.1.0'], { valid: true });
-    if (result !== null) {
-        const [key, , newGame] = result;
-        ts.state1_1_0_games.set([actionId, ...key], newGame);
-        ts.state1_1_0_games_symlinks.set(key, { actionId, value: newGame });
+    for (const change of outputs.games) {
+        switch (change.kind) {
+            case 'set':
+                ts.state1_1_0_games.set([actionId, ...change.key], change.value);
+                ts.state1_1_0_games_symlinks.set(change.key, { actionId, value: change.value });
+                break;
+            case 'delete':
+                ts.state1_1_0_games.delete([actionId, ...change.key]);
+                ts.state1_1_0_games_symlinks.set(change.key, { actionId, value: null });
+                break;
+        }
     }
-    if (scUpdate !== null) {
-        const [scKey, newCount] = scUpdate;
-        ts.state1_1_0_shortCodeUsageCount.set([actionId, ...scKey], newCount);
-        ts.state1_1_0_shortCodeUsageCount_symlinks.set(scKey, { actionId, value: newCount });
+    for (const change of outputs.shortCodeUsageCount) {
+        switch (change.kind) {
+            case 'set':
+                ts.state1_1_0_shortCodeUsageCount.set([actionId, ...change.key], change.value);
+                ts.state1_1_0_shortCodeUsageCount_symlinks.set(change.key, { actionId, value: change.value });
+                break;
+            case 'delete':
+                ts.state1_1_0_shortCodeUsageCount.delete([actionId, ...change.key]);
+                ts.state1_1_0_shortCodeUsageCount_symlinks.set(change.key, { actionId, value: null });
+                break;
+        }
     }
     return [actionId, savedAction]
+}
+
+
+
+export function diffToChange<T>(d: Diff<T>): Change<T> {
+    switch (d.kind) {
+        case 'add':
+            return {
+                kind: 'set',
+                key: d.key,
+                value: d.value,
+            }
+        case 'replace':
+            return {
+                kind: 'set',
+                key: d.key,
+                value: d.newValue,
+            }
+        case 'delete':
+            return {
+                kind: 'delete',
+                key: d.key,
+            }
+    }
+}
+
+
+export type Change<V> = {
+    key: string[]
+    kind: 'set'
+    value: V
+} | {
+    key: string[]
+    kind: 'delete'
 }
 
 
@@ -451,34 +596,35 @@ async function replayIntegration1_1_0(actionId: string, savedAction: SavedAction
     }
 
     // Integrate the action.
-    const result = await integrate1_1Helper(upgradeAction(savedAction.action), inputs);
-    const scUpdate = await (async (): Promise<[Key, NumberValue] | null> => {
-        if (result === null) {
-            return null
-        }
-        const [key, oldGame, newGame] = result;
-        const scDiff = shortCodeDiff(oldGame, newGame)
-        if (scDiff === null) {
-            return null
-        }
-        const [scKey, scDelta] = scDiff;
-        const scCount = await readables.get(inputs.shortCodeUsageCount, [scKey], { value: 0 });
-        return [[scKey], { value: scCount.value + scDelta }];
-    })()
+    const outputs = await integrate1_1MiddleHelper(upgradeAction(savedAction.action), inputs)
 
     // Save the metadata.
     ts.actionTableMetadata.set([actionId, 'state-1.1.0'], { valid: true });
 
     // ... and the data.
-    if (result !== null) {
-        const [key, , newGame] = result;
-        ts.state1_1_0_games.set([actionId, ...key], newGame);
-        ts.state1_1_0_games_symlinks.set(key, { actionId, value: newGame });
+    for (const change of outputs.games) {
+        switch (change.kind) {
+            case 'set':
+                ts.state1_1_0_games.set([actionId, ...change.key], change.value);
+                ts.state1_1_0_games_symlinks.set(change.key, { actionId, value: change.value });
+                break;
+            case 'delete':
+                ts.state1_1_0_games.delete([actionId, ...change.key]);
+                ts.state1_1_0_games_symlinks.set(change.key, { actionId, value: null });
+                break;
+        }
     }
-    if (scUpdate !== null) {
-        const [scKey, newCount] = scUpdate;
-        ts.state1_1_0_shortCodeUsageCount.set([actionId, ...scKey], newCount);
-        ts.state1_1_0_shortCodeUsageCount_symlinks.set(scKey, { actionId, value: newCount });
+    for (const change of outputs.shortCodeUsageCount) {
+        switch (change.kind) {
+            case 'set':
+                ts.state1_1_0_shortCodeUsageCount.set([actionId, ...change.key], change.value);
+                ts.state1_1_0_shortCodeUsageCount_symlinks.set(change.key, { actionId, value: change.value });
+                break;
+            case 'delete':
+                ts.state1_1_0_shortCodeUsageCount.delete([actionId, ...change.key]);
+                ts.state1_1_0_shortCodeUsageCount_symlinks.set(change.key, { actionId, value: null });
+                break;
+        }
     }
 }
 
