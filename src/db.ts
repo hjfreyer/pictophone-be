@@ -69,15 +69,21 @@ class FSTable<T> {
     }
 
     set(key: Key, value: T): void {
-        assert.equal(key.length, this.schema.length,
-            `Invalid key ${JSON.stringify(key)} has length ${key.length}; want ${this.schema.length}`)
+        this.validateKey(key)
         this.committers.push(() => { this.tx.set(this.getDocReference(key), value) })
     }
 
     delete(key: Key): void {
+        this.validateKey(key)
+        this.committers.push(() => { this.tx.delete(this.getDocReference(key)) })
+    }
+
+    private validateKey(key: Key): void {
         assert.equal(key.length, this.schema.length,
             `Invalid key ${JSON.stringify(key)} has length ${key.length}; want ${this.schema.length}`)
-        this.committers.push(() => { this.tx.delete(this.getDocReference(key)) })
+        if (key.some(segment => segment === "")) {
+            throw new Error(`Key ${JSON.stringify(key)} has an empty segment, which is not allowed`)
+        }
     }
 
     commit(): void {

@@ -6,7 +6,7 @@ import { Dictionary, Request } from 'express-serve-static-core'
 import admin from 'firebase-admin'
 import uuid from 'uuid/v1'
 import GetConfig from './config'
-import { Action1_1, AnyAction, Action1_0, Game1_0, Game1_1, TaggedGame1_0, TaggedGame1_1, SavedAction, Symlink, ActionTableMetadata, NumberValue } from './model'
+import { Action1_1, AnyAction, Action1_0, Game1_0, Game1_1, TaggedGame1_0, SavedAction, ActionTableMetadata, NumberValue } from './model'
 import { validate as validateModel } from './model/index.validator'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
@@ -113,14 +113,12 @@ function upgradeAction(action: AnyAction): Action1_1 {
 
 function doAction(fsDb: FirebaseFirestore.Firestore, body: unknown): Promise<void> {
     const anyAction = validateModel('AnyAction')(body)
-    // // const action = upgradeAction(anyAction)
 
     return db.runTransaction(fsDb, async (db: db.Database): Promise<void> => {
         const ts = openAll(db);
         const [actionId, savedAction] = await doLiveIntegration1_1_0(upgradeAction(anyAction), ts);
     })
 }
-
 
 app.options('/action', cors())
 app.post('/action', cors(), function(req: Request<Dictionary<string>>, res, next) {
@@ -144,12 +142,8 @@ app.use('/batch', batch())
 type Tables = {
     actions: db.Table<SavedAction>
     actionTableMetadata: db.Table<ActionTableMetadata>
-    state1_0_0_games: db.Table<Game1_0>
-    state1_0_0_games_symlinks: db.Table<Symlink>
-    state1_1_0_games: db.Table<Game1_1>
-    state1_1_0_games_symlinks: db.Table<Symlink>
-    state1_1_0_shortCodeUsageCount: db.Table<NumberValue>
-    state1_1_0_shortCodeUsageCount_symlinks: db.Table<Symlink>
+    state1_1_0_games: db.Table<Live<Game1_1>>
+    state1_1_0_shortCodeUsageCount: db.Table<Live<NumberValue>>
 }
 
 function openAll(db: db.Database): Tables {
@@ -162,32 +156,27 @@ function openAll(db: db.Database): Tables {
             schema: ['actions', '_META_'],
             validator: validateModel('ActionTableMetadata')
         }),
-        state1_0_0_games: db.open({
-            schema: ['actions', 'state-1.0.0-games'],
-            validator: validateModel('Game1_0')
-        }),
-        state1_0_0_games_symlinks: db.open({
-            schema: ['state-1.0.0-games-symlinks'],
-            validator: validateModel('Symlink')
-        }),
         state1_1_0_games: db.open({
-            schema: ['actions', 'state-1.1.0-games'],
-            validator: validateModel('Game1_1')
-        }),
-        state1_1_0_games_symlinks: db.open({
-            schema: ['state-1.1.0-games-symlinks'],
-            validator: validateModel('Symlink')
+            schema: ['state-1.1.0-games'],
+            validator: validateLive(validateModel('Game1_1'))
         }),
         state1_1_0_shortCodeUsageCount: db.open({
-            schema: ['actions', 'state-1.1.0-scuc'],
-            validator: validateModel('NumberValue')
-        }),
-        state1_1_0_shortCodeUsageCount_symlinks: db.open({
-            schema: ['state-1.1.0-scuc-symlinks'],
-            validator: validateModel('Symlink')
+            schema: ['state-1.1.0-scuc'],
+            validator: validateLive(validateModel('NumberValue'))
         }),
     }
 }
+
+function validateLive<T>(validator: (u: unknown) => T): (u: unknown) => Live<T> {
+    return (outerUnknown: unknown): Live<T> => {
+        const outer = validateModel('LiveUnknown')(outerUnknown)
+        if (outer.value === null) {
+            return { actionId: outer.actionId, value: null };
+        }
+        return { actionId: outer.actionId, value: validator(outer.value) }
+    }
+}
+
 
 function nestedActionTable<T>(table: db.Table<T>, actionId: string): db.Table<T> {
     return {
@@ -273,9 +262,6 @@ function defaultGame1_1(): Game1_1 {
         state: 'UNCREATED'
     }
 }
-function defaultMetadata(): ActionTableMetadata {
-    return { valid: false }
-}
 
 function integrate1_0Helper(a: Action1_0, game: Game1_0): (Game1_0 | null) {
     switch (a.kind) {
@@ -312,6 +298,71 @@ type Inputs1_1 = {
 type Outputs1_1 = {
     games: Change<Game1_1>[]
     shortCodeUsageCount: Change<NumberValue>[]
+}
+
+function getTrackedInputs1_1(ts: Tables): [Set<string>, Inputs1_1] {
+    const parentSet = new Set<string>();
+    const inputs: Inputs1_1 = {
+        games: {
+            schema: ts.state1_1_0_games.schema,
+            read(range: Range): ItemIterable<Game1_1> {
+                const links = ixa.from(ts.state1_1_0_games.read(range))
+                return links.pipe(
+                    ixaop.tap(([, { actionId }]) => { parentSet.add(actionId) }),
+                    ixaop.flatMap(([key, { value }]: Item<Live<Game1_1>>): ItemIterable<Game1_1> =>
+                        value !== null ? ixa.of([key, value]) : ixa.empty())
+                )
+            }
+        },
+        shortCodeUsageCount: {
+            schema: ts.state1_1_0_shortCodeUsageCount.schema,
+            read(range: Range): ItemIterable<NumberValue> {
+                const links = ixa.from(ts.state1_1_0_shortCodeUsageCount.read(range))
+                return links.pipe(
+                    ixaop.tap(([, { actionId }]) => { parentSet.add(actionId) }),
+                    ixaop.flatMap(([key, { value }]: Item<Live<NumberValue>>): ItemIterable<NumberValue> =>
+                        value !== null ? ixa.of([key, value]) : ixa.empty())
+                )
+            }
+        }
+    }
+    return [parentSet, inputs]
+}
+
+function applyOutputs1_1(ts: Tables, actionId: string, outputs: Outputs1_1): void {
+    ts.actionTableMetadata.set([actionId, 'state-1.1.0'], getChangelog(outputs));
+    for (const change of outputs.games) {
+        switch (change.kind) {
+            case 'set':
+                ts.state1_1_0_games.set(change.key, { actionId, value: change.value });
+                break;
+            case 'delete':
+                ts.state1_1_0_games.set(change.key, { actionId, value: null });
+                break;
+        }
+    }
+    for (const change of outputs.shortCodeUsageCount) {
+        switch (change.kind) {
+            case 'set':
+                ts.state1_1_0_shortCodeUsageCount.set(change.key, { actionId, value: change.value });
+                break;
+            case 'delete':
+                ts.state1_1_0_shortCodeUsageCount.set(change.key, { actionId, value: null });
+                break;
+        }
+    }
+}
+
+function getChangelog(outputs: Outputs1_1): ActionTableMetadata {
+    return {
+        tables: [{
+            schema: ['state-1.1.0-games-symlinks'],
+            changes: outputs.games,
+        }, {
+            schema: ['state-1.1.0-scuc-symlinks'],
+            changes: outputs.shortCodeUsageCount,
+        }]
+    }
 }
 
 async function integrate1_1MiddleHelper(a: Action1_1, inputs: Inputs1_1): Promise<Outputs1_1> {
@@ -414,7 +465,7 @@ function integrate1_1SCUCs(as: Item<NumberValue>[], inputs: Inputs1_1): Promise<
 }
 
 function mapShortCode(game: Game1_1): Item<NumberValue>[] {
-    if (game.state !== 'CREATED') {
+    if (game.state !== 'CREATED' || game.shortCode === '') {
         return []
     }
     return [[[game.shortCode], { value: 1 }]]
@@ -474,32 +525,9 @@ function shortCodeDiffAggregate(diffs: Diff<NumberValue>[]): Item<NumberValue>[]
 
 async function doLiveIntegration1_1_0(action: Action1_1, ts: Tables): Promise<[string, SavedAction]> {
     // Set up inputs.
-    const parentSet = new Set<string>();
-    const inputs: Inputs1_1 = {
-        games: {
-            schema: ['state-1.1.0-games'],
-            read(range: Range): ItemIterable<Game1_1> {
-                const links = ixa.from(ts.state1_1_0_games_symlinks.read(range))
-                return links.pipe(
-                    ixaop.tap(([, link]) => { parentSet.add(link.actionId) }),
-                    ixaop.flatMap(([key, link]) =>
-                        ts.state1_1_0_games.read(ranges.singleValue([link.actionId, ...key])))
-                )
-            }
-        },
-        shortCodeUsageCount: {
-            schema: ['state-1.1.0-scuc'],
-            read(range: Range): ItemIterable<NumberValue> {
-                const links = ixa.from(ts.state1_1_0_shortCodeUsageCount_symlinks.read(range))
-                return links.pipe(
-                    ixaop.tap(([, link]) => { parentSet.add(link.actionId) }),
-                    ixaop.flatMap(([key, link]) =>
-                        ts.state1_1_0_shortCodeUsageCount.read(ranges.singleValue([link.actionId, ...key])))
-                )
-            }
-        }
-    }
+    const [parentSet, inputs] = getTrackedInputs1_1(ts);
 
+    // Get outputs.
     const outputs = await integrate1_1MiddleHelper(action, inputs)
 
     // Save the action and metadata.
@@ -507,35 +535,11 @@ async function doLiveIntegration1_1_0(action: Action1_1, ts: Tables): Promise<[s
     const actionId = getActionId(savedAction)
 
     ts.actions.set([actionId], savedAction);
-    ts.actionTableMetadata.set([actionId, 'state-1.1.0'], { valid: true });
-    for (const change of outputs.games) {
-        switch (change.kind) {
-            case 'set':
-                ts.state1_1_0_games.set([actionId, ...change.key], change.value);
-                ts.state1_1_0_games_symlinks.set(change.key, { actionId, value: change.value });
-                break;
-            case 'delete':
-                ts.state1_1_0_games.delete([actionId, ...change.key]);
-                ts.state1_1_0_games_symlinks.set(change.key, { actionId, value: null });
-                break;
-        }
-    }
-    for (const change of outputs.shortCodeUsageCount) {
-        switch (change.kind) {
-            case 'set':
-                ts.state1_1_0_shortCodeUsageCount.set([actionId, ...change.key], change.value);
-                ts.state1_1_0_shortCodeUsageCount_symlinks.set(change.key, { actionId, value: change.value });
-                break;
-            case 'delete':
-                ts.state1_1_0_shortCodeUsageCount.delete([actionId, ...change.key]);
-                ts.state1_1_0_shortCodeUsageCount_symlinks.set(change.key, { actionId, value: null });
-                break;
-        }
-    }
+
+    applyOutputs1_1(ts, actionId, outputs)
+
     return [actionId, savedAction]
 }
-
-
 
 export function diffToChange<T>(d: Diff<T>): Change<T> {
     switch (d.kind) {
@@ -559,7 +563,6 @@ export function diffToChange<T>(d: Diff<T>): Change<T> {
     }
 }
 
-
 export type Change<V> = {
     key: string[]
     kind: 'set'
@@ -569,63 +572,41 @@ export type Change<V> = {
     kind: 'delete'
 }
 
+export interface Live<T> {
+    actionId: string
+    value: T | null
+}
 
 // TODO: these replays need to delete any errant orphans.
 
 async function replayIntegration1_1_0(actionId: string, savedAction: SavedAction, ts: Tables): Promise<void> {
-    const meta = await readables.get(ts.actionTableMetadata, [actionId, 'state-1.1.0'], defaultMetadata());
-    if (meta.valid) {
+    const meta = await readables.get(ts.actionTableMetadata, [actionId, 'state-1.1.0'], null);
+    if (meta !== null) {
         // Already done.
         return;
     }
 
     const parentMetas = ixa.from(savedAction.parents).pipe(
-        ixaop.map(p => readables.get(ts.actionTableMetadata, [p, 'state-1.1.0'], defaultMetadata())),
+        ixaop.map(p => readables.get(ts.actionTableMetadata, [p, 'state-1.1.0'], null)),
     )
 
-    if (await ixa.some(parentMetas, meta => !meta.valid)) {
+    if (await ixa.some(parentMetas, meta => meta === null)) {
         return;
     }
 
-    const parentsGames = savedAction.parents.map(p => nestedActionTable(ts.state1_1_0_games, p))
-    const parentsScuc = savedAction.parents.map(p => nestedActionTable(ts.state1_1_0_shortCodeUsageCount, p))
-
-    const inputs: Inputs1_1 = {
-        games: readables.merge(['state-1.1.0-games'], parentsGames),
-        shortCodeUsageCount: readables.merge(['state-1.1.0-scuc'], parentsScuc),
-    }
+    // Set up inputs.
+    const [parentSet, inputs] = getTrackedInputs1_1(ts);
 
     // Integrate the action.
     const outputs = await integrate1_1MiddleHelper(upgradeAction(savedAction.action), inputs)
 
-    // Save the metadata.
-    ts.actionTableMetadata.set([actionId, 'state-1.1.0'], { valid: true });
+    for (const usedParent of parentSet) {
+        if (savedAction.parents.indexOf(usedParent) === -1) {
+            throw new Error("tried to access state not specified by a parent")
+        }
+    }
 
-    // ... and the data.
-    for (const change of outputs.games) {
-        switch (change.kind) {
-            case 'set':
-                ts.state1_1_0_games.set([actionId, ...change.key], change.value);
-                ts.state1_1_0_games_symlinks.set(change.key, { actionId, value: change.value });
-                break;
-            case 'delete':
-                ts.state1_1_0_games.delete([actionId, ...change.key]);
-                ts.state1_1_0_games_symlinks.set(change.key, { actionId, value: null });
-                break;
-        }
-    }
-    for (const change of outputs.shortCodeUsageCount) {
-        switch (change.kind) {
-            case 'set':
-                ts.state1_1_0_shortCodeUsageCount.set([actionId, ...change.key], change.value);
-                ts.state1_1_0_shortCodeUsageCount_symlinks.set(change.key, { actionId, value: change.value });
-                break;
-            case 'delete':
-                ts.state1_1_0_shortCodeUsageCount.delete([actionId, ...change.key]);
-                ts.state1_1_0_shortCodeUsageCount_symlinks.set(change.key, { actionId, value: null });
-                break;
-        }
-    }
+    applyOutputs1_1(ts, actionId, outputs)
 }
 
 async function replay(): Promise<{}> {
@@ -699,6 +680,24 @@ async function deleteMeta({ collectionId }: DeleteMetaRequest): Promise<void> {
     })
 }
 
+
+type DeleteCollectionRequest = {
+    collectionId: string
+}
+
+async function deleteCollection({ collectionId }: DeleteCollectionRequest): Promise<void> {
+    switch (collectionId) {
+        case 'state-1.1.0':
+            await deleteMeta({ collectionId: 'state-1.1.0' })
+            await deleteTable({ tableId: 'state1_1_0_games' })
+            await deleteTable({ tableId: 'state1_1_0_shortCodeUsageCount' })
+            break
+        default:
+            throw new Error("invalid option")
+    }
+}
+
+
 function batch(): Router {
     const res = Router()
 
@@ -725,14 +724,8 @@ function batch(): Router {
     //     }).catch(next)
     // })
 
-    res.post('/delete/:tableId', function(req: Request<DeleteRequest>, res, next) {
-        deleteTable(req.params).then(result => {
-            res.status(200)
-            res.json(result)
-        }).catch(next)
-    })
-    res.post('/delete-meta/:collectionId', function(req: Request<DeleteMetaRequest>, res, next) {
-        deleteMeta(req.params).then(result => {
+    res.post('/delete/:collectionId', function(req: Request<DeleteCollectionRequest>, res, next) {
+        deleteCollection(req.params).then(result => {
             res.status(200)
             res.json(result)
         }).catch(next)
