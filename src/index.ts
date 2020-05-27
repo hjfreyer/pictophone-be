@@ -76,7 +76,6 @@ export function getActionId(action: SavedAction): string {
     return serializeActionId(now, hashHex);
 }
 
-
 const MAX_POINTS = 50_000
 
 async function doUpload(body: unknown): Promise<UploadResponse> {
@@ -191,105 +190,11 @@ function validateLive<T>(validator: (u: unknown) => T): (u: unknown) => Live<T> 
     }
 }
 
-
-function nestedActionTable<T>(table: db.Table<T>, actionId: string): db.Table<T> {
-    return {
-        schema: table.schema.slice(1),
-        read(innerRange: Range): ItemIterable<T> {
-            const outerRange = ((): Range => {
-                if (innerRange.kind == 'bounded') {
-                    return ranges.bounded([actionId, ...innerRange.start], [actionId, ...innerRange.end])
-                } else {
-                    return ranges.bounded([actionId, ...innerRange.start],
-                        [...ranges.keySuccessor([actionId]), ...table.schema.slice(1).map(() => '')])
-                }
-            })();
-
-            return ixa.from(table.read(outerRange))
-                .pipe(ixaop.map(([k, v]) => [k.slice(1), v]))
-        },
-
-        set(key: Key, value: T): void {
-            throw "unimpl"
-        },
-
-        delete(key: Key): void {
-            throw "unimpl"
-        }
-    }
-}
-
-// function nestedTableReadable<T>(actionReadable: Readable<T>, actionId: string): Readable<T> {
-
-// }
-
-
-// function compareIterableAndReadable<T>(listExpected: ItemIterable<T>, 
-//     isKeyExpected: (key: Key) => Promise<boolean>, 
-//     actual: Readable<T>): AsyncIterable<Diff<T>> {
-//     const diffs = ixa.from(listExpected)
-//         .pipe(flatMap(async ([key, expectedValue]): Promise<AsyncIterable<Diff<T>>> => {
-//             const actualValue = await readables.get(actual, key, null);
-//             if (actualValue === null) {
-//                 return of({
-//                     kind: 'add',
-//                     key,
-//                     value: expectedValue,
-//                 })
-//             } else if (!deepEqual(expectedValue, actualValue)) {
-//                 return of({
-//                     kind: 'replace',
-//                     key,
-//                     oldValue: actualValue,
-//                     newValue: expectedValue,
-//                 })
-//             } else {
-//                 return of();
-//             }
-//         }));
-
-//     const orphans = ixa.from(readables.readAll(actual))
-//         .pipe(flatMap(async ([key, actualValue]): Promise<AsyncIterable<Diff<T>>> => {
-//             if (!(await isKeyExpected(key))) {
-//                 return of({
-//                     kind: 'delete',
-//                     key,
-//                     value: actualValue,
-//                 });
-//             } else {
-//                 return of();
-//             }
-//         }));
-
-//     return concat(diffs, orphans);
-// }
-
-
-function defaultGame1_0(): Game1_0 {
-    return {
-        players: [],
-    }
-}
-
 function defaultGame1_1(): Game1_1 {
     return {
         state: 'UNCREATED'
     }
 }
-
-function integrate1_0Helper(a: Action1_0, game: Game1_0): (Game1_0 | null) {
-    switch (a.kind) {
-        case 'join_game':
-            if (game.players.indexOf(a.playerId) !== -1) {
-                return null
-            }
-            return {
-                ...game,
-                players: [...game.players, a.playerId],
-            }
-    }
-}
-
 
 function upgradeAction1_0(a: Action1_0): Action1_1 {
     switch (a.kind) {
@@ -849,7 +754,6 @@ async function deleteMeta({ collectionId }: DeleteMetaRequest): Promise<void> {
     })
 }
 
-
 type DeleteCollectionRequest = {
     collectionId: string
 }
@@ -865,7 +769,6 @@ async function deleteCollection({ collectionId }: DeleteCollectionRequest): Prom
             throw new Error("invalid option")
     }
 }
-
 
 function batch(): Router {
     const res = Router()
