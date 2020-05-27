@@ -340,21 +340,15 @@ async function integrate1_1MiddleHelper(a: Action1_1, inputs: Inputs1_1): Promis
     // Action1_1 + Game state + scuc state => Diffs of Games
     const gameDiffs = await integrate1_1Helper(a, inputs);
 
-    // Diffs of games => Diffs of numbers indexed by short code.
-    const indexedShortCodeDiffs = Array.from(ix.from(gameDiffs).pipe(
-        ixop.flatMap(diff => {
-            if (diff.kind !== 'replace') {
-                throw new Error('wtf')
-            }
-            return shortCodeDiff2(diff.oldValue, diff.newValue)
-        })));
+    // Diffs of games => Diffs of numbers indexed by short code and game.
+    const indexedShortCodeDiffs = diffThroughMapper(mapShortCode, gameDiffs);
 
     // Diff of numbers indexed by short code => effective change
     // to count of each short code.
-    const aggregatedShortCodeDeltas = shortCodeDiffAggregate(indexedShortCodeDiffs)
+    const shortCodeDeltas = combineShortCodeDiffs(indexedShortCodeDiffs)
 
-    // Effective change + scuc state = scuc diffs.
-    const aggregatedShortCodeDiffs = await integrate1_1SCUCs(aggregatedShortCodeDeltas, inputs)
+    // Effective delta + scuc state = scuc diffs.
+    const aggregatedShortCodeDiffs = await integrate1_1SCUCs(shortCodeDeltas, inputs)
 
     return {
         games: gameDiffs,
@@ -440,7 +434,7 @@ async function integrate1_1_1MiddleHelper(a: Action1_1, inputs: Inputs1_1): Prom
 
     return {
         ...outputs1_1,
-        gamesByPlayer: diffGamesByPlayer(outputs1_1.games)
+        gamesByPlayer: diffThroughMapper(gameToGamesByPlayer, outputs1_1.games)
     }
 }
 
@@ -449,10 +443,6 @@ function gameToGamesByPlayer([gameKey, game]: Item<Game1_1>): Item<Game1_1>[] {
         return []
     }
     return util.sorted(game.players).map((playerId): Item<Game1_1> => [[playerId, ...gameKey], game])
-}
-
-function diffGamesByPlayer(diffs: Diff<Game1_1>[]): Diff<Game1_1>[] {
-    return diffThroughMapper(gameToGamesByPlayer, diffs)
 }
 
 interface Mapper<I, O> {
@@ -514,49 +504,17 @@ function singleDiffThroughMapper<I, O>(mapper: Mapper<I, O>, diff: Diff<I>): Dif
 
 }
 
-function mapShortCode(game: Game1_1): Item<NumberValue>[] {
+function mapShortCode([key, game]: Item<Game1_1>): Item<NumberValue>[] {
     if (game.state !== 'CREATED' || game.shortCode === '') {
         return []
     }
-    return [[[game.shortCode], { value: 1 }]]
+    return [[[game.shortCode, ...key], { value: 1 }]]
 }
 
-function shortCodeDiff2(oldGame: Game1_1, newGame: Game1_1): Diff<NumberValue>[] {
-    // Each array must have 0 or 1 items
-    const olds = mapShortCode(oldGame);
-    const news = mapShortCode(newGame);
-    if (olds.length === 0 && news.length === 0) {
-        return []
-    }
-    if (olds.length === 0 && news.length !== 0) {
-        const [key, value] = news[0]
-        return [{ kind: 'add', key, value }]
-    }
-    if (olds.length !== 0 && news.length === 0) {
-        const [key, value] = olds[0]
-        return [{ kind: 'delete', key, value }]
-    }
-    // i.e, olds.length !== 0 && news.length !== 0
-    const [oldKey, oldValue] = olds[0];
-    const [newKey, newValue] = news[0];
-    if (util.lexCompare(oldKey, newKey) === 0) {
-        if (deepEqual(oldValue, newValue)) {
-            return []
-        } else {
-            return [{ kind: 'replace', key: oldKey, oldValue, newValue }]
-        }
-    } else {
-        return [
-            { kind: 'delete', key: oldKey, value: oldValue },
-            { kind: 'add', key: newKey, value: newValue }
-        ]
-
-    }
-}
-
-function shortCodeDiffAggregate(diffs: Diff<NumberValue>[]): Item<NumberValue>[] {
+function combineShortCodeDiffs(diffs: Diff<NumberValue>[]): Item<NumberValue>[] {
     return Array.from(ix.from(diffs).pipe(
         ixop.map((diff: Diff<NumberValue>): [string, number] => {
+            // Strip out gameId and turn the diff into a delta.
             const sc = diff.key[0]
             switch (diff.kind) {
                 case 'add':
@@ -567,6 +525,8 @@ function shortCodeDiffAggregate(diffs: Diff<NumberValue>[]): Item<NumberValue>[]
                     return [sc, diff.newValue.value - diff.oldValue.value]
             }
         }),
+
+        // Combine and drop 0-deltas.
         ixop.groupBy(([sc,]) => sc, ([, delta]) => delta,
             (sc, deltas): Item<NumberValue> => [[sc], { value: ix.sum(deltas) }]),
         ixop.filter(([, delta]) => delta.value !== 0),
