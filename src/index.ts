@@ -174,7 +174,7 @@ function openAll(db: db.Database): Tables {
             validator: validateLive(validateModel('NumberValue'))
         }),
         state1_1_1_gamesByPlayer: db.open({
-            schema: ['players', 'state-1.1.1-games'],
+            schema: ['players', 'state-1.1.1-games-by-player'],
             validator: validateLive(validateModel('Game1_1'))
         }),
     }
@@ -414,19 +414,51 @@ async function integrate1_1Helper(a: Action1_1, inputs: Inputs1_1): Promise<Diff
     }
 }
 
+const SUM_INTEGRATOR: Integrator<NumberValue, NumberValue> = {
+    start: { value: 0 },
+    integrate(key: Key, acc: NumberValue, action: NumberValue): NumberValue {
+        return { value: acc.value + action.value }
+    }
+}
+
 function integrate1_1SCUCs(as: Item<NumberValue>[], inputs: Inputs1_1): Promise<Diff<NumberValue>[]> {
-    return ixa.toArray(ixa.from(as).pipe(
-        ixaop.map(async ([key, delta]): Promise<Diff<NumberValue>> => {
-            const oldValue = await readables.get(inputs.shortCodeUsageCount, key, { value: 0 });
-            const newValue = { value: oldValue.value + delta.value };
-            return {
-                kind: 'replace',
-                key,
-                oldValue,
-                newValue
+    return ixa.toArray(integrate(SUM_INTEGRATOR, inputs.shortCodeUsageCount, as))
+}
+
+interface Integrator<TAction, TAccumulator> {
+    start: TAccumulator
+    integrate(key: Key, acc: TAccumulator, action: TAction): TAccumulator
+}
+
+function integrate<TAction, TAccumulator>(
+    integrator: Integrator<TAction, TAccumulator>,
+    accTable: Readable<TAccumulator>,
+    actions: Item<TAction>[]): AsyncIterable<Diff<TAccumulator>> {
+    return ixa.from(actions).pipe(
+        ixaop.flatMap(async ([key, action]: Item<TAction>): Promise<AsyncIterable<Diff<TAccumulator>>> => {
+            console.log(key, action)
+            const oldAccOrNull = await readables.get(accTable, key, null);
+            const oldAcc = oldAccOrNull !== null ? oldAccOrNull : integrator.start;
+            const newAcc = integrator.integrate(key, oldAcc, action);
+            if (deepEqual(oldAcc, newAcc)) {
+                return ixa.empty();
+            }
+            if (oldAccOrNull === null) {
+                return ixa.of({
+                    kind: 'add',
+                    key,
+                    value: newAcc
+                })
+            } else {
+                return ixa.of({
+                    kind: 'replace',
+                    key,
+                    oldValue: oldAcc,
+                    newValue: newAcc,
+                })
             }
         })
-    ))
+    )
 }
 
 async function integrate1_1_1MiddleHelper(a: Action1_1, inputs: Inputs1_1): Promise<Outputs1_1_1> {
@@ -681,7 +713,7 @@ async function replay(): Promise<{}> {
 }
 
 type DeleteRequest = {
-    tableId: string
+    tableId: keyof Tables
 }
 
 async function deleteTable({ tableId }: DeleteRequest): Promise<void> {
@@ -724,6 +756,12 @@ async function deleteCollection({ collectionId }: DeleteCollectionRequest): Prom
             await deleteMeta({ collectionId: 'state-1.1.0' })
             await deleteTable({ tableId: 'state1_1_0_games' })
             await deleteTable({ tableId: 'state1_1_0_shortCodeUsageCount' })
+            break
+        case 'state-1.1.1':
+            await deleteMeta({ collectionId: 'state-1.1.1' })
+            await deleteTable({ tableId: 'state1_1_1_games' })
+            await deleteTable({ tableId: 'state1_1_1_shortCodeUsageCount' })
+            await deleteTable({ tableId: 'state1_1_1_gamesByPlayer' })
             break
         default:
             throw new Error("invalid option")
