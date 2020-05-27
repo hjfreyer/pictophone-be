@@ -1,5 +1,5 @@
 
-import { Readable, ItemIterable, Range, Key, Item } from './interfaces'
+import { Readable, ItemIterable, Range, Key, Item, Live } from './interfaces'
 import * as ranges from './ranges';
 import * as ixa from "ix/asynciterable"
 import * as ixaop from "ix/asynciterable/operators"
@@ -41,6 +41,19 @@ export function readAllAfter<T>(source: Readable<T>, startAfter: Key): ItemItera
     return source.read(ranges.unbounded(ranges.keySuccessor(startAfter)))
 }
 
+export function tracked<T>(source: Readable<Live<T>>, cb: (actionId: string) => void): Readable<T> {
+    return {
+        schema: source.schema,
+        read(range: Range): ItemIterable<T> {
+                const links = ixa.from(source.read(range))
+                return links.pipe(
+                    ixaop.tap(([, { actionId }]) => cb),
+                    ixaop.flatMap(([key, { value }]: Item<Live<T>>): ItemIterable<T> =>
+                        value !== null ? ixa.of([key, value]) : ixa.empty())
+                )
+            }
+    }
+}
 
 
 // export class Tape<T> implements Readable<T> {

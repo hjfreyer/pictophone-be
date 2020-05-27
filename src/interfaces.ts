@@ -33,3 +33,17 @@ export type Diff<V> = {
     oldValue: V
     newValue: V
 }
+
+export type Change<V> = {
+    key: string[]
+    kind: 'set'
+    value: V
+} | {
+    key: string[]
+    kind: 'delete'
+}
+
+export interface Live<T> {
+    actionId: string
+    value: T | null
+}
