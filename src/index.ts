@@ -348,7 +348,8 @@ async function integrate1_1MiddleHelper(a: Action1_1, inputs: Inputs1_1): Promis
     const shortCodeDeltas = combineShortCodeDiffs(indexedShortCodeDiffs)
 
     // Effective delta + scuc state = scuc diffs.
-    const aggregatedShortCodeDiffs = await integrate1_1SCUCs(shortCodeDeltas, inputs)
+    const aggregatedShortCodeDiffs = await ixa.toArray(
+        reduce(SUM_REDUCER, inputs.shortCodeUsageCount, shortCodeDeltas))
 
     return {
         games: gameDiffs,
@@ -414,32 +415,27 @@ async function integrate1_1Helper(a: Action1_1, inputs: Inputs1_1): Promise<Diff
     }
 }
 
-const SUM_INTEGRATOR: Integrator<NumberValue, NumberValue> = {
+const SUM_REDUCER: Reducer<NumberValue, NumberValue> = {
     start: { value: 0 },
-    integrate(key: Key, acc: NumberValue, action: NumberValue): NumberValue {
+    reduce(_key: Key, acc: NumberValue, action: NumberValue): NumberValue {
         return { value: acc.value + action.value }
     }
 }
 
-function integrate1_1SCUCs(as: Item<NumberValue>[], inputs: Inputs1_1): Promise<Diff<NumberValue>[]> {
-    return ixa.toArray(integrate(SUM_INTEGRATOR, inputs.shortCodeUsageCount, as))
-}
-
-interface Integrator<TAction, TAccumulator> {
+interface Reducer<TAction, TAccumulator> {
     start: TAccumulator
-    integrate(key: Key, acc: TAccumulator, action: TAction): TAccumulator
+    reduce(key: Key, acc: TAccumulator, action: TAction): TAccumulator
 }
 
-function integrate<TAction, TAccumulator>(
-    integrator: Integrator<TAction, TAccumulator>,
+function reduce<TAction, TAccumulator>(
+    reducer: Reducer<TAction, TAccumulator>,
     accTable: Readable<TAccumulator>,
     actions: Item<TAction>[]): AsyncIterable<Diff<TAccumulator>> {
     return ixa.from(actions).pipe(
         ixaop.flatMap(async ([key, action]: Item<TAction>): Promise<AsyncIterable<Diff<TAccumulator>>> => {
-            console.log(key, action)
             const oldAccOrNull = await readables.get(accTable, key, null);
-            const oldAcc = oldAccOrNull !== null ? oldAccOrNull : integrator.start;
-            const newAcc = integrator.integrate(key, oldAcc, action);
+            const oldAcc = oldAccOrNull !== null ? oldAccOrNull : reducer.start;
+            const newAcc = reducer.reduce(key, oldAcc, action);
             if (deepEqual(oldAcc, newAcc)) {
                 return ixa.empty();
             }
@@ -533,7 +529,6 @@ function singleDiffThroughMapper<I, O>(mapper: Mapper<I, O>, diff: Diff<I>): Dif
             }
         })
     ))
-
 }
 
 function mapShortCode([key, game]: Item<Game1_1>): Item<NumberValue>[] {
