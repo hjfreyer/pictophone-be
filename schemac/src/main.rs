@@ -1,173 +1,156 @@
-// use serde::Deserialize;
-// use std::io::{self, Read};
-// use std::collections::HashMap;
+use serde::{Deserialize, Serialize};
+use std::io::{self, Read};
 
+#[derive(Serialize, Deserialize, Debug)]
+struct Config {
+    collections: Vec<Collection>,
+}
 
-// #[derive(Deserialize, Debug)]
-// struct Config {
-//     collections : HashMap<String, Collection>,
-// }
+#[derive(Serialize, Deserialize, Debug)]
+struct Collection {
+    id: String,
+    tables: Vec<Table>,
+}
 
-// #[derive(Deserialize, Debug)]
-// struct Collection {
-//     tables : HashMap<String, Table>,
+#[derive(Serialize, Deserialize, Debug)]
+struct Table {
+    id: String,
+    schema: Vec<String>,
+    r#type: String,
 
-// }
+    #[serde(default)]
+    input: bool,
+}
 
-// #[derive(Deserialize, Debug)]
-// struct Table {
-//     schema: Vec<String>,
-//     r#type: String,
-// }
+#[derive(Serialize)]
+struct Context {
+    collections: Vec<String>,
+}
 
-// fn gen<W : std::io::Write>(w : &mut W, config : &Config)-> Result<(), std::io::Error> {
+fn ident_formatter(
+    value: &serde_json::Value,
+    output: &mut String,
+) -> tinytemplate::error::Result<()> {
+    if let serde_json::Value::String(s) = value {
+        tinytemplate::format_unescaped(&serde_json::Value::String(s.replace(".", "_")), output)
+    } else {
+        Err(tinytemplate::error::Error::GenericError {
+            msg: "bad".to_string(),
+        })
+    }
+}
 
-// }
+fn json_formatter(
+    value: &serde_json::Value,
+    output: &mut String,
+) -> tinytemplate::error::Result<()> {
+    output.push_str(&value.to_string());
+    Ok(())
+}
 
-
-fn main() {
-    println!("{}", r#"
-// DON'T EDIT THIS FILE, IT IS AUTO GENERATED
+static TEMPLATE : &'static str = "// DON'T EDIT THIS FILE, IT IS AUTO GENERATED
 
 import * as db from './db'
-import { Live, Diff, Change, Readable } from './interfaces'
+import \\{ Live, Diff, Change, Readable } from './interfaces'
 import * as model from './model'
-import { validate as validateModel } from './model/index.validator'
-import { validateLive, applyChanges, diffToChange } from './schema'
+import \\{ validate as validateModel } from './model/index.validator'
+import \\{ validateLive, applyChanges, diffToChange } from './schema'
 import * as readables from './readables'
 
-export type Tables = {
+export type Tables = \\{
     actions: db.Table<model.SavedAction>
     actionTableMetadata: db.Table<model.ActionTableMetadata>
-    state1_1_0_games: db.Table<Live<model.Game1_1>>
-    state1_1_0_shortCodeUsageCount: db.Table<Live<model.NumberValue>>
-    state1_1_1_games: db.Table<Live<model.Game1_1>>
-    state1_1_1_shortCodeUsageCount: db.Table<Live<model.NumberValue>>
-    state1_1_1_gamesByPlayer: db.Table<Live<model.Game1_1>>
+    {{ for collection in collections -}}
+    {{ for table in collection.tables -}}
+    state{ collection.id | ident}_{table.id}: db.Table<Live<model.{table.type}>>
+    {{ endfor }}
+    {{- endfor }}
 }
 
-export type Inputs1_1_0 = {
-    games: Readable<model.Game1_1>
-    shortCodeUsageCount: Readable<model.NumberValue>
-}
-
-export type Inputs1_1_1 = {
-    games: Readable<model.Game1_1>
-    shortCodeUsageCount: Readable<model.NumberValue>
-}
-
-export type Outputs1_1_0 = {
-    games: Diff<model.Game1_1>[]
-    shortCodeUsageCount: Diff<model.NumberValue>[]
-}
-
-export type Outputs1_1_1 = {
-    games: Diff<model.Game1_1>[]
-    shortCodeUsageCount: Diff<model.NumberValue>[]
-    gamesByPlayer: Diff<model.Game1_1>[]
-}
-
-export function openAll(db: db.Database): Tables {
-    return {
-        actions: db.open({
+export function openAll(db: db.Database): Tables \\{
+    return \\{
+        actions: db.open(\\{
             schema: ['actions'],
             validator: validateModel('SavedAction')
         }),
-        actionTableMetadata: db.open({
+        actionTableMetadata: db.open(\\{
             schema: ['actions', '_META_'],
             validator: validateModel('ActionTableMetadata')
         }),
-        state1_1_0_games: db.open({
-            schema: ['state-1.1.0-games'],
-            validator: validateLive(validateModel('Game1_1'))
+        {{ for collection in collections -}}
+        {{ for table in collection.tables -}}
+        state{ collection.id | ident}_{table.id}: db.open(\\{
+            schema: {table.schema | json},
+            validator: validateLive(validateModel('{table.type}'))
         }),
-        state1_1_0_shortCodeUsageCount: db.open({
-            schema: ['state-1.1.0-scuc'],
-            validator: validateLive(validateModel('NumberValue'))
-        }),
-        state1_1_1_games: db.open({
-            schema: ['state-1.1.1-games'],
-            validator: validateLive(validateModel('Game1_1'))
-        }),
-        state1_1_1_shortCodeUsageCount: db.open({
-            schema: ['state-1.1.1-scuc'],
-            validator: validateLive(validateModel('NumberValue'))
-        }),
-        state1_1_1_gamesByPlayer: db.open({
-            schema: ['players', 'state-1.1.1-games-by-player'],
-            validator: validateLive(validateModel('Game1_1'))
-        }),
+        {{ endfor }}
+        {{- endfor }}
     }
 }
 
-export function getTrackedInputs1_1_0(ts: Tables): [Set<string>, Inputs1_1_0] {
+{{ for collection in collections }}
+// BEGIN {collection.id}
+
+export type Inputs{collection.id | ident} = \\{
+{{- for table in collection.tables -}}
+    {{- if table.input }}
+    { table.id }: Readable<model.{ table.type }>
+    {{- endif -}}
+{{ endfor }}
+}
+
+export function getTrackedInputs{collection.id | ident}(ts: Tables): [Set<string>, Inputs{collection.id | ident}] \\{
     const parentSet = new Set<string>();
-    const track = (actionId: string) => { parentSet.add(actionId) };
-    const inputs: Inputs1_1_0 = {
-        games: readables.tracked(ts.state1_1_0_games, track),
-        shortCodeUsageCount: readables.tracked(ts.state1_1_0_shortCodeUsageCount, track),
+    const track = (actionId: string) => \\{ parentSet.add(actionId) };
+    const inputs: Inputs{collection.id | ident} = \\{
+    {{- for table in collection.tables -}}
+        {{- if table.input }}
+        { table.id }: readables.tracked(ts.state{collection.id | ident}_{table.id}, track),
+        {{- endif -}}
+    {{ endfor }}
     }
     return [parentSet, inputs]
 }
 
-export function getTrackedInputs1_1_1(ts: Tables): [Set<string>, Inputs1_1_1] {
-    const parentSet = new Set<string>();
-    const track = (actionId: string) => { parentSet.add(actionId) };
-    const inputs: Inputs1_1_1 = {
-        games: readables.tracked(ts.state1_1_1_games, track),
-        shortCodeUsageCount: readables.tracked(ts.state1_1_1_shortCodeUsageCount, track)
-    }
-    return [parentSet, inputs]
+export type Outputs{collection.id | ident} = \\{
+{{- for table in collection.tables }}
+    { table.id }: Diff<model.{ table.type }>[]
+{{- endfor }}
 }
 
-export function applyOutputs1_1_0(ts: Tables, actionId: string, outputs: Outputs1_1_0): void {
-    ts.actionTableMetadata.set([actionId, 'state-1.1.0'], getChangelog1_1_0(outputs));
-    applyChanges(ts.state1_1_0_games, actionId, outputs.games.map(diffToChange))
-    applyChanges(ts.state1_1_0_shortCodeUsageCount, actionId, outputs.shortCodeUsageCount.map(diffToChange))
+export function applyOutputs{collection.id | ident}(ts: Tables, actionId: string, outputs: Outputs{collection.id | ident}): void \\{
+    ts.actionTableMetadata.set([actionId, 'state-{collection.id}'], getChangelog{collection.id | ident}(outputs));
+{{- for table in collection.tables }}
+    applyChanges(ts.state{collection.id | ident}_{table.id}, actionId, outputs.{table.id}.map(diffToChange))
+{{- endfor }}
 }
 
-export function applyOutputs1_1_1(ts: Tables, actionId: string, outputs: Outputs1_1_1): void {
-    ts.actionTableMetadata.set([actionId, 'state-1.1.1'], getChangelog1_1_1(ts, outputs));
-    applyChanges(ts.state1_1_1_games, actionId, outputs.games.map(diffToChange))
-    applyChanges(ts.state1_1_1_shortCodeUsageCount, actionId, outputs.shortCodeUsageCount.map(diffToChange))
-    applyChanges(ts.state1_1_1_gamesByPlayer, actionId, outputs.gamesByPlayer.map(diffToChange))
-}
-
-function getChangelog1_1_0(outputs: Outputs1_1_0): model.ActionTableMetadata {
-    return {
-        tables: [{
-            schema: ['state-1.1.0-games-symlinks'],
-            changes: outputs.games.map(diffToChange),
-        }, {
-            schema: ['state-1.1.0-scuc-symlinks'],
-            changes: outputs.shortCodeUsageCount.map(diffToChange),
-        }]
+function getChangelog{collection.id | ident}(outputs: Outputs{collection.id | ident}): model.ActionTableMetadata \\{
+    return \\{
+        tables: [
+        {{- for table in collection.tables }}
+            \\{
+                schema: {table.schema | json},
+                changes: outputs.{table.id}.map(diffToChange),
+            },
+        {{- endfor }}
+        ]
     }
 }
 
-function getChangelog1_1_1(ts: Tables, outputs: Outputs1_1_1): model.ActionTableMetadata {
-    return {
-        tables: [{
-            schema: ts.state1_1_1_games.schema,
-            changes: outputs.games.map(diffToChange),
-        }, {
-            schema: ts.state1_1_1_shortCodeUsageCount.schema,
-            changes: outputs.shortCodeUsageCount.map(diffToChange),
-        }, {
-            schema: ts.state1_1_1_gamesByPlayer.schema,
-            changes: outputs.gamesByPlayer.map(diffToChange),
-        }]
-    }
-}
+// END {collection.id}
+{{ endfor }}
 
-
-export async function deleteCollection(runner: db.TxRunner, collectionId: string): Promise<void> {
-    switch (collectionId) {
-        case 'state-1.1.0':
-            await deleteMeta(runner, 'state-1.1.0')
-            await deleteTable(runner, 'state1_1_0_games')
-            await deleteTable(runner, 'state1_1_0_shortCodeUsageCount')
-            break
+export async function deleteCollection(runner: db.TxRunner, collectionId: string): Promise<void> \\{
+    switch (collectionId) \\{
+    {{ for collection in collections }}
+        case 'state-{collection.id}':
+            await deleteMeta(runner, 'state-{collection.id}')
+        {{ for table in collection.tables }}
+            await deleteTable(runner, 'state{collection.id | ident}_{table.id}')
+        {{- endfor }}
+            break;
+    {{- endfor }}
         case 'state-1.1.1':
             await deleteMeta(runner, 'state-1.1.1')
             await deleteTable(runner, 'state1_1_1_games')
@@ -175,64 +158,48 @@ export async function deleteCollection(runner: db.TxRunner, collectionId: string
             await deleteTable(runner, 'state1_1_1_gamesByPlayer')
             break
         default:
-            throw new Error("invalid option")
+            throw new Error('invalid option')
     }
 }
 
-async function deleteTable(runner: db.TxRunner, tableId: keyof Tables): Promise<void> {
-    if (tableId === 'actions') {
+async function deleteTable(runner: db.TxRunner, tableId: keyof Tables): Promise<void> \\{
+    if (tableId === 'actions') \\{
         throw new Error('nope')
     }
-    await runner(async (db: db.Database): Promise<void> => {
+    await runner(async (db: db.Database): Promise<void> => \\{
         const ts = openAll(db);
-        if (!(tableId in ts)) {
-            throw new Error(`no such table: "${tableId}"`)
+        if (!(tableId in ts)) \\{
+            throw new Error(`no such table: '$\\{tableId}'`)
         }
         const table: db.Table<unknown> = ts[tableId as keyof typeof ts];
-        for await (const [k,] of readables.readAll(table)) {
+        for await (const [k,] of readables.readAll(table)) \\{
             table.delete(k)
         }
     })
 }
 
-async function deleteMeta(runner: db.TxRunner, collectionId: string): Promise<void> {
-    await runner(async (db: db.Database): Promise<void> => {
+async function deleteMeta(runner: db.TxRunner, collectionId: string): Promise<void> \\{
+    await runner(async (db: db.Database): Promise<void> => \\{
         const ts = openAll(db);
-        for await (const [k,] of readables.readAll(ts.actionTableMetadata)) {
-            if (k[k.length - 1] === collectionId) {
+        for await (const [k,] of readables.readAll(ts.actionTableMetadata)) \\{
+            if (k[k.length - 1] === collectionId) \\{
                 ts.actionTableMetadata.delete(k)
             }
         }
     })
 }
-"#)
+";
+
+fn main() {
+    let mut buffer = String::new();
+    io::stdin().read_to_string(&mut buffer).unwrap();
+
+    let config: Config = serde_yaml::from_str(&buffer).unwrap();
+    let mut tt = tinytemplate::TinyTemplate::new();
+    tt.add_template("hello", TEMPLATE).unwrap();
+    tt.add_formatter("ident", ident_formatter);
+    tt.add_formatter("json", json_formatter);
+
+    let rendered = tt.render("hello", &config).unwrap();
+    println!("{}", rendered);
 }
-
-
-
-// #[derive(Debug)]
-// enum Error {
-//     Io(std::io::Error),
-//     Parse(toml::de::Error),
-// }
-
-// impl From<std::io::Error> for Error {
-//     fn from(e: std::io::Error) -> Self {
-//         Error::Io(e)
-//     }
-// }
-
-// impl From<toml::de::Error> for Error {
-//     fn from(e: toml::de::Error) -> Self {
-//         Error::Parse(e)
-//     }
-// }
-
-// fn main() -> Result<(), Error> {
-//     let mut buffer = String::new();
-//     io::stdin().read_to_string(&mut buffer)?;
-
-//     let config: Config = toml::from_str(&buffer)?;
-//     gen(&mut io::stdout(), &config)?;
-//     Ok(())
-// }

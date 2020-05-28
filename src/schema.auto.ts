@@ -1,4 +1,3 @@
-
 // DON'T EDIT THIS FILE, IT IS AUTO GENERATED
 
 import * as db from './db'
@@ -16,27 +15,7 @@ export type Tables = {
     state1_1_1_games: db.Table<Live<model.Game1_1>>
     state1_1_1_shortCodeUsageCount: db.Table<Live<model.NumberValue>>
     state1_1_1_gamesByPlayer: db.Table<Live<model.Game1_1>>
-}
-
-export type Inputs1_1_0 = {
-    games: Readable<model.Game1_1>
-    shortCodeUsageCount: Readable<model.NumberValue>
-}
-
-export type Inputs1_1_1 = {
-    games: Readable<model.Game1_1>
-    shortCodeUsageCount: Readable<model.NumberValue>
-}
-
-export type Outputs1_1_0 = {
-    games: Diff<model.Game1_1>[]
-    shortCodeUsageCount: Diff<model.NumberValue>[]
-}
-
-export type Outputs1_1_1 = {
-    games: Diff<model.Game1_1>[]
-    shortCodeUsageCount: Diff<model.NumberValue>[]
-    gamesByPlayer: Diff<model.Game1_1>[]
+    
 }
 
 export function openAll(db: db.Database): Tables {
@@ -50,26 +29,35 @@ export function openAll(db: db.Database): Tables {
             validator: validateModel('ActionTableMetadata')
         }),
         state1_1_0_games: db.open({
-            schema: ['state-1.1.0-games'],
+            schema: ["state-1.1.0-games"],
             validator: validateLive(validateModel('Game1_1'))
         }),
         state1_1_0_shortCodeUsageCount: db.open({
-            schema: ['state-1.1.0-scuc'],
+            schema: ["state-1.1.0-scuc"],
             validator: validateLive(validateModel('NumberValue'))
         }),
         state1_1_1_games: db.open({
-            schema: ['state-1.1.1-games'],
+            schema: ["state-1.1.1-games"],
             validator: validateLive(validateModel('Game1_1'))
         }),
         state1_1_1_shortCodeUsageCount: db.open({
-            schema: ['state-1.1.1-scuc'],
+            schema: ["state-1.1.1-scuc"],
             validator: validateLive(validateModel('NumberValue'))
         }),
         state1_1_1_gamesByPlayer: db.open({
-            schema: ['players', 'state-1.1.1-games-by-player'],
+            schema: ["players","state-1.1.1-games-by-player"],
             validator: validateLive(validateModel('Game1_1'))
         }),
+        
     }
+}
+
+
+// BEGIN 1.1.0
+
+export type Inputs1_1_0 = {
+    games: Readable<model.Game1_1>
+    shortCodeUsageCount: Readable<model.NumberValue>
 }
 
 export function getTrackedInputs1_1_0(ts: Tables): [Set<string>, Inputs1_1_0] {
@@ -82,14 +70,9 @@ export function getTrackedInputs1_1_0(ts: Tables): [Set<string>, Inputs1_1_0] {
     return [parentSet, inputs]
 }
 
-export function getTrackedInputs1_1_1(ts: Tables): [Set<string>, Inputs1_1_1] {
-    const parentSet = new Set<string>();
-    const track = (actionId: string) => { parentSet.add(actionId) };
-    const inputs: Inputs1_1_1 = {
-        games: readables.tracked(ts.state1_1_1_games, track),
-        shortCodeUsageCount: readables.tracked(ts.state1_1_1_shortCodeUsageCount, track)
-    }
-    return [parentSet, inputs]
+export type Outputs1_1_0 = {
+    games: Diff<model.Game1_1>[]
+    shortCodeUsageCount: Diff<model.NumberValue>[]
 }
 
 export function applyOutputs1_1_0(ts: Tables, actionId: string, outputs: Outputs1_1_0): void {
@@ -98,48 +81,91 @@ export function applyOutputs1_1_0(ts: Tables, actionId: string, outputs: Outputs
     applyChanges(ts.state1_1_0_shortCodeUsageCount, actionId, outputs.shortCodeUsageCount.map(diffToChange))
 }
 
+function getChangelog1_1_0(outputs: Outputs1_1_0): model.ActionTableMetadata {
+    return {
+        tables: [
+            {
+                schema: ["state-1.1.0-games"],
+                changes: outputs.games.map(diffToChange),
+            },
+            {
+                schema: ["state-1.1.0-scuc"],
+                changes: outputs.shortCodeUsageCount.map(diffToChange),
+            },
+        ]
+    }
+}
+
+// END 1.1.0
+
+// BEGIN 1.1.1
+
+export type Inputs1_1_1 = {
+    games: Readable<model.Game1_1>
+    shortCodeUsageCount: Readable<model.NumberValue>
+}
+
+export function getTrackedInputs1_1_1(ts: Tables): [Set<string>, Inputs1_1_1] {
+    const parentSet = new Set<string>();
+    const track = (actionId: string) => { parentSet.add(actionId) };
+    const inputs: Inputs1_1_1 = {
+        games: readables.tracked(ts.state1_1_1_games, track),
+        shortCodeUsageCount: readables.tracked(ts.state1_1_1_shortCodeUsageCount, track),
+    }
+    return [parentSet, inputs]
+}
+
+export type Outputs1_1_1 = {
+    games: Diff<model.Game1_1>[]
+    shortCodeUsageCount: Diff<model.NumberValue>[]
+    gamesByPlayer: Diff<model.Game1_1>[]
+}
+
 export function applyOutputs1_1_1(ts: Tables, actionId: string, outputs: Outputs1_1_1): void {
-    ts.actionTableMetadata.set([actionId, 'state-1.1.1'], getChangelog1_1_1(ts, outputs));
+    ts.actionTableMetadata.set([actionId, 'state-1.1.1'], getChangelog1_1_1(outputs));
     applyChanges(ts.state1_1_1_games, actionId, outputs.games.map(diffToChange))
     applyChanges(ts.state1_1_1_shortCodeUsageCount, actionId, outputs.shortCodeUsageCount.map(diffToChange))
     applyChanges(ts.state1_1_1_gamesByPlayer, actionId, outputs.gamesByPlayer.map(diffToChange))
 }
 
-function getChangelog1_1_0(outputs: Outputs1_1_0): model.ActionTableMetadata {
+function getChangelog1_1_1(outputs: Outputs1_1_1): model.ActionTableMetadata {
     return {
-        tables: [{
-            schema: ['state-1.1.0-games-symlinks'],
-            changes: outputs.games.map(diffToChange),
-        }, {
-            schema: ['state-1.1.0-scuc-symlinks'],
-            changes: outputs.shortCodeUsageCount.map(diffToChange),
-        }]
+        tables: [
+            {
+                schema: ["state-1.1.1-games"],
+                changes: outputs.games.map(diffToChange),
+            },
+            {
+                schema: ["state-1.1.1-scuc"],
+                changes: outputs.shortCodeUsageCount.map(diffToChange),
+            },
+            {
+                schema: ["players","state-1.1.1-games-by-player"],
+                changes: outputs.gamesByPlayer.map(diffToChange),
+            },
+        ]
     }
 }
 
-function getChangelog1_1_1(ts: Tables, outputs: Outputs1_1_1): model.ActionTableMetadata {
-    return {
-        tables: [{
-            schema: ts.state1_1_1_games.schema,
-            changes: outputs.games.map(diffToChange),
-        }, {
-            schema: ts.state1_1_1_shortCodeUsageCount.schema,
-            changes: outputs.shortCodeUsageCount.map(diffToChange),
-        }, {
-            schema: ts.state1_1_1_gamesByPlayer.schema,
-            changes: outputs.gamesByPlayer.map(diffToChange),
-        }]
-    }
-}
+// END 1.1.1
 
 
 export async function deleteCollection(runner: db.TxRunner, collectionId: string): Promise<void> {
     switch (collectionId) {
+    
         case 'state-1.1.0':
             await deleteMeta(runner, 'state-1.1.0')
+        
             await deleteTable(runner, 'state1_1_0_games')
             await deleteTable(runner, 'state1_1_0_shortCodeUsageCount')
-            break
+            break;
+        case 'state-1.1.1':
+            await deleteMeta(runner, 'state-1.1.1')
+        
+            await deleteTable(runner, 'state1_1_1_games')
+            await deleteTable(runner, 'state1_1_1_shortCodeUsageCount')
+            await deleteTable(runner, 'state1_1_1_gamesByPlayer')
+            break;
         case 'state-1.1.1':
             await deleteMeta(runner, 'state-1.1.1')
             await deleteTable(runner, 'state1_1_1_games')
@@ -147,7 +173,7 @@ export async function deleteCollection(runner: db.TxRunner, collectionId: string
             await deleteTable(runner, 'state1_1_1_gamesByPlayer')
             break
         default:
-            throw new Error("invalid option")
+            throw new Error('invalid option')
     }
 }
 
@@ -158,7 +184,7 @@ async function deleteTable(runner: db.TxRunner, tableId: keyof Tables): Promise<
     await runner(async (db: db.Database): Promise<void> => {
         const ts = openAll(db);
         if (!(tableId in ts)) {
-            throw new Error(`no such table: "${tableId}"`)
+            throw new Error(`no such table: '${tableId}'`)
         }
         const table: db.Table<unknown> = ts[tableId as keyof typeof ts];
         for await (const [k,] of readables.readAll(table)) {

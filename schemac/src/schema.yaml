@@ -1,0 +1,24 @@
+collections:
+- id: "1.1.0"
+  tables:
+  - id: games
+    schema: [state-1.1.0-games]
+    type: Game1_1
+    input: true
+  - id: shortCodeUsageCount
+    schema: [state-1.1.0-scuc]
+    type: NumberValue
+    input: true
+- id: "1.1.1"
+  tables:
+  - id: games
+    schema: [state-1.1.1-games]
+    type: Game1_1
+    input: true
+  - id: shortCodeUsageCount
+    schema: [state-1.1.1-scuc]
+    type: NumberValue
+    input: true
+  - id: gamesByPlayer
+    schema: [players, state-1.1.1-games-by-player]
+    type: Game1_1
