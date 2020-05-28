@@ -8,18 +8,24 @@ import * as ixaop from 'ix/asynciterable/operators';
 import * as ixa from "ix/asynciterable";
 import { AsyncIterableX } from 'ix/asynciterable';
 
+export interface TxRunner {
+    <R>(cb: (db: Database) => Promise<R>): Promise<R>
+}
+
 export interface TableSpec<T> {
     schema: string[]
     validator: (u: unknown) => T
 }
 
-export function runTransaction<R>(fsDb: Firestore, cb: (db: Database) => Promise<R>): Promise<R> {
-    return fsDb.runTransaction(async (tx) => {
-        const db = new Database(fsDb, tx);
-        const res = await cb(db);
-        db.commit();
-        return res
-    });
+export function runTransaction(fsDb: Firestore): TxRunner {
+    return <R>(cb: (db: Database) => Promise<R>): Promise<R> => {
+        return fsDb.runTransaction(async (tx) => {
+            const db = new Database(fsDb, tx);
+            const res = await cb(db);
+            db.commit();
+            return res
+        });
+    }
 }
 
 export class Database {

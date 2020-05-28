@@ -7,6 +7,7 @@ import admin from 'firebase-admin'
 import uuid from 'uuid/v1'
 import GetConfig from './config'
 import { Action1_1, AnyAction, Action1_0, Game1_0, Game1_1, TaggedGame1_0, SavedAction, ActionTableMetadata, NumberValue } from './model'
+import * as model from './model'
 import { validate as validateModel } from './model/index.validator'
 import { Drawing, UploadResponse } from './model/rpc'
 import { validate as validateRpc } from './model/rpc.validator'
@@ -25,8 +26,10 @@ import * as readables from './readables'
 import * as ranges from './ranges'
 import { Readable, Diff, ItemIterable, Range, Key, Item, Live, Change } from './interfaces'
 import { strict as assert } from 'assert';
-import {openAll, Tables, applyOutputs1_1_0, applyOutputs1_1_1, Outputs1_1_0, Outputs1_1_1, 
-Inputs1_1_0, Inputs1_1_1, getTrackedInputs1_1_0, getTrackedInputs1_1_1} from './schema.auto';
+import {
+    openAll, Tables, applyOutputs1_1_0, applyOutputs1_1_1, Outputs1_1_0, Outputs1_1_1,
+    Inputs1_1_0, Inputs1_1_1, getTrackedInputs1_1_0, getTrackedInputs1_1_1, deleteCollection
+} from './schema.auto';
 
 
 admin.initializeApp({
@@ -113,11 +116,22 @@ function upgradeAction(action: AnyAction): Action1_1 {
 function doAction(fsDb: FirebaseFirestore.Firestore, body: unknown): Promise<void> {
     const anyAction = validateModel('AnyAction')(body)
 
-    return db.runTransaction(fsDb, async (db: db.Database): Promise<void> => {
+    return db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
         const ts = openAll(db);
         const [actionId, savedAction] = await doLiveIntegration1_1_0(upgradeAction(anyAction), ts);
-        await replayIntegration1_1_1(actionId, savedAction, ts);
+
+        await doReplay1_1_1(actionId, savedAction, ts);
     })
+}
+
+function doReplay1_1_0(actionId: string, savedAction: model.SavedAction, ts: Tables): Promise<void> {
+    return replayCollection(ts, getTrackedInputs1_1_0, actionId, savedAction, 'state-1.1.0',
+        replayIntegration1_1_0, applyOutputs1_1_0)
+}
+
+function doReplay1_1_1(actionId: string, savedAction: model.SavedAction, ts: Tables): Promise<void> {
+    return replayCollection(ts, getTrackedInputs1_1_1, actionId, savedAction, 'state-1.1.1',
+        replayIntegration1_1_1, applyOutputs1_1_1)
 }
 
 app.options('/action', cors())
@@ -402,31 +416,42 @@ async function doLiveIntegration1_1_0(action: Action1_1, ts: Tables): Promise<[s
     return [actionId, savedAction]
 }
 
-// TODO: these replays need to delete any errant orphans.
-
-async function replayIntegration1_1_0(actionId: string, savedAction: SavedAction, ts: Tables): Promise<void> {
-    // Set up inputs.
-    const [parentSet, inputs] = getTrackedInputs1_1_0(ts);
-
-    // Integrate the action.
-    const outputs = await integrate1_1MiddleHelper(upgradeAction(savedAction.action), inputs)
-
-    for (const usedParent of parentSet) {
-        if (savedAction.parents.indexOf(usedParent) === -1) {
-            throw new Error("tried to access state not specified by a parent")
-        }
-    }
-
-    applyOutputs1_1_0(ts, actionId, outputs)
+function replayIntegration1_1_0(a: AnyAction, inputs: Inputs1_1_0): Promise<Outputs1_1_0> {
+    return integrate1_1MiddleHelper(upgradeAction(a), inputs)
 }
 
+function replayIntegration1_1_1(a: AnyAction, inputs: Inputs1_1_1): Promise<Outputs1_1_1> {
+    return integrate1_1_1MiddleHelper(upgradeAction(a), inputs)
+}
 
-async function replayIntegration1_1_1(actionId: string, savedAction: SavedAction, ts: Tables): Promise<void> {
+async function replayCollection<Inputs, Outputs>(
+    ts: Tables,
+    inputGetter: (ts: Tables) => [Set<string>, Inputs],
+    actionId: string,
+    savedAction: SavedAction,
+    collectionId: string,
+    integrator: (a: AnyAction, inputs: Inputs) => Promise<Outputs>,
+    outputSaver: (ts: Tables, actionId: string, outputs: Outputs) => void): Promise<void> {
     // Set up inputs.
-    const [parentSet, inputs] = getTrackedInputs1_1_1(ts);
+    const [parentSet, inputs] = inputGetter(ts);
 
-    // Integrate the action.
-    const outputs = await integrate1_1_1MiddleHelper(upgradeAction(savedAction.action), inputs)
+    const meta = await readables.get(ts.actionTableMetadata, [actionId, collectionId], null);
+    if (meta !== null) {
+        // Already done.
+        console.log(`- ${collectionId}: PASS`)
+        return;
+    }
+
+    const parentMetas = ixa.from(savedAction.parents).pipe(
+        ixaop.map(p => readables.get(ts.actionTableMetadata, [p, collectionId], null)),
+    )
+
+    if (await ixa.some(parentMetas, meta => meta === null)) {
+        console.log(`- ${collectionId}: PASS`)
+        return;
+    }
+    console.log(`- ${collectionId}: REPLAY`)
+    const outputs = await integrator(savedAction.action, inputs);
 
     for (const usedParent of parentSet) {
         if (savedAction.parents.indexOf(usedParent) === -1) {
@@ -434,14 +459,14 @@ async function replayIntegration1_1_1(actionId: string, savedAction: SavedAction
         }
     }
 
-    applyOutputs1_1_1(ts, actionId, outputs)
+    outputSaver(ts, actionId, outputs)
 }
 
 async function replay(): Promise<{}> {
     let cursor: Key = [''];
     console.log('REPLAY')
     while (true) {
-        const nextAction = await db.runTransaction(fsDb,
+        const nextAction = await db.runTransaction(fsDb)(
             async (db: db.Database): Promise<string | null> => {
                 const tables = openAll(db);
                 const first = await ixa.first(ixa.from(readables.readAllAfter(tables.actions, cursor!)));
@@ -456,99 +481,32 @@ async function replay(): Promise<{}> {
             break;
         }
         const replayers = [
-            { collectionId: 'state-1.1.0', integrator: replayIntegration1_1_0 },
-            { collectionId: 'state-1.1.1', integrator: replayIntegration1_1_1 },
+            doReplay1_1_0,
+            doReplay1_1_1,
         ]
         console.log(`REPLAY ${nextAction}`)
 
-        for (const { collectionId, integrator } of replayers) {
-            await db.runTransaction(fsDb, async (db: db.Database): Promise<void> => {
-                const tables = openAll(db);
-                const savedAction = (await readables.get(tables.actions, [nextAction], null));
+        for (const replayer of replayers) {
+            await db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
+                const ts = openAll(db);
 
+                const savedAction = (await readables.get(ts.actions, [nextAction], null));
                 if (savedAction === null) {
                     throw new Error('wut');
                 }
 
-                const meta = await readables.get(tables.actionTableMetadata, [nextAction, collectionId], null);
-                if (meta !== null) {
-                    // Already done.
-                    console.log(`- ${collectionId}: PASS`)
-                    return;
-                }
-
-                const parentMetas = ixa.from(savedAction.parents).pipe(
-                    ixaop.map(p => readables.get(tables.actionTableMetadata, [p, collectionId], null)),
-                )
-
-                if (await ixa.some(parentMetas, meta => meta === null)) {
-                    console.log(`- ${collectionId}: PASS`)
-                    return;
-                }
-                console.log(`- ${collectionId}: REPLAY`)
-                await integrator(nextAction, savedAction, tables);
+                await replayer(nextAction, savedAction, ts);
             });
         }
+
         cursor = [nextAction];
     }
     console.log('DONE')
     return {}
 }
 
-type DeleteRequest = {
-    tableId: keyof Tables
-}
-
-async function deleteTable({ tableId }: DeleteRequest): Promise<void> {
-    if (tableId === 'actions') {
-        throw new Error('nope')
-    }
-    await db.runTransaction(fsDb, async (db: db.Database): Promise<void> => {
-        const ts = openAll(db);
-        if (!(tableId in ts)) {
-            throw new Error(`no such table: "${tableId}"`)
-        }
-        const table: db.Table<unknown> = ts[tableId as keyof typeof ts];
-        for await (const [k,] of readables.readAll(table)) {
-            table.delete(k)
-        }
-    })
-}
-type DeleteMetaRequest = {
-    collectionId: string
-}
-
-async function deleteMeta({ collectionId }: DeleteMetaRequest): Promise<void> {
-    await db.runTransaction(fsDb, async (db: db.Database): Promise<void> => {
-        const ts = openAll(db);
-        for await (const [k,] of readables.readAll(ts.actionTableMetadata)) {
-            if (k[k.length - 1] === collectionId) {
-                ts.actionTableMetadata.delete(k)
-            }
-        }
-    })
-}
-
 type DeleteCollectionRequest = {
     collectionId: string
-}
-
-async function deleteCollection({ collectionId }: DeleteCollectionRequest): Promise<void> {
-    switch (collectionId) {
-        case 'state-1.1.0':
-            await deleteMeta({ collectionId: 'state-1.1.0' })
-            await deleteTable({ tableId: 'state1_1_0_games' })
-            await deleteTable({ tableId: 'state1_1_0_shortCodeUsageCount' })
-            break
-        case 'state-1.1.1':
-            await deleteMeta({ collectionId: 'state-1.1.1' })
-            await deleteTable({ tableId: 'state1_1_1_games' })
-            await deleteTable({ tableId: 'state1_1_1_shortCodeUsageCount' })
-            await deleteTable({ tableId: 'state1_1_1_gamesByPlayer' })
-            break
-        default:
-            throw new Error("invalid option")
-    }
 }
 
 function batch(): Router {
@@ -578,7 +536,7 @@ function batch(): Router {
     // })
 
     res.post('/delete/:collectionId', function(req: Request<DeleteCollectionRequest>, res, next) {
-        deleteCollection(req.params).then(result => {
+        deleteCollection(db.runTransaction(fsDb), req.params.collectionId).then(result => {
             res.status(200)
             res.json(result)
         }).catch(next)

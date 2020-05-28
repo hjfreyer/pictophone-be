@@ -31,7 +31,7 @@ fn main() {
 
 import * as db from './db'
 import { Live, Diff, Change, Readable } from './interfaces'
-import  *  as model from './model'
+import * as model from './model'
 import { validate as validateModel } from './model/index.validator'
 import { validateLive, applyChanges, diffToChange } from './schema'
 import * as readables from './readables'
@@ -54,26 +54,6 @@ export type Inputs1_1_0 = {
 export type Inputs1_1_1 = {
     games: Readable<model.Game1_1>
     shortCodeUsageCount: Readable<model.NumberValue>
-}
-
-export function getTrackedInputs1_1_0(ts: Tables): [Set<string>, Inputs1_1_0] {
-    const parentSet = new Set<string>();
-    const track = (actionId: string) => {parentSet.add(actionId)};
-    const inputs: Inputs1_1_0 = {
-        games: readables.tracked(ts.state1_1_0_games, track),
-        shortCodeUsageCount: readables.tracked(ts.state1_1_0_shortCodeUsageCount, track),
-    }
-    return [parentSet, inputs]
-}
-
-export function getTrackedInputs1_1_1(ts: Tables): [Set<string>, Inputs1_1_1] {
-    const parentSet = new Set<string>();
-    const track = (actionId: string) => {parentSet.add(actionId)};
-    const inputs: Inputs1_1_1 = {
-        games: readables.tracked(ts.state1_1_1_games, track),
-        shortCodeUsageCount: readables.tracked(ts.state1_1_1_shortCodeUsageCount, track)
-    }
-    return [parentSet, inputs]
 }
 
 export type Outputs1_1_0 = {
@@ -120,6 +100,26 @@ export function openAll(db: db.Database): Tables {
     }
 }
 
+export function getTrackedInputs1_1_0(ts: Tables): [Set<string>, Inputs1_1_0] {
+    const parentSet = new Set<string>();
+    const track = (actionId: string) => { parentSet.add(actionId) };
+    const inputs: Inputs1_1_0 = {
+        games: readables.tracked(ts.state1_1_0_games, track),
+        shortCodeUsageCount: readables.tracked(ts.state1_1_0_shortCodeUsageCount, track),
+    }
+    return [parentSet, inputs]
+}
+
+export function getTrackedInputs1_1_1(ts: Tables): [Set<string>, Inputs1_1_1] {
+    const parentSet = new Set<string>();
+    const track = (actionId: string) => { parentSet.add(actionId) };
+    const inputs: Inputs1_1_1 = {
+        games: readables.tracked(ts.state1_1_1_games, track),
+        shortCodeUsageCount: readables.tracked(ts.state1_1_1_shortCodeUsageCount, track)
+    }
+    return [parentSet, inputs]
+}
+
 export function applyOutputs1_1_0(ts: Tables, actionId: string, outputs: Outputs1_1_0): void {
     ts.actionTableMetadata.set([actionId, 'state-1.1.0'], getChangelog1_1_0(outputs));
     applyChanges(ts.state1_1_0_games, actionId, outputs.games.map(diffToChange))
@@ -160,6 +160,51 @@ function getChangelog1_1_1(ts: Tables, outputs: Outputs1_1_1): model.ActionTable
     }
 }
 
+
+export async function deleteCollection(runner: db.TxRunner, collectionId: string): Promise<void> {
+    switch (collectionId) {
+        case 'state-1.1.0':
+            await deleteMeta(runner, 'state-1.1.0')
+            await deleteTable(runner, 'state1_1_0_games')
+            await deleteTable(runner, 'state1_1_0_shortCodeUsageCount')
+            break
+        case 'state-1.1.1':
+            await deleteMeta(runner, 'state-1.1.1')
+            await deleteTable(runner, 'state1_1_1_games')
+            await deleteTable(runner, 'state1_1_1_shortCodeUsageCount')
+            await deleteTable(runner, 'state1_1_1_gamesByPlayer')
+            break
+        default:
+            throw new Error("invalid option")
+    }
+}
+
+async function deleteTable(runner: db.TxRunner, tableId: keyof Tables): Promise<void> {
+    if (tableId === 'actions') {
+        throw new Error('nope')
+    }
+    await runner(async (db: db.Database): Promise<void> => {
+        const ts = openAll(db);
+        if (!(tableId in ts)) {
+            throw new Error(`no such table: "${tableId}"`)
+        }
+        const table: db.Table<unknown> = ts[tableId as keyof typeof ts];
+        for await (const [k,] of readables.readAll(table)) {
+            table.delete(k)
+        }
+    })
+}
+
+async function deleteMeta(runner: db.TxRunner, collectionId: string): Promise<void> {
+    await runner(async (db: db.Database): Promise<void> => {
+        const ts = openAll(db);
+        for await (const [k,] of readables.readAll(ts.actionTableMetadata)) {
+            if (k[k.length - 1] === collectionId) {
+                ts.actionTableMetadata.delete(k)
+            }
+        }
+    })
+}
 "#)
 }
 

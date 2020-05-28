@@ -45,13 +45,13 @@ export function tracked<T>(source: Readable<Live<T>>, cb: (actionId: string) => 
     return {
         schema: source.schema,
         read(range: Range): ItemIterable<T> {
-                const links = ixa.from(source.read(range))
-                return links.pipe(
-                    ixaop.tap(([, { actionId }]) => cb),
-                    ixaop.flatMap(([key, { value }]: Item<Live<T>>): ItemIterable<T> =>
-                        value !== null ? ixa.of([key, value]) : ixa.empty())
-                )
-            }
+            const links = ixa.from(source.read(range))
+            return links.pipe(
+                ixaop.tap(([, { actionId }]) => cb),
+                ixaop.flatMap(([key, { value }]: Item<Live<T>>): ItemIterable<T> =>
+                    value !== null ? ixa.of([key, value]) : ixa.empty())
+            )
+        }
     }
 }
 
