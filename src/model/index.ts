@@ -103,12 +103,17 @@ export type Game1_1 = UncreatedGame1_1 | CreatedGame1_1
 export type AnyAction = Action1_0 | Action1_1
 
 export type Error1_1 = {
+    version: '1.1'
     status: 'GAME_NOT_FOUND'
     gameId: string
 } | {
+    version: '1.1'
     status: 'GAME_ALREADY_EXISTS'
     gameId: string
 } | {
+    version: '1.1'
     status: 'SHORT_CODE_IN_USE'
     shortCode: string
 }
+
+export type AnyError = Error1_1

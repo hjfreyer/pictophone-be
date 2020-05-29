@@ -141,9 +141,9 @@ export function sorted<T>(i: Iterable<T>, cmp?: Comparator<T>): T[] {
     return res
 }
 
-export type AsyncResponse<R, E> = Promise<Response<R, E>>
+export type AsyncResult<R, E> = Promise<Result<R, E>>
 
-export type Response<R, E> = {
+export type Result<R, E> = {
     status: 'ok',
     value: R,
 } | {
@@ -151,10 +151,10 @@ export type Response<R, E> = {
     error: E
 }
 
-export function ok<R, E>(r: R): Response<R, E> {
+export function ok<R, E>(r: R): Result<R, E> {
     return { status: 'ok', value: r }
 }
 
-export function err<R, E>(e: E): Response<R, E> {
+export function err<R, E>(e: E): Result<R, E> {
     return { status: 'err', error: e }
 }

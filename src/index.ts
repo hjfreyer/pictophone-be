@@ -30,6 +30,12 @@ import {
     openAll, Tables, applyOutputs1_1_0, applyOutputs1_1_1, Outputs1_1_0, Outputs1_1_1,
     Inputs1_1_0, Inputs1_1_1, getTrackedInputs1_1_0, getTrackedInputs1_1_1, deleteCollection
 } from './schema.auto';
+import {
+    Integrator1_1_0, Integrator1_1_1, Framework
+} from './schema.manual';
+import {
+    getActionId
+} from './schema';
 
 
 admin.initializeApp({
@@ -49,37 +55,6 @@ app.listen(port, function() {
     console.log(`Example app listening on port ${port}!`)
 })
 
-const HASH_HEX_CHARS_LEN = (32 / 8) * 2;  // 32 bits of hash
-function serializeActionId(date: Date, hashHex: string): string {
-    return `0${date.toISOString()}${hashHex.slice(0, HASH_HEX_CHARS_LEN)}`
-}
-
-function parseActionId(serialized: string): [Date, string] {
-    if (serialized[0] !== '0') {
-        throw new Error('unknown action ID format');
-    }
-
-    const dateStr = serialized.slice(1, serialized.length - HASH_HEX_CHARS_LEN);
-    const hashStr = serialized.slice(serialized.length - HASH_HEX_CHARS_LEN);
-
-    return [new Date(dateStr), hashStr]
-}
-
-export function getActionId(action: SavedAction): string {
-    // TODO: JSON.stringify isn't deterministic, so what's saved in the DB
-    // should really be a particular serialization, but I'm not worrying
-    // about that at the moment.
-    const hashHex = sha256.hex(JSON.stringify(action));
-    const maxDate = _.max(action.parents.map(id => parseActionId(id)[0]));
-
-    let now = new Date();
-
-    // TODO: just fake the date rather than waiting.
-    while (maxDate !== undefined && now < maxDate) {
-        now = new Date();
-    }
-    return serializeActionId(now, hashHex);
-}
 
 const MAX_POINTS = 50_000
 
@@ -113,17 +88,24 @@ function upgradeAction(action: AnyAction): Action1_1 {
     }
 }
 
+const INT1_1_0: Integrator1_1_0 = {
+    integrate(action: model.AnyAction, inputs: Inputs1_1_0): Promise<util.Result<Outputs1_1_0, model.AnyError>> {
+        return integrate1_1_0MiddleHelper(upgradeAction(action), inputs)
+    }
+}
+
+const INT1_1_1: Integrator1_1_1 = {
+    integrate(action: model.AnyAction, inputs: Inputs1_1_1): Promise<util.Result<Outputs1_1_1, model.AnyError>> {
+        return integrate1_1_1MiddleHelper(upgradeAction(action), inputs)
+    }
+}
+
+
 function doAction(fsDb: FirebaseFirestore.Firestore, body: unknown): Promise<Error1_1 | null> {
     const anyAction = validateModel('AnyAction')(body)
 
-    return db.runTransaction(fsDb)(async (db: db.Database): Promise<Error1_1 | null> => {
-        const ts = openAll(db);
-        const [actionId, savedAction, maybeError] = await doLiveIntegration1_1_0(upgradeAction(anyAction), ts);
-
-        await doReplay1_1_1(actionId, savedAction, ts);
-
-        return maybeError;
-    })
+    const fw = new Framework(db.runTransaction(fsDb), INT1_1_0, INT1_1_1);
+    return fw.handleAction(anyAction);
 }
 
 function doReplay1_1_0(actionId: string, savedAction: model.SavedAction, ts: Tables): Promise<void> {
@@ -190,10 +172,10 @@ function upgradeAction1_0(a: Action1_0): Action1_1 {
     }
 }
 
-type AsyncResponse1_1<R> = util.AsyncResponse<R, Error1_1>
+type AsyncResult1_1<R> = util.AsyncResult<R, Error1_1>
 
 async function integrate1_1_0MiddleHelper(
-    a: Action1_1, inputs: Inputs1_1_0): AsyncResponse1_1<Outputs1_1_0> {
+    a: Action1_1, inputs: Inputs1_1_0): AsyncResult1_1<Outputs1_1_0> {
     // Action1_1 + Game state + scuc state => Diffs of Games
     const gameDiffsResult = await integrate1_1_0Helper(a, inputs);
     if (gameDiffsResult.status !== 'ok') {
@@ -214,7 +196,7 @@ async function integrate1_1_0MiddleHelper(
 }
 
 async function integrate1_1_0Helper(a: Action1_1, inputs: Inputs1_1_0):
-    AsyncResponse1_1<Diff<Game1_1>[]> {
+    AsyncResult1_1<Diff<Game1_1>[]> {
     const game = await readables.get(inputs.games, [a.gameId], defaultGame1_1());
     switch (a.kind) {
         case 'join_game':
@@ -232,6 +214,7 @@ async function integrate1_1_0Helper(a: Action1_1, inputs: Inputs1_1_0):
                     }])
                 } else {
                     return util.err({
+                        version: '1.1',
                         status: 'GAME_NOT_FOUND',
                         gameId: a.gameId,
                     })
@@ -247,20 +230,26 @@ async function integrate1_1_0Helper(a: Action1_1, inputs: Inputs1_1_0):
                 newValue: {
                     ...game,
                     players: [...game.players, a.playerId],
-
                 }
             }])
 
         case 'create_game':
             if (game.state !== 'UNCREATED') {
-                return util.err({ status: 'GAME_ALREADY_EXISTS', gameId: a.gameId })
+                return util.err({
+                    version: '1.1',
+                    status: 'GAME_ALREADY_EXISTS', gameId: a.gameId
+                })
             }
             if (a.shortCode === '') {
                 throw new Error("Validator should have caught this.")
             }
             const scCount = await readables.get(inputs.shortCodeUsageCount, [a.shortCode], { value: 0 });
             if (scCount.value !== 0) {
-                return util.err({ status: 'SHORT_CODE_IN_USE', shortCode: a.shortCode })
+                return util.err({
+                    version: '1.1',
+                    status: 'SHORT_CODE_IN_USE',
+                    shortCode: a.shortCode,
+                })
             }
             return util.ok([{
                 kind: 'replace',
@@ -365,7 +354,7 @@ function reduce<TAction, TAccumulator>(
     )
 }
 
-async function integrate1_1_1MiddleHelper(a: Action1_1, inputs: Inputs1_1_0): AsyncResponse1_1<Outputs1_1_1> {
+async function integrate1_1_1MiddleHelper(a: Action1_1, inputs: Inputs1_1_0): AsyncResult1_1<Outputs1_1_1> {
     const outputs1_1OrError = await integrate1_1_0MiddleHelper(a, inputs);
     if (outputs1_1OrError.status === 'err') {
         return outputs1_1OrError;
