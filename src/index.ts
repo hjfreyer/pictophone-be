@@ -6,7 +6,7 @@ import { Dictionary, Request } from 'express-serve-static-core'
 import admin from 'firebase-admin'
 import uuid from 'uuid/v1'
 import GetConfig from './config'
-import { Action1_1, AnyAction, Action1_0, Game1_0, Game1_1, TaggedGame1_0, SavedAction, ActionTableMetadata, NumberValue } from './model'
+import { Action1_1, AnyAction, Action1_0, Game1_0, Game1_1, Error1_1, TaggedGame1_0, SavedAction, ActionTableMetadata, NumberValue } from './model'
 import * as model from './model'
 import { validate as validateModel } from './model/index.validator'
 import { Drawing, UploadResponse } from './model/rpc'
@@ -113,14 +113,16 @@ function upgradeAction(action: AnyAction): Action1_1 {
     }
 }
 
-function doAction(fsDb: FirebaseFirestore.Firestore, body: unknown): Promise<void> {
+function doAction(fsDb: FirebaseFirestore.Firestore, body: unknown): Promise<Error1_1 | null> {
     const anyAction = validateModel('AnyAction')(body)
 
-    return db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
+    return db.runTransaction(fsDb)(async (db: db.Database): Promise<Error1_1 | null> => {
         const ts = openAll(db);
-        const [actionId, savedAction] = await doLiveIntegration1_1_0(upgradeAction(anyAction), ts);
+        const [actionId, savedAction, maybeError] = await doLiveIntegration1_1_0(upgradeAction(anyAction), ts);
 
         await doReplay1_1_1(actionId, savedAction, ts);
+
+        return maybeError;
     })
 }
 
@@ -134,11 +136,26 @@ function doReplay1_1_1(actionId: string, savedAction: model.SavedAction, ts: Tab
         replayIntegration1_1_1, applyOutputs1_1_1)
 }
 
+function getHttpCode(error: Error1_1): number {
+    switch (error.status) {
+        case 'GAME_NOT_FOUND':
+            return 404;
+        case 'SHORT_CODE_IN_USE':
+        case 'GAME_ALREADY_EXISTS':
+            return 403;
+    }
+}
+
 app.options('/action', cors())
 app.post('/action', cors(), function(req: Request<Dictionary<string>>, res, next) {
     doAction(fsDb, req.body).then((resp) => {
-        res.status(200)
-        res.json(resp)
+        if (resp !== null) {
+            res.status(getHttpCode(resp))
+            res.json(resp)
+        } else {
+            res.status(200)
+            res.json()
+        }
     }).catch(next)
 })
 
@@ -173,10 +190,16 @@ function upgradeAction1_0(a: Action1_0): Action1_1 {
     }
 }
 
+type AsyncResponse1_1<R> = util.AsyncResponse<R, Error1_1>
 
-async function integrate1_1_0MiddleHelper(a: Action1_1, inputs: Inputs1_1_0): Promise<Outputs1_1_0> {
+async function integrate1_1_0MiddleHelper(
+    a: Action1_1, inputs: Inputs1_1_0): AsyncResponse1_1<Outputs1_1_0> {
     // Action1_1 + Game state + scuc state => Diffs of Games
-    const gameDiffs = await integrate1_1_0Helper(a, inputs);
+    const gameDiffsResult = await integrate1_1_0Helper(a, inputs);
+    if (gameDiffsResult.status !== 'ok') {
+        return gameDiffsResult
+    }
+    const gameDiffs = gameDiffsResult.value;
 
     // Diffs of games => Diffs of numbers indexed by short code.
     const indexedShortCodeDiffs = diffThroughMapper(mapShortCode, gameDiffs);
@@ -184,19 +207,20 @@ async function integrate1_1_0MiddleHelper(a: Action1_1, inputs: Inputs1_1_0): Pr
     // Diffs of indexed short code count => diffs of sums to apply to DB.
     const shortCodeUsageCountDiffs = await combine(SUM_COMBINER, inputs.shortCodeUsageCount, indexedShortCodeDiffs)
 
-    return {
+    return util.ok({
         games: gameDiffs,
         shortCodeUsageCount: shortCodeUsageCountDiffs,
-    }
+    })
 }
 
-async function integrate1_1_0Helper(a: Action1_1, inputs: Inputs1_1_0): Promise<Diff<Game1_1>[]> {
+async function integrate1_1_0Helper(a: Action1_1, inputs: Inputs1_1_0):
+    AsyncResponse1_1<Diff<Game1_1>[]> {
     const game = await readables.get(inputs.games, [a.gameId], defaultGame1_1());
     switch (a.kind) {
         case 'join_game':
             if (game.state === 'UNCREATED') {
                 if (a.createIfNecessary) {
-                    return [{
+                    return util.ok([{
                         kind: 'replace',
                         key: [a.gameId],
                         oldValue: game,
@@ -205,15 +229,18 @@ async function integrate1_1_0Helper(a: Action1_1, inputs: Inputs1_1_0): Promise<
                             players: [a.playerId],
                             shortCode: '',
                         }
-                    }]
+                    }])
                 } else {
-                    return []
+                    return util.err({
+                        status: 'GAME_NOT_FOUND',
+                        gameId: a.gameId,
+                    })
                 }
             }
             if (game.players.indexOf(a.playerId) !== -1) {
-                return []
+                return util.ok([])
             }
-            return [{
+            return util.ok([{
                 kind: 'replace',
                 key: [a.gameId],
                 oldValue: game,
@@ -222,20 +249,20 @@ async function integrate1_1_0Helper(a: Action1_1, inputs: Inputs1_1_0): Promise<
                     players: [...game.players, a.playerId],
 
                 }
-            }]
+            }])
 
         case 'create_game':
             if (game.state !== 'UNCREATED') {
-                return []
+                return util.err({ status: 'GAME_ALREADY_EXISTS', gameId: a.gameId })
             }
             if (a.shortCode === '') {
-                return []
+                throw new Error("Validator should have caught this.")
             }
             const scCount = await readables.get(inputs.shortCodeUsageCount, [a.shortCode], { value: 0 });
             if (scCount.value !== 0) {
-                return []
+                return util.err({ status: 'SHORT_CODE_IN_USE', shortCode: a.shortCode })
             }
-            return [{
+            return util.ok([{
                 kind: 'replace',
                 key: [a.gameId],
                 oldValue: game,
@@ -244,7 +271,7 @@ async function integrate1_1_0Helper(a: Action1_1, inputs: Inputs1_1_0): Promise<
                     players: [],
                     shortCode: a.shortCode
                 }
-            }]
+            }])
     }
 }
 
@@ -338,13 +365,18 @@ function reduce<TAction, TAccumulator>(
     )
 }
 
-async function integrate1_1_1MiddleHelper(a: Action1_1, inputs: Inputs1_1_0): Promise<Outputs1_1_1> {
-    const outputs1_1 = await integrate1_1_0MiddleHelper(a, inputs);
+async function integrate1_1_1MiddleHelper(a: Action1_1, inputs: Inputs1_1_0): AsyncResponse1_1<Outputs1_1_1> {
+    const outputs1_1OrError = await integrate1_1_0MiddleHelper(a, inputs);
+    if (outputs1_1OrError.status === 'err') {
+        return outputs1_1OrError;
+    }
+    const outputs1_1 = outputs1_1OrError.value;
 
-    return {
+
+    return util.ok({
         ...outputs1_1,
         gamesByPlayer: diffThroughMapper(gameToGamesByPlayer, outputs1_1.games)
-    }
+    })
 }
 
 function gameToGamesByPlayer([gameKey, game]: Item<Game1_1>): Item<Game1_1>[] {
@@ -419,12 +451,12 @@ function mapShortCode([key, game]: Item<Game1_1>): Item<NumberValue>[] {
     return [[[game.shortCode], { value: 1 }]]
 }
 
-async function doLiveIntegration1_1_0(action: Action1_1, ts: Tables): Promise<[string, SavedAction]> {
+async function doLiveIntegration1_1_0(action: Action1_1, ts: Tables): Promise<[string, SavedAction, Error1_1 | null]> {
     // Set up inputs.
     const [parentSet, inputs] = getTrackedInputs1_1_0(ts);
 
     // Get outputs.
-    const outputs = await integrate1_1_0MiddleHelper(action, inputs)
+    const outputsOrError = await integrate1_1_0MiddleHelper(action, inputs)
 
     // Save the action and metadata.
     const savedAction: SavedAction = { parents: util.sorted(parentSet), action }
@@ -432,17 +464,21 @@ async function doLiveIntegration1_1_0(action: Action1_1, ts: Tables): Promise<[s
 
     ts.actions.set([actionId], savedAction);
 
-    applyOutputs1_1_0(ts, actionId, outputs)
+    if (outputsOrError.status === 'ok') {
+        applyOutputs1_1_0(ts, actionId, outputsOrError.value)
+    }
 
-    return [actionId, savedAction]
+    return [actionId, savedAction, outputsOrError.status === 'ok' ? null : outputsOrError.error];
 }
 
-function replayIntegration1_1_0(a: AnyAction, inputs: Inputs1_1_0): Promise<Outputs1_1_0> {
-    return integrate1_1_0MiddleHelper(upgradeAction(a), inputs)
+async function replayIntegration1_1_0(a: AnyAction, inputs: Inputs1_1_0): Promise<Outputs1_1_0 | null> {
+    const res = await integrate1_1_0MiddleHelper(upgradeAction(a), inputs);
+    return res.status === 'ok' ? res.value : null;
 }
 
-function replayIntegration1_1_1(a: AnyAction, inputs: Inputs1_1_1): Promise<Outputs1_1_1> {
-    return integrate1_1_1MiddleHelper(upgradeAction(a), inputs)
+async function replayIntegration1_1_1(a: AnyAction, inputs: Inputs1_1_1): Promise<Outputs1_1_1 | null> {
+    const res = await integrate1_1_1MiddleHelper(upgradeAction(a), inputs)
+    return res.status === 'ok' ? res.value : null;
 }
 
 async function replayCollection<Inputs, Outputs>(
@@ -451,7 +487,7 @@ async function replayCollection<Inputs, Outputs>(
     actionId: string,
     savedAction: SavedAction,
     collectionId: string,
-    integrator: (a: AnyAction, inputs: Inputs) => Promise<Outputs>,
+    integrator: (a: AnyAction, inputs: Inputs) => Promise<Outputs | null>,
     outputSaver: (ts: Tables, actionId: string, outputs: Outputs) => void): Promise<void> {
     // Set up inputs.
     const [parentSet, inputs] = inputGetter(ts);
@@ -480,7 +516,9 @@ async function replayCollection<Inputs, Outputs>(
         }
     }
 
-    outputSaver(ts, actionId, outputs)
+    if (outputs !== null) {
+        outputSaver(ts, actionId, outputs)
+    }
 }
 
 async function replay(): Promise<{}> {

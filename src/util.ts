@@ -140,3 +140,21 @@ export function sorted<T>(i: Iterable<T>, cmp?: Comparator<T>): T[] {
     res.sort(cmp)
     return res
 }
+
+export type AsyncResponse<R, E> = Promise<Response<R, E>>
+
+export type Response<R, E> = {
+    status: 'ok',
+    value: R,
+} | {
+    status: 'err'
+    error: E
+}
+
+export function ok<R, E>(r: R): Response<R, E> {
+    return { status: 'ok', value: r }
+}
+
+export function err<R, E>(e: E): Response<R, E> {
+    return { status: 'err', error: e }
+}
