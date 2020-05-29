@@ -88,6 +88,16 @@ function upgradeAction(action: AnyAction): Action1_1 {
     }
 }
 
+function getHttpCode(error: Error1_1): number {
+    switch (error.status) {
+        case 'GAME_NOT_FOUND':
+            return 404;
+        case 'SHORT_CODE_IN_USE':
+        case 'GAME_ALREADY_EXISTS':
+            return 403;
+    }
+}
+
 const INT1_1_0: Integrator1_1_0 = {
     integrate(action: model.AnyAction, inputs: Inputs1_1_0): Promise<util.Result<Outputs1_1_0, model.AnyError>> {
         return integrate1_1_0MiddleHelper(upgradeAction(action), inputs)
@@ -100,37 +110,12 @@ const INT1_1_1: Integrator1_1_1 = {
     }
 }
 
+const FRAMEWORK = new Framework(db.runTransaction(fsDb), INT1_1_0, INT1_1_1);
 
-function doAction(fsDb: FirebaseFirestore.Firestore, body: unknown): Promise<Error1_1 | null> {
-    const anyAction = validateModel('AnyAction')(body)
-
-    const fw = new Framework(db.runTransaction(fsDb), INT1_1_0, INT1_1_1);
-    return fw.handleAction(anyAction);
-}
-
-function doReplay1_1_0(actionId: string, savedAction: model.SavedAction, ts: Tables): Promise<void> {
-    return replayCollection(ts, getTrackedInputs1_1_0, actionId, savedAction, 'state-1.1.0',
-        replayIntegration1_1_0, applyOutputs1_1_0)
-}
-
-function doReplay1_1_1(actionId: string, savedAction: model.SavedAction, ts: Tables): Promise<void> {
-    return replayCollection(ts, getTrackedInputs1_1_1, actionId, savedAction, 'state-1.1.1',
-        replayIntegration1_1_1, applyOutputs1_1_1)
-}
-
-function getHttpCode(error: Error1_1): number {
-    switch (error.status) {
-        case 'GAME_NOT_FOUND':
-            return 404;
-        case 'SHORT_CODE_IN_USE':
-        case 'GAME_ALREADY_EXISTS':
-            return 403;
-    }
-}
 
 app.options('/action', cors())
 app.post('/action', cors(), function(req: Request<Dictionary<string>>, res, next) {
-    doAction(fsDb, req.body).then((resp) => {
+    FRAMEWORK.handleAction(validateModel('AnyAction')(req.body)).then((resp) => {
         if (resp !== null) {
             res.status(getHttpCode(resp))
             res.json(resp)
@@ -460,99 +445,6 @@ async function doLiveIntegration1_1_0(action: Action1_1, ts: Tables): Promise<[s
     return [actionId, savedAction, outputsOrError.status === 'ok' ? null : outputsOrError.error];
 }
 
-async function replayIntegration1_1_0(a: AnyAction, inputs: Inputs1_1_0): Promise<Outputs1_1_0 | null> {
-    const res = await integrate1_1_0MiddleHelper(upgradeAction(a), inputs);
-    return res.status === 'ok' ? res.value : null;
-}
-
-async function replayIntegration1_1_1(a: AnyAction, inputs: Inputs1_1_1): Promise<Outputs1_1_1 | null> {
-    const res = await integrate1_1_1MiddleHelper(upgradeAction(a), inputs)
-    return res.status === 'ok' ? res.value : null;
-}
-
-async function replayCollection<Inputs, Outputs>(
-    ts: Tables,
-    inputGetter: (ts: Tables) => [Set<string>, Inputs],
-    actionId: string,
-    savedAction: SavedAction,
-    collectionId: string,
-    integrator: (a: AnyAction, inputs: Inputs) => Promise<Outputs | null>,
-    outputSaver: (ts: Tables, actionId: string, outputs: Outputs) => void): Promise<void> {
-    // Set up inputs.
-    const [parentSet, inputs] = inputGetter(ts);
-
-    const meta = await readables.get(ts.actionTableMetadata, [actionId, collectionId], null);
-    if (meta !== null) {
-        // Already done.
-        console.log(`- ${collectionId}: PASS`)
-        return;
-    }
-
-    const parentMetas = ixa.from(savedAction.parents).pipe(
-        ixaop.map(p => readables.get(ts.actionTableMetadata, [p, collectionId], null)),
-    )
-
-    if (await ixa.some(parentMetas, meta => meta === null)) {
-        console.log(`- ${collectionId}: PASS`)
-        return;
-    }
-    console.log(`- ${collectionId}: REPLAY`)
-    const outputs = await integrator(savedAction.action, inputs);
-
-    for (const usedParent of parentSet) {
-        if (savedAction.parents.indexOf(usedParent) === -1) {
-            throw new Error("tried to access state not specified by a parent")
-        }
-    }
-
-    if (outputs !== null) {
-        outputSaver(ts, actionId, outputs)
-    }
-}
-
-async function replay(): Promise<{}> {
-    let cursor: Key = [''];
-    console.log('REPLAY')
-    while (true) {
-        const nextAction = await db.runTransaction(fsDb)(
-            async (db: db.Database): Promise<string | null> => {
-                const tables = openAll(db);
-                const first = await ixa.first(ixa.from(readables.readAllAfter(tables.actions, cursor!)));
-                if (first === undefined) {
-                    return null;
-                }
-                const [[actionId],] = first;
-                return actionId;
-            }
-        );
-        if (nextAction === null) {
-            break;
-        }
-        const replayers = [
-            doReplay1_1_0,
-            doReplay1_1_1,
-        ]
-        console.log(`REPLAY ${nextAction}`)
-
-        for (const replayer of replayers) {
-            await db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
-                const ts = openAll(db);
-
-                const savedAction = (await readables.get(ts.actions, [nextAction], null));
-                if (savedAction === null) {
-                    throw new Error('wut');
-                }
-
-                await replayer(nextAction, savedAction, ts);
-            });
-        }
-
-        cursor = [nextAction];
-    }
-    console.log('DONE')
-    return {}
-}
-
 type DeleteCollectionRequest = {
     collectionId: string
 }
@@ -569,7 +461,7 @@ function batch(): Router {
     // })
 
     res.post('/replay', function(req: Request<{}>, res, next) {
-        replay().then(result => {
+        FRAMEWORK.handleReplay().then(result => {
             res.status(200)
             res.json(result)
         }).catch(next)

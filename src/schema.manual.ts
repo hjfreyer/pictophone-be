@@ -1,9 +1,9 @@
 
 import * as db from './db'
-import { Live, Diff, Change, Readable } from './interfaces'
+import { Key, Live, Diff, Change, Readable } from './interfaces'
 import * as model from './model'
 import { validate as validateModel } from './model/index.validator'
-import { validateLive, applyChanges, diffToChange, getActionId } from './schema'
+import { validateLive, applyChanges, diffToChange, getActionId, integrateLive, integrateReplay } from './schema'
 import * as readables from './readables'
 import * as util from './util'
 import * as ixa from "ix/asynciterable"
@@ -32,75 +32,57 @@ export class Framework {
             const [actionId, savedAction, maybeError] = await integrateLive(
                 getTrackedInputs1_1_0, this.i1_1_0.integrate, applyOutputs1_1_0, ts, action);
 
-            await replayCollection('state-1.1.1', getTrackedInputs1_1_1,
+            await integrateReplay('state-1.1.1', getTrackedInputs1_1_1,
                 this.i1_1_1.integrate, applyOutputs1_1_1, ts, actionId, savedAction);
 
             return maybeError;
         });
     }
-}
 
-async function integrateLive<Inputs, Outputs>(
-    inputGetter: (ts: Tables) => [Set<string>, Inputs],
-    integrator: (a: model.AnyAction, inputs: Inputs) => Promise<util.Result<Outputs, model.AnyError>>,
-    outputSaver: (ts: Tables, actionId: string, outputs: Outputs) => void,
-    ts: Tables,
-    action: model.AnyAction): Promise<[string, model.SavedAction, model.AnyError | null]> {
-    // Set up inputs.
-    const [parentSet, inputs] = inputGetter(ts);
+    async handleReplay(): Promise<void> {
+        let cursor: Key = [''];
+        console.log('REPLAY')
+        while (true) {
+            const nextAction = await this.tx(
+                async (db: db.Database): Promise<string | null> => {
+                    const tables = openAll(db);
+                    const first = await ixa.first(ixa.from(readables.readAllAfter(tables.actions, cursor!)));
+                    if (first === undefined) {
+                        return null;
+                    }
+                    const [[actionId],] = first;
+                    return actionId;
+                }
+            );
+            if (nextAction === null) {
+                break;
+            }
+            const replayers = [
+                (ts: Tables, actionId: string, savedAction: model.SavedAction) =>
+                    integrateReplay('state-1.1.0', getTrackedInputs1_1_0,
+                        this.i1_1_0.integrate, applyOutputs1_1_0, ts, actionId, savedAction),
+                (ts: Tables, actionId: string, savedAction: model.SavedAction) =>
+                    integrateReplay('state-1.1.1', getTrackedInputs1_1_1,
+                        this.i1_1_1.integrate, applyOutputs1_1_1, ts, actionId, savedAction),
+            ]
+            console.log(`REPLAY ${nextAction}`)
 
-    // Get outputs.
-    const outputsOrError = await integrator(action, inputs)
+            for (const replayer of replayers) {
+                await this.tx(async (db: db.Database): Promise<void> => {
+                    const ts = openAll(db);
 
-    // Save the action and metadata.
-    const savedAction: model.SavedAction = { parents: util.sorted(parentSet), action }
-    const actionId = getActionId(savedAction)
+                    const savedAction = (await readables.get(ts.actions, [nextAction], null));
+                    if (savedAction === null) {
+                        throw new Error('wut');
+                    }
 
-    ts.actions.set([actionId], savedAction);
+                    await replayer(ts, nextAction, savedAction);
+                });
+            }
 
-    if (outputsOrError.status === 'ok') {
-        outputSaver(ts, actionId, outputsOrError.value)
-    }
-
-    return [actionId, savedAction, outputsOrError.status === 'ok' ? null : outputsOrError.error];
-}
-
-async function replayCollection<Inputs, Outputs>(
-    collectionId: string,
-    inputGetter: (ts: Tables) => [Set<string>, Inputs],
-    integrator: (a: model.AnyAction, inputs: Inputs) => Promise<util.Result<Outputs, model.AnyError>>,
-    outputSaver: (ts: Tables, actionId: string, outputs: Outputs) => void,
-    ts: Tables,
-    actionId: string,
-    savedAction: model.SavedAction): Promise<void> {
-    // Set up inputs.
-    const [parentSet, inputs] = inputGetter(ts);
-
-    const meta = await readables.get(ts.actionTableMetadata, [actionId, collectionId], null);
-    if (meta !== null) {
-        // Already done.
-        console.log(`- ${collectionId}: PASS`)
-        return;
-    }
-
-    const parentMetas = ixa.from(savedAction.parents).pipe(
-        ixaop.map(p => readables.get(ts.actionTableMetadata, [p, collectionId], null)),
-    )
-
-    if (await ixa.some(parentMetas, meta => meta === null)) {
-        console.log(`- ${collectionId}: PASS`)
-        return;
-    }
-    console.log(`- ${collectionId}: REPLAY`)
-    const outputs = await integrator(savedAction.action, inputs);
-
-    for (const usedParent of parentSet) {
-        if (savedAction.parents.indexOf(usedParent) === -1) {
-            throw new Error("tried to access state not specified by a parent")
+            cursor = [nextAction];
         }
-    }
-
-    if (outputs.status === 'ok') {
-        outputSaver(ts, actionId, outputs.value)
+        console.log('DONE')
     }
 }
+
