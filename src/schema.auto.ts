@@ -15,7 +15,7 @@ export type Tables = {
     state1_1_1_games: db.Table<Live<model.Game1_1>>
     state1_1_1_shortCodeUsageCount: db.Table<Live<model.NumberValue>>
     state1_1_1_gamesByPlayer: db.Table<Live<model.Game1_1>>
-    
+
 }
 
 export function openAll(db: db.Database): Tables {
@@ -45,10 +45,10 @@ export function openAll(db: db.Database): Tables {
             validator: validateLive(validateModel('NumberValue'))
         }),
         state1_1_1_gamesByPlayer: db.open({
-            schema: ["players","state-1.1.1-games-by-player"],
+            schema: ["players", "state-1.1.1-games-by-player"],
             validator: validateLive(validateModel('Game1_1'))
         }),
-        
+
     }
 }
 
@@ -140,7 +140,7 @@ function getChangelog1_1_1(outputs: Outputs1_1_1): model.ActionTableMetadata {
                 changes: outputs.shortCodeUsageCount.map(diffToChange),
             },
             {
-                schema: ["players","state-1.1.1-games-by-player"],
+                schema: ["players", "state-1.1.1-games-by-player"],
                 changes: outputs.gamesByPlayer.map(diffToChange),
             },
         ]
@@ -152,16 +152,16 @@ function getChangelog1_1_1(outputs: Outputs1_1_1): model.ActionTableMetadata {
 
 export async function deleteCollection(runner: db.TxRunner, collectionId: string): Promise<void> {
     switch (collectionId) {
-    
+
         case 'state-1.1.0':
             await deleteMeta(runner, 'state-1.1.0')
-        
+
             await deleteTable(runner, 'state1_1_0_games')
             await deleteTable(runner, 'state1_1_0_shortCodeUsageCount')
             break;
         case 'state-1.1.1':
             await deleteMeta(runner, 'state-1.1.1')
-        
+
             await deleteTable(runner, 'state1_1_1_games')
             await deleteTable(runner, 'state1_1_1_shortCodeUsageCount')
             await deleteTable(runner, 'state1_1_1_gamesByPlayer')

@@ -174,28 +174,23 @@ function upgradeAction1_0(a: Action1_0): Action1_1 {
 }
 
 
-async function integrate1_1MiddleHelper(a: Action1_1, inputs: Inputs1_1_0): Promise<Outputs1_1_0> {
+async function integrate1_1_0MiddleHelper(a: Action1_1, inputs: Inputs1_1_0): Promise<Outputs1_1_0> {
     // Action1_1 + Game state + scuc state => Diffs of Games
-    const gameDiffs = await integrate1_1Helper(a, inputs);
+    const gameDiffs = await integrate1_1_0Helper(a, inputs);
 
-    // Diffs of games => Diffs of numbers indexed by short code and game.
+    // Diffs of games => Diffs of numbers indexed by short code.
     const indexedShortCodeDiffs = diffThroughMapper(mapShortCode, gameDiffs);
 
-    // Diff of numbers indexed by short code => effective change
-    // to count of each short code.
-    const shortCodeDeltas = combineShortCodeDiffs(indexedShortCodeDiffs)
-
-    // Effective delta + scuc state = scuc diffs.
-    const aggregatedShortCodeDiffs = await ixa.toArray(
-        reduce(SUM_REDUCER, inputs.shortCodeUsageCount, shortCodeDeltas))
+    // Diffs of indexed short code count => diffs of sums to apply to DB.
+    const shortCodeUsageCountDiffs = await combine(SUM_COMBINER, inputs.shortCodeUsageCount, indexedShortCodeDiffs)
 
     return {
         games: gameDiffs,
-        shortCodeUsageCount: aggregatedShortCodeDiffs,
+        shortCodeUsageCount: shortCodeUsageCountDiffs,
     }
 }
 
-async function integrate1_1Helper(a: Action1_1, inputs: Inputs1_1_0): Promise<Diff<Game1_1>[]> {
+async function integrate1_1_0Helper(a: Action1_1, inputs: Inputs1_1_0): Promise<Diff<Game1_1>[]> {
     const game = await readables.get(inputs.games, [a.gameId], defaultGame1_1());
     switch (a.kind) {
         case 'join_game':
@@ -253,6 +248,54 @@ async function integrate1_1Helper(a: Action1_1, inputs: Inputs1_1_0): Promise<Di
     }
 }
 
+
+interface Combiner<T> {
+    identity(): T
+    opposite(n: T): T
+    combine(a: T, b: T): T
+}
+
+const SUM_COMBINER: Combiner<NumberValue> = {
+    identity(): NumberValue { return { value: 0 } },
+    opposite(n: NumberValue): NumberValue { return { value: -n.value } },
+    combine(a: NumberValue, b: NumberValue): NumberValue {
+        return { value: a.value + b.value }
+    }
+}
+
+function combine<T>(
+    combiner: Combiner<T>,
+    accTable: Readable<T>,
+    diffs: Diff<T>[]): Promise<Diff<T>[]> {
+    const deltas: Item<T>[] = Array.from(ix.from(diffs).pipe(
+        ixop.flatMap((diff: Diff<T>): Item<T>[] => {
+            switch (diff.kind) {
+                case 'add':
+                    return [[diff.key, diff.value]];
+                case 'delete':
+                    return [[diff.key, combiner.opposite(diff.value)]];
+                case 'replace':
+                    return [[diff.key, diff.newValue], [diff.key, combiner.opposite(diff.oldValue)]];
+            }
+        }),
+        ixop.groupBy(
+            ([key, delta]) => JSON.stringify(key),
+            ([key, delta]) => delta,
+            (key_json, deltas) => {
+                return [JSON.parse(key_json), ix.reduce(deltas, combiner.combine, combiner.identity())]
+            })
+    ))
+
+    const reducer: Reducer<T, T> = {
+        start: combiner.identity(),
+        reduce(key: Key, acc: T, delta: T): T {
+            return combiner.combine(acc, delta)
+        }
+    }
+
+    return ixa.toArray(reduce(reducer, accTable, deltas))
+}
+
 const SUM_REDUCER: Reducer<NumberValue, NumberValue> = {
     start: { value: 0 },
     reduce(_key: Key, acc: NumberValue, action: NumberValue): NumberValue {
@@ -296,7 +339,7 @@ function reduce<TAction, TAccumulator>(
 }
 
 async function integrate1_1_1MiddleHelper(a: Action1_1, inputs: Inputs1_1_0): Promise<Outputs1_1_1> {
-    const outputs1_1 = await integrate1_1MiddleHelper(a, inputs);
+    const outputs1_1 = await integrate1_1_0MiddleHelper(a, inputs);
 
     return {
         ...outputs1_1,
@@ -373,29 +416,7 @@ function mapShortCode([key, game]: Item<Game1_1>): Item<NumberValue>[] {
     if (game.state !== 'CREATED' || game.shortCode === '') {
         return []
     }
-    return [[[game.shortCode, ...key], { value: 1 }]]
-}
-
-function combineShortCodeDiffs(diffs: Diff<NumberValue>[]): Item<NumberValue>[] {
-    return Array.from(ix.from(diffs).pipe(
-        ixop.map((diff: Diff<NumberValue>): [string, number] => {
-            // Strip out gameId and turn the diff into a delta.
-            const sc = diff.key[0]
-            switch (diff.kind) {
-                case 'add':
-                    return [sc, diff.value.value]
-                case 'delete':
-                    return [sc, -diff.value.value]
-                case 'replace':
-                    return [sc, diff.newValue.value - diff.oldValue.value]
-            }
-        }),
-
-        // Combine and drop 0-deltas.
-        ixop.groupBy(([sc,]) => sc, ([, delta]) => delta,
-            (sc, deltas): Item<NumberValue> => [[sc], { value: ix.sum(deltas) }]),
-        ixop.filter(([, delta]) => delta.value !== 0),
-    ))
+    return [[[game.shortCode], { value: 1 }]]
 }
 
 async function doLiveIntegration1_1_0(action: Action1_1, ts: Tables): Promise<[string, SavedAction]> {
@@ -403,7 +424,7 @@ async function doLiveIntegration1_1_0(action: Action1_1, ts: Tables): Promise<[s
     const [parentSet, inputs] = getTrackedInputs1_1_0(ts);
 
     // Get outputs.
-    const outputs = await integrate1_1MiddleHelper(action, inputs)
+    const outputs = await integrate1_1_0MiddleHelper(action, inputs)
 
     // Save the action and metadata.
     const savedAction: SavedAction = { parents: util.sorted(parentSet), action }
@@ -417,7 +438,7 @@ async function doLiveIntegration1_1_0(action: Action1_1, ts: Tables): Promise<[s
 }
 
 function replayIntegration1_1_0(a: AnyAction, inputs: Inputs1_1_0): Promise<Outputs1_1_0> {
-    return integrate1_1MiddleHelper(upgradeAction(a), inputs)
+    return integrate1_1_0MiddleHelper(upgradeAction(a), inputs)
 }
 
 function replayIntegration1_1_1(a: AnyAction, inputs: Inputs1_1_1): Promise<Outputs1_1_1> {
