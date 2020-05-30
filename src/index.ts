@@ -17,6 +17,7 @@ import timestamp from 'timestamp-nano';
 
 import { sha256 } from 'js-sha256';
 import _ from 'lodash';
+import * as collections from './collections';
 import * as ix from "ix/iterable"
 import * as ixop from "ix/iterable/operators"
 import * as ixa from "ix/asynciterable"
@@ -27,14 +28,9 @@ import * as ranges from './ranges'
 import { Readable, Diff, ItemIterable, Range, Key, Item, Live, Change } from './interfaces'
 import { strict as assert } from 'assert';
 import {
+    Integrator1_1_0, Integrator1_1_1, Framework,
     openAll, Tables, applyOutputs1_1_0, applyOutputs1_1_1, Outputs1_1_0, Outputs1_1_1,
     Inputs1_1_0, Inputs1_1_1, getTrackedInputs1_1_0, getTrackedInputs1_1_1, deleteCollection
-} from './schema.auto';
-import {
-    Integrator1_1_0, Integrator1_1_1, Framework
-} from './schema.manual';
-import {
-    getActionId
 } from './schema';
 
 
@@ -159,6 +155,14 @@ function upgradeAction1_0(a: Action1_0): Action1_1 {
 
 type AsyncResult1_1<R> = util.AsyncResult<R, Error1_1>
 
+export const SUM_COMBINER: collections.Combiner<NumberValue> = {
+    identity(): NumberValue { return { value: 0 } },
+    opposite(n: NumberValue): NumberValue { return { value: -n.value } },
+    combine(a: NumberValue, b: NumberValue): NumberValue {
+        return { value: a.value + b.value }
+    }
+}
+
 async function integrate1_1_0MiddleHelper(
     a: Action1_1, inputs: Inputs1_1_0): AsyncResult1_1<Outputs1_1_0> {
     // Action1_1 + Game state + scuc state => Diffs of Games
@@ -166,17 +170,17 @@ async function integrate1_1_0MiddleHelper(
     if (gameDiffsResult.status !== 'ok') {
         return gameDiffsResult
     }
-    const gameDiffs = gameDiffsResult.value;
+    const games = collections.fromDiffs(gameDiffsResult.value);
 
     // Diffs of games => Diffs of numbers indexed by short code.
-    const indexedShortCodeDiffs = diffThroughMapper(mapShortCode, gameDiffs);
+    const indexedShortCodes = collections.map(games, mapShortCode);
 
     // Diffs of indexed short code count => diffs of sums to apply to DB.
-    const shortCodeUsageCountDiffs = await combine(SUM_COMBINER, inputs.shortCodeUsageCount, indexedShortCodeDiffs)
+    const shortCodeUsageCount = await collections.combine(indexedShortCodes, SUM_COMBINER, inputs.shortCodeUsageCount)
 
     return util.ok({
-        games: gameDiffs,
-        shortCodeUsageCount: shortCodeUsageCountDiffs,
+        games: await collections.toDiffs(games),
+        shortCodeUsageCount: await collections.toDiffs(shortCodeUsageCount),
     })
 }
 
@@ -250,94 +254,6 @@ async function integrate1_1_0Helper(a: Action1_1, inputs: Inputs1_1_0):
 }
 
 
-interface Combiner<T> {
-    identity(): T
-    opposite(n: T): T
-    combine(a: T, b: T): T
-}
-
-const SUM_COMBINER: Combiner<NumberValue> = {
-    identity(): NumberValue { return { value: 0 } },
-    opposite(n: NumberValue): NumberValue { return { value: -n.value } },
-    combine(a: NumberValue, b: NumberValue): NumberValue {
-        return { value: a.value + b.value }
-    }
-}
-
-function combine<T>(
-    combiner: Combiner<T>,
-    accTable: Readable<T>,
-    diffs: Diff<T>[]): Promise<Diff<T>[]> {
-    const deltas: Item<T>[] = Array.from(ix.from(diffs).pipe(
-        ixop.flatMap((diff: Diff<T>): Item<T>[] => {
-            switch (diff.kind) {
-                case 'add':
-                    return [[diff.key, diff.value]];
-                case 'delete':
-                    return [[diff.key, combiner.opposite(diff.value)]];
-                case 'replace':
-                    return [[diff.key, diff.newValue], [diff.key, combiner.opposite(diff.oldValue)]];
-            }
-        }),
-        ixop.groupBy(
-            ([key, delta]) => JSON.stringify(key),
-            ([key, delta]) => delta,
-            (key_json, deltas) => {
-                return [JSON.parse(key_json), ix.reduce(deltas, combiner.combine, combiner.identity())]
-            })
-    ))
-
-    const reducer: Reducer<T, T> = {
-        start: combiner.identity(),
-        reduce(key: Key, acc: T, delta: T): T {
-            return combiner.combine(acc, delta)
-        }
-    }
-
-    return ixa.toArray(reduce(reducer, accTable, deltas))
-}
-
-const SUM_REDUCER: Reducer<NumberValue, NumberValue> = {
-    start: { value: 0 },
-    reduce(_key: Key, acc: NumberValue, action: NumberValue): NumberValue {
-        return { value: acc.value + action.value }
-    }
-}
-
-interface Reducer<TAction, TAccumulator> {
-    start: TAccumulator
-    reduce(key: Key, acc: TAccumulator, action: TAction): TAccumulator
-}
-
-function reduce<TAction, TAccumulator>(
-    reducer: Reducer<TAction, TAccumulator>,
-    accTable: Readable<TAccumulator>,
-    actions: Item<TAction>[]): AsyncIterable<Diff<TAccumulator>> {
-    return ixa.from(actions).pipe(
-        ixaop.flatMap(async ([key, action]: Item<TAction>): Promise<AsyncIterable<Diff<TAccumulator>>> => {
-            const oldAccOrNull = await readables.get(accTable, key, null);
-            const oldAcc = oldAccOrNull !== null ? oldAccOrNull : reducer.start;
-            const newAcc = reducer.reduce(key, oldAcc, action);
-            if (deepEqual(oldAcc, newAcc)) {
-                return ixa.empty();
-            }
-            if (oldAccOrNull === null) {
-                return ixa.of({
-                    kind: 'add',
-                    key,
-                    value: newAcc
-                })
-            } else {
-                return ixa.of({
-                    kind: 'replace',
-                    key,
-                    oldValue: oldAcc,
-                    newValue: newAcc,
-                })
-            }
-        })
-    )
-}
 
 async function integrate1_1_1MiddleHelper(a: Action1_1, inputs: Inputs1_1_0): AsyncResult1_1<Outputs1_1_1> {
     const outputs1_1OrError = await integrate1_1_0MiddleHelper(a, inputs);
@@ -425,25 +341,6 @@ function mapShortCode([key, game]: Item<Game1_1>): Item<NumberValue>[] {
     return [[[game.shortCode], { value: 1 }]]
 }
 
-async function doLiveIntegration1_1_0(action: Action1_1, ts: Tables): Promise<[string, SavedAction, Error1_1 | null]> {
-    // Set up inputs.
-    const [parentSet, inputs] = getTrackedInputs1_1_0(ts);
-
-    // Get outputs.
-    const outputsOrError = await integrate1_1_0MiddleHelper(action, inputs)
-
-    // Save the action and metadata.
-    const savedAction: SavedAction = { parents: util.sorted(parentSet), action }
-    const actionId = getActionId(savedAction)
-
-    ts.actions.set([actionId], savedAction);
-
-    if (outputsOrError.status === 'ok') {
-        applyOutputs1_1_0(ts, actionId, outputsOrError.value)
-    }
-
-    return [actionId, savedAction, outputsOrError.status === 'ok' ? null : outputsOrError.error];
-}
 
 type DeleteCollectionRequest = {
     collectionId: string

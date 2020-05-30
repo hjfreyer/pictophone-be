@@ -1,11 +1,12 @@
 
-import * as db from './db'
-import { Key, Live, Diff, Change, Readable } from './interfaces'
-import * as model from './model'
-import { validate as validateModel } from './model/index.validator'
-import { validateLive, applyChanges, diffToChange, getActionId, integrateLive, integrateReplay } from './schema'
-import * as readables from './readables'
-import * as util from './util'
+import * as db from '../db'
+import { Key, Live, Diff, Change, Readable } from '../interfaces'
+import * as model from '../model'
+import { validate as validateModel } from '../model/index.validator'
+import { integrateLive, integrateReplay } from '../schema'
+import { validateLive, applyChanges, diffToChange, getActionId } from '../base'
+import * as readables from '../readables'
+import * as util from '../util'
 import * as ixa from "ix/asynciterable"
 import * as ixaop from "ix/asynciterable/operators"
 
@@ -13,7 +14,7 @@ import {
     Inputs1_1_0, Inputs1_1_1, Outputs1_1_0, Outputs1_1_1, Tables, openAll, getTrackedInputs1_1_0
     , applyOutputs1_1_0, getTrackedInputs1_1_1
     , applyOutputs1_1_1
-} from './schema.auto'
+} from './auto'
 
 export interface Integrator1_1_0 {
     integrate(action: model.AnyAction, inputs: Inputs1_1_0): Promise<util.Result<Outputs1_1_0, model.AnyError>>

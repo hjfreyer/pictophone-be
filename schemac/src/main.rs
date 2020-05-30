@@ -50,12 +50,12 @@ fn json_formatter(
 
 static TEMPLATE : &'static str = "// DON'T EDIT THIS FILE, IT IS AUTO GENERATED
 
-import * as db from './db'
-import \\{ Live, Diff, Change, Readable } from './interfaces'
-import * as model from './model'
-import \\{ validate as validateModel } from './model/index.validator'
-import \\{ validateLive, applyChanges, diffToChange } from './schema'
-import * as readables from './readables'
+import * as db from '../db'
+import \\{ Live, Diff, Change, Readable } from '../interfaces'
+import * as model from '../model'
+import \\{ validate as validateModel } from '../model/index.validator'
+import \\{ validateLive, applyChanges, diffToChange } from '../base'
+import * as readables from '../readables'
 
 export type Tables = \\{
     actions: db.Table<model.SavedAction>
