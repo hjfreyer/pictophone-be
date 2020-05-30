@@ -10,6 +10,7 @@ collections:
     type: NumberValue
     input: true
 - id: "1.1.1"
+  is_primary: true
   tables:
   - id: games
     schema: [state-1.1.1-games]

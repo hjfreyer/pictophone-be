@@ -7,9 +7,7 @@ import * as model from '../model'
 import { validate as validateModel } from '../model/index.validator'
 import { validateLive, applyChanges, diffToChange } from '../base'
 import * as readables from '../readables'
-import { deleteTable, deleteMeta } from '.'
-
-export * from './manual';
+import { deleteTable, deleteMeta, integrateLive, integrateReplay } from '.'
 
 export type Tables = {
     actions: db.Table<model.SavedAction>
@@ -57,6 +55,43 @@ export function openAll(db: db.Database): Tables {
 export interface Integrators {
     integrate1_1_0(action: model.AnyAction, inputs: Inputs1_1_0): Promise<util.Result<Outputs1_1_0, model.AnyError>>
     integrate1_1_1(action: model.AnyAction, inputs: Inputs1_1_1): Promise<util.Result<Outputs1_1_1, model.AnyError>>
+}
+
+export function getSecondaryLiveIntegrators(integrators: Integrators):
+    ((ts: Tables, actionId: string, savedAction: model.SavedAction) => Promise<void>)[] {
+    return [
+        (ts: Tables, actionId: string, savedAction: model.SavedAction) =>
+            integrateReplay(
+                'state-1.1.0',
+                getTrackedInputs1_1_0,
+                integrators.integrate1_1_0,
+                applyOutputs1_1_0,
+                emptyOutputs1_1_0,
+                ts, actionId, savedAction),
+
+    ]
+}
+
+export function getAllReplayers(integrators: Integrators, actionId: string, savedAction: model.SavedAction):
+    ((ts: Tables) => Promise<void>)[] {
+    return [
+        (ts: Tables) =>
+            integrateReplay(
+                'state-1.1.0',
+                getTrackedInputs1_1_0,
+                integrators.integrate1_1_0,
+                applyOutputs1_1_0,
+                emptyOutputs1_1_0,
+                ts, actionId, savedAction),
+        (ts: Tables) =>
+            integrateReplay(
+                'state-1.1.1',
+                getTrackedInputs1_1_1,
+                integrators.integrate1_1_1,
+                applyOutputs1_1_1,
+                emptyOutputs1_1_1,
+                ts, actionId, savedAction),
+    ]
 }
 
 
@@ -114,7 +149,15 @@ function getChangelog1_1_0(outputs: Outputs1_1_0): model.ActionTableMetadata {
 
 // BEGIN 1.1.1
 
-export type Inputs1_1_1 = {
+export function getPrimaryLiveIntegrator(integrators: Integrators):
+    (ts: Tables, action: model.AnyAction) => Promise<[string, model.SavedAction, model.AnyError | null]> {
+    return (ts, action) => integrateLive(
+        getTrackedInputs1_1_1,
+        integrators.integrate1_1_1,
+        applyOutputs1_1_1,
+        emptyOutputs1_1_1,
+        ts, action);
+} export type Inputs1_1_1 = {
     games: Readable<model.Game1_1>
     shortCodeUsageCount: Readable<model.NumberValue>
 }

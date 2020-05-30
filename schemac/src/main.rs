@@ -9,6 +9,10 @@ struct Config {
 #[derive(Serialize, Deserialize, Debug)]
 struct Collection {
     id: String,
+
+    #[serde(default)]
+    is_primary: bool,
+
     tables: Vec<Table>,
 }
 
@@ -57,9 +61,7 @@ import * as model from '../model'
 import \\{ validate as validateModel } from '../model/index.validator'
 import \\{ validateLive, applyChanges, diffToChange } from '../base'
 import * as readables from '../readables'
-import \\{ deleteTable, deleteMeta } from '.'
-
-export * from './manual';
+import \\{ deleteTable, deleteMeta, integrateLive, integrateReplay } from '.'
 
 export type Tables = \\{
     actions: db.Table<model.SavedAction>
@@ -98,8 +100,55 @@ export interface Integrators \\{
     {{- endfor }}
 }
 
+export function getSecondaryLiveIntegrators(integrators: Integrators):
+    ((ts: Tables, actionId: string, savedAction: model.SavedAction) => Promise<void>)[] \\{
+    return [
+        {{- for collection in collections }}
+        {{ if collection.is_primary -}}
+        {{ else -}}
+        (ts: Tables, actionId: string, savedAction: model.SavedAction) =>
+            integrateReplay(
+                'state-{collection.id}',
+                getTrackedInputs{collection.id | ident},
+                integrators.integrate{collection.id | ident},
+                applyOutputs{collection.id | ident},
+                emptyOutputs{collection.id | ident},
+                ts, actionId, savedAction),
+        {{- endif }}
+        {{- endfor }}
+    ]
+}
+
+export function getAllReplayers(integrators: Integrators, actionId: string, savedAction: model.SavedAction):
+    ((ts: Tables) => Promise<void>)[] \\{
+    return [
+        {{- for collection in collections }}
+        (ts: Tables) =>
+            integrateReplay(
+                'state-{collection.id}',
+                getTrackedInputs{collection.id | ident},
+                integrators.integrate{collection.id | ident},
+                applyOutputs{collection.id | ident},
+                emptyOutputs{collection.id | ident},
+                ts, actionId, savedAction),
+        {{- endfor }}
+    ]
+}
+
 {{ for collection in collections }}
 // BEGIN {collection.id}
+
+{{ if collection.is_primary -}}
+export function getPrimaryLiveIntegrator(integrators: Integrators):
+    (ts: Tables, action: model.AnyAction) => Promise<[string, model.SavedAction, model.AnyError | null]> \\{
+    return (ts, action) => integrateLive(
+        getTrackedInputs{collection.id | ident},
+        integrators.integrate{collection.id | ident},
+        applyOutputs{collection.id | ident},
+        emptyOutputs{collection.id | ident},
+        ts, action);
+}
+{{- endif -}}
 
 export type Inputs{collection.id | ident} = \\{
 {{- for table in collection.tables -}}
