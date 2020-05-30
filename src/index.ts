@@ -176,7 +176,7 @@ async function integrate1_1_0MiddleHelper(
     const indexedShortCodes = collections.map(games, mapShortCode);
 
     // Diffs of indexed short code count => diffs of sums to apply to DB.
-    const shortCodeUsageCount = await collections.combine(indexedShortCodes, SUM_COMBINER, inputs.shortCodeUsageCount)
+    const shortCodeUsageCount = collections.combine(indexedShortCodes, SUM_COMBINER, inputs.shortCodeUsageCount)
 
     return util.ok({
         games: await collections.toDiffs(games),
@@ -265,7 +265,8 @@ async function integrate1_1_1MiddleHelper(a: Action1_1, inputs: Inputs1_1_0): As
 
     return util.ok({
         ...outputs1_1,
-        gamesByPlayer: diffThroughMapper(gameToGamesByPlayer, outputs1_1.games)
+        gamesByPlayer: await collections.toDiffs(collections.map(
+            collections.fromDiffs(outputs1_1.games), gameToGamesByPlayer))
     })
 }
 
@@ -274,64 +275,6 @@ function gameToGamesByPlayer([gameKey, game]: Item<Game1_1>): Item<Game1_1>[] {
         return []
     }
     return util.sorted(game.players).map((playerId): Item<Game1_1> => [[playerId, ...gameKey], game])
-}
-
-interface Mapper<I, O> {
-    // Must be injective: input items with different keys must never produce 
-    // output items with the same key.
-    (item: Item<I>): Item<O>[]
-}
-
-function diffThroughMapper<I, O>(mapper: Mapper<I, O>, diffs: Diff<I>[]): Diff<O>[] {
-    return _.flatMap(diffs, d => singleDiffThroughMapper(mapper, d))
-}
-
-function singleDiffThroughMapper<I, O>(mapper: Mapper<I, O>, diff: Diff<I>): Diff<O>[] {
-    const [oldMapped, newMapped] = (() => {
-        switch (diff.kind) {
-            case 'add':
-                return [[], mapper([diff.key, diff.value])]
-            case 'delete':
-                return [mapper([diff.key, diff.value]), []]
-            case 'replace':
-                return [mapper([diff.key, diff.oldValue]), mapper([diff.key, diff.newValue])]
-        }
-    })()
-    type AgedItem = { age: 'old' | 'new', key: Key, value: O };
-    const tagger = (age: 'old' | 'new') => ([key, value]: Item<O>): AgedItem => ({ age, key, value });
-
-    const aged: ix.IterableX<AgedItem> = ix.concat(
-        oldMapped.map(tagger('old')),
-        newMapped.map(tagger('new')));
-    return Array.from(aged.pipe(
-        ixop.groupBy(({ key }) => JSON.stringify(key), x => x, (_, valueIter) => {
-            const values = Array.from(valueIter);
-            if (values.length === 0) {
-                throw new Error("wtf")
-            }
-            if (2 < values.length) {
-                throw new Error("mapper must have returned the same key multiple times")
-            }
-            if (values.length === 1) {
-                const [{ age, key, value }] = values;
-                return {
-                    kind: age === 'old' ? 'delete' : 'add',
-                    key,
-                    value,
-                }
-            }
-            // Else, values has 2 elements.
-            if (values[0].age === values[1].age) {
-                throw new Error("mapper must have returned the same key multiple times")
-            }
-            return {
-                kind: 'replace',
-                key: values[0].key,
-                oldValue: values[0].age === 'old' ? values[0].value : values[1].value,
-                newValue: values[0].age === 'new' ? values[0].value : values[1].value,
-            }
-        })
-    ))
 }
 
 function mapShortCode([key, game]: Item<Game1_1>): Item<NumberValue>[] {
