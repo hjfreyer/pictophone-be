@@ -51,7 +51,6 @@ app.listen(port, function() {
     console.log(`Example app listening on port ${port}!`)
 })
 
-
 const MAX_POINTS = 50_000
 
 async function doUpload(body: unknown): Promise<UploadResponse> {

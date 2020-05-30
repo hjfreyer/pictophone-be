@@ -43,11 +43,11 @@ export class Framework {
         return this.tx(async (db: db.Database): Promise<model.AnyError | null> => {
             const ts = openAll(db);
             const [actionId, savedAction, maybeError] = await integrateLive(
-                getTrackedInputs1_1_0, this.integrators.integrate1_1_0, 
-                applyOutputs1_1_0, emptyOutputs1_1_0, ts, action);
+                getTrackedInputs1_1_1, this.integrators.integrate1_1_1,
+                applyOutputs1_1_1, emptyOutputs1_1_1, ts, action);
 
-            await integrateReplay('state-1.1.1', getTrackedInputs1_1_1,
-                this.integrators.integrate1_1_1, applyOutputs1_1_1, emptyOutputs1_1_1, ts, actionId, savedAction);
+            await integrateReplay('state-1.1.0', getTrackedInputs1_1_0,
+                this.integrators.integrate1_1_0, applyOutputs1_1_0, emptyOutputs1_1_0, ts, actionId, savedAction);
 
             return maybeError;
         });
