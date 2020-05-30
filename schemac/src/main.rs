@@ -51,6 +51,7 @@ fn json_formatter(
 static TEMPLATE : &'static str = "// DON'T EDIT THIS FILE, IT IS AUTO GENERATED
 
 import * as db from '../db'
+import * as util from '../util'
 import \\{ Live, Diff, Change, Readable } from '../interfaces'
 import * as model from '../model'
 import \\{ validate as validateModel } from '../model/index.validator'
@@ -58,13 +59,15 @@ import \\{ validateLive, applyChanges, diffToChange } from '../base'
 import * as readables from '../readables'
 import \\{ deleteTable, deleteMeta } from '.'
 
+export * from './manual';
+
 export type Tables = \\{
     actions: db.Table<model.SavedAction>
     actionTableMetadata: db.Table<model.ActionTableMetadata>
-    {{ for collection in collections -}}
-    {{ for table in collection.tables -}}
+    {{- for collection in collections -}}
+    {{ for table in collection.tables }}
     state{ collection.id | ident}_{table.id}: db.Table<Live<model.{table.type}>>
-    {{ endfor }}
+    {{- endfor -}}
     {{- endfor }}
 }
 
@@ -78,15 +81,21 @@ export function openAll(db: db.Database): Tables \\{
             schema: ['actions', '_META_'],
             validator: validateModel('ActionTableMetadata')
         }),
-        {{ for collection in collections -}}
-        {{ for table in collection.tables -}}
+        {{- for collection in collections -}}
+        {{ for table in collection.tables }}
         state{ collection.id | ident}_{table.id}: db.open(\\{
             schema: {table.schema | json},
             validator: validateLive(validateModel('{table.type}'))
         }),
+        {{- endfor -}}
         {{ endfor }}
-        {{- endfor }}
     }
+}
+
+export interface Integrators \\{
+    {{- for collection in collections }}
+    integrate{ collection.id | ident}(action: model.AnyAction, inputs: Inputs{ collection.id | ident}): Promise<util.Result<Outputs{ collection.id | ident}, model.AnyError>>
+    {{- endfor }}
 }
 
 {{ for collection in collections }}
@@ -117,6 +126,14 @@ export type Outputs{collection.id | ident} = \\{
 {{- for table in collection.tables }}
     { table.id }: Diff<model.{ table.type }>[]
 {{- endfor }}
+}
+
+export function emptyOutputs{collection.id | ident}(): Outputs{collection.id | ident} \\{
+    return \\{
+{{- for table in collection.tables }}
+        { table.id }: [],
+{{- endfor }}
+    }
 }
 
 export function applyOutputs{collection.id | ident}(ts: Tables, actionId: string, outputs: Outputs{collection.id | ident}): void \\{

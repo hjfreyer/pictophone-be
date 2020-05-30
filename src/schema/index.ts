@@ -5,7 +5,10 @@ import { validate as validateModel } from '../model/index.validator'
 import { AnyAction, AnyError, SavedAction } from '../model';
 import { sha256 } from 'js-sha256';
 import _ from 'lodash';
-import { Tables, openAll } from './auto';
+import {
+    Tables, openAll, getPrimaryLiveIntegrator,
+    getSecondaryLiveIntegrators, Integrators, getAllReplayers
+} from './auto';
 import * as util from '../util'
 import * as ixa from "ix/asynciterable"
 import * as ixaop from "ix/asynciterable/operators"
@@ -13,7 +16,46 @@ import * as readables from '../readables'
 import { getActionId } from '../base';
 
 export * from './auto';
-export * from './manual'
+
+export class Framework {
+    constructor(private tx: db.TxRunner, private integrators: Integrators) { }
+
+    handleAction(action: AnyAction): Promise<AnyError | null> {
+        return this.tx(async (db: db.Database): Promise<AnyError | null> => {
+            const ts = openAll(db);
+
+            const [actionId, savedAction, maybeError] =
+                await getPrimaryLiveIntegrator(this.integrators)(ts, action);
+
+            for (const secondary of getSecondaryLiveIntegrators(this.integrators)) {
+                await secondary(ts, actionId, savedAction);
+            }
+
+            return maybeError;
+        });
+    }
+
+    async handleReplay(): Promise<void> {
+        let cursor: string = '';
+        console.log('REPLAY')
+        while (true) {
+            const nextActionOrNull = await getNextAction(this.tx, cursor);
+            if (nextActionOrNull === null) {
+                break;
+            }
+            const [actionId, savedAction] = nextActionOrNull;
+            console.log(`REPLAY ${actionId}`)
+
+            for (const replayer of getAllReplayers(this.integrators, actionId, savedAction)) {
+                await this.tx((db: db.Database): Promise<void> => {
+                    return replayer(openAll(db));
+                });
+            }
+            cursor = actionId;
+        }
+        console.log('DONE')
+    }
+}
 
 export async function integrateLive<Inputs, Outputs>(
     inputGetter: (ts: Tables) => [Set<string>, Inputs],

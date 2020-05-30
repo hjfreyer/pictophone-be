@@ -11,76 +11,37 @@ import * as ixa from "ix/asynciterable"
 import * as ixaop from "ix/asynciterable/operators"
 
 import {
+    emptyOutputs1_1_0, emptyOutputs1_1_1,
     Inputs1_1_0, Inputs1_1_1, Outputs1_1_0, Outputs1_1_1, Tables, openAll, getTrackedInputs1_1_0
     , applyOutputs1_1_0, getTrackedInputs1_1_1
-    , applyOutputs1_1_1
+    , applyOutputs1_1_1, Integrators
 } from './auto'
 
-export interface Integrators {
-    integrate1_1_0(action: model.AnyAction, inputs: Inputs1_1_0): Promise<util.Result<Outputs1_1_0, model.AnyError>>
-    integrate1_1_1(action: model.AnyAction, inputs: Inputs1_1_1): Promise<util.Result<Outputs1_1_1, model.AnyError>>
+
+export function getPrimaryLiveIntegrator(integrators: Integrators):
+    (ts: Tables, action: model.AnyAction) => Promise<[string, model.SavedAction, model.AnyError | null]> {
+    return (ts, action) => integrateLive(
+        getTrackedInputs1_1_1, integrators.integrate1_1_1,
+        applyOutputs1_1_1, emptyOutputs1_1_1, ts, action);
 }
 
-export function emptyOutputs1_1_0(): Outputs1_1_0 {
-    return {
-        games: [],
-        shortCodeUsageCount: []
-    }
+export function getSecondaryLiveIntegrators(integrators: Integrators):
+    ((ts: Tables, actionId: string, savedAction: model.SavedAction) => Promise<void>)[] {
+    return [
+        (ts: Tables, actionId: string, savedAction: model.SavedAction) =>
+            integrateReplay('state-1.1.0', getTrackedInputs1_1_0,
+                integrators.integrate1_1_0, applyOutputs1_1_0, emptyOutputs1_1_0, ts, actionId, savedAction),
+    ]
 }
 
-export function emptyOutputs1_1_1(): Outputs1_1_1 {
-    return {
-        games: [],
-        shortCodeUsageCount: [],
-        gamesByPlayer: [],
-    }
+export function getAllReplayers(integrators: Integrators, actionId: string, savedAction: model.SavedAction):
+    ((ts: Tables) => Promise<void>)[] {
+    return [
+        (ts: Tables) =>
+            integrateReplay('state-1.1.0', getTrackedInputs1_1_0,
+                integrators.integrate1_1_0, applyOutputs1_1_0, emptyOutputs1_1_0, ts, actionId, savedAction),
+        (ts: Tables) =>
+            integrateReplay('state-1.1.1', getTrackedInputs1_1_1,
+                integrators.integrate1_1_1, applyOutputs1_1_1, emptyOutputs1_1_1, ts, actionId, savedAction),
+    ]
 }
-
-export class Framework {
-    constructor(private tx: db.TxRunner, private integrators: Integrators) { }
-
-    handleAction(action: model.AnyAction): Promise<model.AnyError | null> {
-        return this.tx(async (db: db.Database): Promise<model.AnyError | null> => {
-            const ts = openAll(db);
-            const [actionId, savedAction, maybeError] = await integrateLive(
-                getTrackedInputs1_1_1, this.integrators.integrate1_1_1,
-                applyOutputs1_1_1, emptyOutputs1_1_1, ts, action);
-
-            await integrateReplay('state-1.1.0', getTrackedInputs1_1_0,
-                this.integrators.integrate1_1_0, applyOutputs1_1_0, emptyOutputs1_1_0, ts, actionId, savedAction);
-
-            return maybeError;
-        });
-    }
-
-    async handleReplay(): Promise<void> {
-        let cursor: string = '';
-        console.log('REPLAY')
-        while (true) {
-            const nextActionOrNull = await getNextAction(this.tx, cursor);
-            if (nextActionOrNull === null) {
-                break;
-            }
-            const [actionId, savedAction] = nextActionOrNull;
-            cursor = actionId;
-            const replayers = [
-                (ts: Tables) =>
-                    integrateReplay('state-1.1.0', getTrackedInputs1_1_0,
-                        this.integrators.integrate1_1_0, applyOutputs1_1_0, emptyOutputs1_1_0, ts, actionId, savedAction),
-                (ts: Tables) =>
-                    integrateReplay('state-1.1.1', getTrackedInputs1_1_1,
-                        this.integrators.integrate1_1_1, applyOutputs1_1_1, emptyOutputs1_1_1, ts, actionId, savedAction),
-            ]
-            console.log(`REPLAY ${actionId}`)
-
-            for (const replayer of replayers) {
-                await this.tx((db: db.Database): Promise<void> => {
-                    const ts = openAll(db);
-                    return replayer(ts);
-                });
-            }
-        }
-        console.log('DONE')
-    }
-}
-
