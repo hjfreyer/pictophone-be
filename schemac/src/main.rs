@@ -56,6 +56,7 @@ import * as model from '../model'
 import \\{ validate as validateModel } from '../model/index.validator'
 import \\{ validateLive, applyChanges, diffToChange } from '../base'
 import * as readables from '../readables'
+import \\{ deleteTable, deleteMeta } from '.'
 
 export type Tables = \\{
     actions: db.Table<model.SavedAction>
@@ -151,44 +152,10 @@ export async function deleteCollection(runner: db.TxRunner, collectionId: string
         {{- endfor }}
             break;
     {{- endfor }}
-        case 'state-1.1.1':
-            await deleteMeta(runner, 'state-1.1.1')
-            await deleteTable(runner, 'state1_1_1_games')
-            await deleteTable(runner, 'state1_1_1_shortCodeUsageCount')
-            await deleteTable(runner, 'state1_1_1_gamesByPlayer')
-            break
         default:
             throw new Error('invalid option')
     }
-}
-
-async function deleteTable(runner: db.TxRunner, tableId: keyof Tables): Promise<void> \\{
-    if (tableId === 'actions') \\{
-        throw new Error('nope')
-    }
-    await runner(async (db: db.Database): Promise<void> => \\{
-        const ts = openAll(db);
-        if (!(tableId in ts)) \\{
-            throw new Error(`no such table: '$\\{tableId}'`)
-        }
-        const table: db.Table<unknown> = ts[tableId as keyof typeof ts];
-        for await (const [k,] of readables.readAll(table)) \\{
-            table.delete(k)
-        }
-    })
-}
-
-async function deleteMeta(runner: db.TxRunner, collectionId: string): Promise<void> \\{
-    await runner(async (db: db.Database): Promise<void> => \\{
-        const ts = openAll(db);
-        for await (const [k,] of readables.readAll(ts.actionTableMetadata)) \\{
-            if (k[k.length - 1] === collectionId) \\{
-                ts.actionTableMetadata.delete(k)
-            }
-        }
-    })
-}
-";
+}";
 
 fn main() {
     let mut buffer = String::new();

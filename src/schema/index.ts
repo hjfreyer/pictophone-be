@@ -5,7 +5,7 @@ import { validate as validateModel } from '../model/index.validator'
 import { AnyAction, AnyError, SavedAction } from '../model';
 import { sha256 } from 'js-sha256';
 import _ from 'lodash';
-import { Tables } from './auto';
+import { Tables, openAll } from './auto';
 import * as util from '../util'
 import * as ixa from "ix/asynciterable"
 import * as ixaop from "ix/asynciterable/operators"
@@ -19,6 +19,7 @@ export async function integrateLive<Inputs, Outputs>(
     inputGetter: (ts: Tables) => [Set<string>, Inputs],
     integrator: (a: AnyAction, inputs: Inputs) => Promise<util.Result<Outputs, AnyError>>,
     outputSaver: (ts: Tables, actionId: string, outputs: Outputs) => void,
+    emptyOutputs: () => Outputs,
     ts: Tables,
     action: AnyAction): Promise<[string, SavedAction, AnyError | null]> {
     // Set up inputs.
@@ -33,9 +34,7 @@ export async function integrateLive<Inputs, Outputs>(
 
     ts.actions.set([actionId], savedAction);
 
-    if (outputsOrError.status === 'ok') {
-        outputSaver(ts, actionId, outputsOrError.value)
-    }
+    outputSaver(ts, actionId, outputsOrError.status === 'ok' ? outputsOrError.value : emptyOutputs());
 
     return [actionId, savedAction, outputsOrError.status === 'ok' ? null : outputsOrError.error];
 }
@@ -45,6 +44,7 @@ export async function integrateReplay<Inputs, Outputs>(
     inputGetter: (ts: Tables) => [Set<string>, Inputs],
     integrator: (a: AnyAction, inputs: Inputs) => Promise<util.Result<Outputs, AnyError>>,
     outputSaver: (ts: Tables, actionId: string, outputs: Outputs) => void,
+    emptyOutputs: () => Outputs,
     ts: Tables,
     actionId: string,
     savedAction: SavedAction): Promise<void> {
@@ -75,7 +75,32 @@ export async function integrateReplay<Inputs, Outputs>(
         }
     }
 
-    if (outputs.status === 'ok') {
-        outputSaver(ts, actionId, outputs.value)
+    outputSaver(ts, actionId, outputs.status === 'ok' ? outputs.value : emptyOutputs());
+}
+
+export async function deleteTable(runner: db.TxRunner, tableId: keyof Tables): Promise<void> {
+    if (tableId === 'actions') {
+        throw new Error('nope')
     }
+    await runner(async (db: db.Database): Promise<void> => {
+        const ts = openAll(db);
+        if (!(tableId in ts)) {
+            throw new Error(`no such table: '${tableId}'`)
+        }
+        const table: db.Table<unknown> = ts[tableId as keyof typeof ts];
+        for await (const [k,] of readables.readAll(table)) {
+            table.delete(k)
+        }
+    })
+}
+
+export async function deleteMeta(runner: db.TxRunner, collectionId: string): Promise<void> {
+    await runner(async (db: db.Database): Promise<void> => {
+        const ts = openAll(db);
+        for await (const [k,] of readables.readAll(ts.actionTableMetadata)) {
+            if (k[k.length - 1] === collectionId) {
+                ts.actionTableMetadata.delete(k)
+            }
+        }
+    })
 }

@@ -253,8 +253,6 @@ async function integrate1_1_0Helper(a: Action1_1, inputs: Inputs1_1_0):
     }
 }
 
-
-
 async function integrate1_1_1MiddleHelper(a: Action1_1, inputs: Inputs1_1_0): AsyncResult1_1<Outputs1_1_1> {
     const outputs1_1OrError = await integrate1_1_0MiddleHelper(a, inputs);
     if (outputs1_1OrError.status === 'err') {

@@ -24,6 +24,21 @@ export interface Integrator1_1_1 {
     integrate(action: model.AnyAction, inputs: Inputs1_1_1): Promise<util.Result<Outputs1_1_1, model.AnyError>>
 }
 
+export function emptyOutputs1_1_0(): Outputs1_1_0 {
+    return {
+        games: [],
+        shortCodeUsageCount: []
+    }
+}
+
+export function emptyOutputs1_1_1(): Outputs1_1_1 {
+    return {
+        games: [],
+        shortCodeUsageCount: [],
+        gamesByPlayer: [],
+    }
+}
+
 export class Framework {
     constructor(private tx: db.TxRunner, private i1_1_0: Integrator1_1_0, private i1_1_1: Integrator1_1_1) { }
 
@@ -31,10 +46,10 @@ export class Framework {
         return this.tx(async (db: db.Database): Promise<model.AnyError | null> => {
             const ts = openAll(db);
             const [actionId, savedAction, maybeError] = await integrateLive(
-                getTrackedInputs1_1_0, this.i1_1_0.integrate, applyOutputs1_1_0, ts, action);
+                getTrackedInputs1_1_0, this.i1_1_0.integrate, applyOutputs1_1_0, emptyOutputs1_1_0, ts, action);
 
             await integrateReplay('state-1.1.1', getTrackedInputs1_1_1,
-                this.i1_1_1.integrate, applyOutputs1_1_1, ts, actionId, savedAction);
+                this.i1_1_1.integrate, applyOutputs1_1_1, emptyOutputs1_1_1, ts, actionId, savedAction);
 
             return maybeError;
         });
@@ -61,10 +76,10 @@ export class Framework {
             const replayers = [
                 (ts: Tables, actionId: string, savedAction: model.SavedAction) =>
                     integrateReplay('state-1.1.0', getTrackedInputs1_1_0,
-                        this.i1_1_0.integrate, applyOutputs1_1_0, ts, actionId, savedAction),
+                        this.i1_1_0.integrate, applyOutputs1_1_0, emptyOutputs1_1_0, ts, actionId, savedAction),
                 (ts: Tables, actionId: string, savedAction: model.SavedAction) =>
                     integrateReplay('state-1.1.1', getTrackedInputs1_1_1,
-                        this.i1_1_1.integrate, applyOutputs1_1_1, ts, actionId, savedAction),
+                        this.i1_1_1.integrate, applyOutputs1_1_1, emptyOutputs1_1_1, ts, actionId, savedAction),
             ]
             console.log(`REPLAY ${nextAction}`)
 
