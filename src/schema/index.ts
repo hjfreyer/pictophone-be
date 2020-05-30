@@ -104,3 +104,15 @@ export async function deleteMeta(runner: db.TxRunner, collectionId: string): Pro
         }
     })
 }
+
+export function getNextAction(tx: db.TxRunner, startAfter: string): Promise<([string, SavedAction] | null)> {
+    return tx(async (db: db.Database): Promise<([string, SavedAction] | null)> => {
+        const tables = openAll(db);
+        const first = await ixa.first(ixa.from(readables.readAllAfter(tables.actions, [startAfter])));
+        if (first === undefined) {
+            return null;
+        }
+        const [[actionId], savedAction] = first;
+        return [actionId, savedAction];
+    });
+}

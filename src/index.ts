@@ -28,7 +28,7 @@ import * as ranges from './ranges'
 import { Readable, Diff, ItemIterable, Range, Key, Item, Live, Change } from './interfaces'
 import { strict as assert } from 'assert';
 import {
-    Integrator1_1_0, Integrator1_1_1, Framework,
+    Framework,
     openAll, Tables, applyOutputs1_1_0, applyOutputs1_1_1, Outputs1_1_0, Outputs1_1_1,
     Inputs1_1_0, Inputs1_1_1, getTrackedInputs1_1_0, getTrackedInputs1_1_1, deleteCollection
 } from './schema';
@@ -94,19 +94,14 @@ function getHttpCode(error: Error1_1): number {
     }
 }
 
-const INT1_1_0: Integrator1_1_0 = {
-    integrate(action: model.AnyAction, inputs: Inputs1_1_0): Promise<util.Result<Outputs1_1_0, model.AnyError>> {
+const FRAMEWORK = new Framework(db.runTransaction(fsDb), {
+    integrate1_1_0(action: model.AnyAction, inputs: Inputs1_1_0): Promise<util.Result<Outputs1_1_0, model.AnyError>> {
         return integrate1_1_0MiddleHelper(upgradeAction(action), inputs)
-    }
-}
-
-const INT1_1_1: Integrator1_1_1 = {
-    integrate(action: model.AnyAction, inputs: Inputs1_1_1): Promise<util.Result<Outputs1_1_1, model.AnyError>> {
+    },
+    integrate1_1_1(action: model.AnyAction, inputs: Inputs1_1_1): Promise<util.Result<Outputs1_1_1, model.AnyError>> {
         return integrate1_1_1MiddleHelper(upgradeAction(action), inputs)
     }
-}
-
-const FRAMEWORK = new Framework(db.runTransaction(fsDb), INT1_1_0, INT1_1_1);
+});
 
 
 app.options('/action', cors())
