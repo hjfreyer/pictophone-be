@@ -33,6 +33,10 @@ export async function get<T, D>(source: Readable<T>, key: Key, def: D): Promise<
     return def
 }
 
+export async function getOrDefault<T>(source: Readable<T>, key: Key, def: T): Promise<util.Defaultable<T>> {
+    return util.defaultable_from_nullable(await get(source, key, null), def);
+}
+
 export function readAll<T>(source: Readable<T>): ItemIterable<T> {
     return source.read(ranges.unbounded(source.schema.map(_ => '')));
 }
@@ -47,7 +51,7 @@ export function tracked<T>(source: Readable<Live<T>>, cb: (actionId: string) => 
         read(range: Range): ItemIterable<T> {
             const links = ixa.from(source.read(range))
             return links.pipe(
-                ixaop.tap(([, { actionId }]) => cb),
+                ixaop.tap(([, { actionId }]) => cb(actionId)),
                 ixaop.flatMap(([key, { value }]: Item<Live<T>>): ItemIterable<T> =>
                     value !== null ? ixa.of([key, value]) : ixa.empty())
             )

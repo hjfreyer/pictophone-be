@@ -158,3 +158,33 @@ export function ok<R, E>(r: R): Result<R, E> {
 export function err<R, E>(e: E): Result<R, E> {
     return { status: 'err', error: e }
 }
+
+export interface Defaultable<T> {
+    is_default: boolean
+    value: T
+}
+
+export function defaultable_from_nullable<T>(value: T | null, def: T): Defaultable<T> {
+    return {
+        is_default: value === null,
+        value: value === null ? def : value,
+    }
+}
+
+export function defaultable_to_nullable<T>(d: Defaultable<T>): T | null {
+    return d.is_default ? null : d.value
+}
+
+export function defaultable_some<T>(value: T): Defaultable<T> {
+    return {
+        is_default: false,
+        value,
+    }
+}
+
+export function defaultable_none<T>(def: T): Defaultable<T> {
+    return {
+        is_default: true,
+        value: def,
+    }
+}

@@ -1,14 +1,5 @@
 // Base
 
-export interface Timestamp {
-    seconds: number
-    nanoseconds: number
-}
-
-export interface Timestamped {
-    timestamp: Timestamp
-}
-
 export interface NumberValue {
     value: number
 }
@@ -22,21 +13,45 @@ export interface ActionTableMetadata {
     tables: TableChanges[]
 }
 
-export type ChangeUnknown = {
+export type DiffUnknown = {
     key: string[]
-    kind: 'set'
+    kind: 'add'
     value: unknown
 } | {
     key: string[]
     kind: 'delete'
+    value: unknown
+} | {
+    key: string[]
+    kind: 'replace'
+    oldValue: unknown
+    newValue: unknown
 }
 
 export interface TableChanges {
     schema: string[]
-    changes: ChangeUnknown[]
+    diffs: DiffUnknown[]
 }
 
-// v1.0
+export type SavedAction = {
+    parents: string[]
+    action: AnyAction
+}
+
+export type AnyAction = Action1_0
+export type AnyError = Error1_0
+
+// Shared
+
+export type Submission = {
+    kind: 'word'
+    word: string
+} | {
+    kind: 'drawing'
+    drawingId: string
+}
+
+// 1.0
 
 export interface JoinGameAction1_0 {
     version: '1.0'
@@ -45,75 +60,85 @@ export interface JoinGameAction1_0 {
     playerId: string
 }
 
-export type Action1_0 = JoinGameAction1_0
-
-export interface Game1_0 {
-    players: string[]
-}
-export type TaggedGame1_0 = Game1_0 & { actionId: string }
-
-export type SavedAction = {
-    parents: string[]
-    action: AnyAction
-}
-
-export type SavedState = {
-    action: Game1_0
-}
-
-// v1.1
-
-export interface CreateGameAction1_1 {
-    version: '1.1'
-    kind: 'create_game'
-
-    /**
-     * @minLength 1
-     */
-    gameId: string
-    /**
-     * @minLength 1
-     */
-    shortCode: string
-}
-
-export interface JoinGameAction1_1 {
-    version: '1.1'
-    kind: 'join_game'
+export interface StartGameAction1_0 {
+    version: '1.0'
+    kind: 'start_game'
     gameId: string
     playerId: string
-
-    createIfNecessary?: boolean
 }
 
-export type Action1_1 = CreateGameAction1_1 | JoinGameAction1_1
-
-export interface UncreatedGame1_1 {
-    state: 'UNCREATED'
+export type MakeMoveAction1_0 = {
+    version: '1.0'
+    kind: 'make_move'
+    gameId: string
+    playerId: string
+    submission: Submission
 }
 
-export interface CreatedGame1_1 {
-    state: 'CREATED'
+export type Action1_0 = JoinGameAction1_0 | StartGameAction1_0 | MakeMoveAction1_0
+
+export interface UnstartedGame1_0 {
+    state: 'UNSTARTED'
     players: string[]
-    shortCode: string
 }
 
-export type Game1_1 = UncreatedGame1_1 | CreatedGame1_1
-
-export type AnyAction = Action1_0 | Action1_1
-
-export type Error1_1 = {
-    version: '1.1'
-    status: 'GAME_NOT_FOUND'
-    gameId: string
-} | {
-    version: '1.1'
-    status: 'GAME_ALREADY_EXISTS'
-    gameId: string
-} | {
-    version: '1.1'
-    status: 'SHORT_CODE_IN_USE'
-    shortCode: string
+export interface StartedGame1_0 {
+    state: 'STARTED'
+    players: string[]
+    submissions: Record<string, Submission[]>
 }
 
-export type AnyError = Error1_1
+export type Game1_0 = UnstartedGame1_0 | StartedGame1_0
+
+export type Error1_0 = {
+    version: '1.0'
+    status: 'GAME_NOT_STARTED'
+    gameId: string
+} | {
+    version: '1.0'
+    status: 'PLAYER_NOT_IN_GAME'
+    gameId: string
+    playerId: string
+} | {
+    version: '1.0'
+    status: 'MOVE_PLAYED_OUT_OF_TURN'
+    gameId: string
+    playerId: string
+} | {
+    version: '1.0'
+    status: 'GAME_IS_OVER'
+    gameId: string
+} | {
+    version: '1.0'
+    status: 'INCORRECT_SUBMISSION_KIND'
+    wanted: Submission['kind']
+    got: Submission['kind']
+}
+
+export type BoringPlayerGame1_0 = {
+    state: 'UNSTARTED' | 'FIRST_PROMPT' | 'WAITING_FOR_PROMPT'
+    players: string[]
+}
+
+export type RespondToPromptPlayerGame1_0 = {
+    state: 'RESPOND_TO_PROMPT'
+    players: string[]
+    prompt: Submission
+}
+
+export type FinishedPlayerGame1_0 = {
+    state: 'GAME_OVER'
+    players: string[]
+    series: Series[]
+}
+
+export type Series = {
+    entries: SeriesEntry[]
+}
+
+export type SeriesEntry = {
+    playerId: string
+    submission: Submission
+}
+
+export type PlayerGame1_0 = BoringPlayerGame1_0 | RespondToPromptPlayerGame1_0 | FinishedPlayerGame1_0

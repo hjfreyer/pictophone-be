@@ -6,7 +6,7 @@ import { Dictionary, Request } from 'express-serve-static-core'
 import admin from 'firebase-admin'
 import uuid from 'uuid/v1'
 import GetConfig from './config'
-import { Action1_1, AnyAction, Action1_0, Game1_0, Game1_1, Error1_1, TaggedGame1_0, SavedAction, ActionTableMetadata, NumberValue } from './model'
+import { AnyAction, Action1_0, Game1_0, Error1_0, AnyError, NumberValue } from './model'
 import * as model from './model'
 import { validate as validateModel } from './model/index.validator'
 import { Drawing, UploadResponse } from './model/rpc'
@@ -28,11 +28,9 @@ import * as ranges from './ranges'
 import { Readable, Diff, ItemIterable, Range, Key, Item, Live, Change } from './interfaces'
 import { strict as assert } from 'assert';
 import {
-    Framework,
-    openAll, Tables, applyOutputs1_1_0, applyOutputs1_1_1, Outputs1_1_0, Outputs1_1_1,
-    Inputs1_1_0, Inputs1_1_1, getTrackedInputs1_1_0, getTrackedInputs1_1_1, deleteCollection
+    Framework, Outputs1_0_0, Inputs1_0_0, deleteCollection, Inputs1_0_1, Outputs1_0_1
 } from './schema';
-
+import produce from 'immer';
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -74,31 +72,146 @@ function numPoints(drawing: Drawing): number {
     return res
 }
 
-function upgradeAction(action: AnyAction): Action1_1 {
-    switch (action.version) {
-        case '1.0':
-            action = upgradeAction1_0(action);
-        case '1.1':
-            return action;
+function getHttpCode(error: AnyError): number {
+    switch (error.status) {
+        case 'GAME_NOT_STARTED':
+        case 'MOVE_PLAYED_OUT_OF_TURN':
+        case 'GAME_IS_OVER':
+        case 'INCORRECT_SUBMISSION_KIND':
+            return 400;
+        case 'PLAYER_NOT_IN_GAME':
+            return 403
     }
 }
 
-function getHttpCode(error: Error1_1): number {
-    switch (error.status) {
-        case 'GAME_NOT_FOUND':
-            return 404;
-        case 'SHORT_CODE_IN_USE':
-        case 'GAME_ALREADY_EXISTS':
-            return 403;
+export function newDiff<T>(key: Key, oldValue: util.Defaultable<T>, newValue: util.Defaultable<T>): Diff<T>[] {
+    if (oldValue.is_default && newValue.is_default) {
+        return [];
     }
+    if (oldValue.is_default && !newValue.is_default) {
+        return [{
+            key,
+            kind: 'add',
+            value: newValue.value,
+        }]
+    }
+    if (!oldValue.is_default && newValue.is_default) {
+        return [{
+            key,
+            kind: 'delete',
+            value: oldValue.value,
+        }]
+    }
+    if (!oldValue.is_default && !newValue.is_default) {
+        if (deepEqual(oldValue, newValue, { strict: true })) {
+            return []
+        } else {
+            return [{
+                key,
+                kind: 'replace',
+                oldValue: oldValue.value,
+                newValue: newValue.value,
+            }]
+        }
+    }
+    throw new Error("unreachable")
+}
+
+function gameToPlayerGames([[gameId], game]: Item<Game1_0>): Iterable<Item<model.PlayerGame1_0>> {
+    return ix.from(game.players).pipe(
+        ixop.map((playerId: string): Item<model.PlayerGame1_0> =>
+            [[playerId, gameId], getPlayerGameExport(game, playerId)])
+    )
+}
+
+function getPlayerGameExport(game: Game1_0, playerId: string): model.PlayerGame1_0 {
+    if (game.state === 'UNSTARTED') {
+        return {
+            state: 'UNSTARTED',
+            players: game.players,
+        }
+    }
+
+    const numPlayers = game.players.length
+    const roundNum = Math.min(...Object.values(game.submissions).map(a => a.length))
+
+    // Game is over.
+    if (roundNum === numPlayers) {
+        const series: model.Series[] = game.players.map(() => ({ entries: [] }))
+        for (let rIdx = 0; rIdx < numPlayers; rIdx++) {
+            for (let pIdx = 0; pIdx < numPlayers; pIdx++) {
+                series[(pIdx + rIdx) % numPlayers].entries.push({
+                    playerId: game.players[pIdx],
+                    submission: game.submissions[game.players[pIdx]][rIdx]
+                })
+            }
+        }
+
+        return {
+            state: 'GAME_OVER',
+            players: game.players,
+            series,
+        }
+    }
+
+    if (game.submissions[playerId].length === 0) {
+        return {
+            state: 'FIRST_PROMPT',
+            players: game.players,
+        }
+    }
+
+    if (game.submissions[playerId].length === roundNum) {
+        const playerIdx = game.players.indexOf(playerId)
+        if (playerIdx === -1) {
+            throw new Error('baad')
+        }
+        const nextPlayerIdx = (playerIdx + 1) % game.players.length
+        return {
+            state: 'RESPOND_TO_PROMPT',
+            players: game.players,
+            prompt: game.submissions[game.players[nextPlayerIdx]][roundNum - 1]
+        }
+    }
+
+    return {
+        state: 'WAITING_FOR_PROMPT',
+        players: game.players,
+    }
+}
+
+async function integrate1_0(action: model.AnyAction, inputs: Inputs1_0_0): Promise<util.Result<Diff<Game1_0>[], model.AnyError>> {
+    const gameOrDefault = await readables.getOrDefault(inputs.games, [action.gameId], defaultGame1_0());
+
+    const gameResult = integrate1_0_0Helper(action, gameOrDefault);
+    if (gameResult.status !== 'ok') {
+        return gameResult
+    }
+    return util.ok(newDiff([action.gameId], gameOrDefault, gameResult.value));
 }
 
 const FRAMEWORK = new Framework(db.runTransaction(fsDb), {
-    integrate1_1_0(action: model.AnyAction, inputs: Inputs1_1_0): Promise<util.Result<Outputs1_1_0, model.AnyError>> {
-        return integrate1_1_0MiddleHelper(upgradeAction(action), inputs)
+    async integrate1_0_0(action: model.AnyAction, inputs: Inputs1_0_0): Promise<util.Result<Outputs1_0_0, model.AnyError>> {
+        const gamesResult = await integrate1_0(action, inputs);
+        if (gamesResult.status !== 'ok') {
+            return gamesResult
+        }
+
+        return util.ok({
+            games: gamesResult.value,
+        })
     },
-    integrate1_1_1(action: model.AnyAction, inputs: Inputs1_1_1): Promise<util.Result<Outputs1_1_1, model.AnyError>> {
-        return integrate1_1_1MiddleHelper(upgradeAction(action), inputs)
+    async integrate1_0_1(action: model.AnyAction, inputs: Inputs1_0_1): Promise<util.Result<Outputs1_0_1, model.AnyError>> {
+        const gamesResult = await integrate1_0(action, inputs);
+        if (gamesResult.status !== 'ok') {
+            return gamesResult
+        }
+        const gamesByPlayer = collections.map(collections.fromDiffs(gamesResult.value), gameToPlayerGames);
+
+        return util.ok({
+            games: gamesResult.value,
+            gamesByPlayer: await collections.toDiffs(gamesByPlayer),
+        })
     }
 });
 
@@ -128,26 +241,14 @@ app.post('/upload', cors(), function(req: Request<Dictionary<string>>, res, next
 app.use('/batch', batch())
 
 
-function defaultGame1_1(): Game1_1 {
+function defaultGame1_0(): Game1_0 {
     return {
-        state: 'UNCREATED'
+        state: 'UNSTARTED',
+        players: [],
     }
 }
 
-function upgradeAction1_0(a: Action1_0): Action1_1 {
-    switch (a.kind) {
-        case 'join_game':
-            return {
-                version: '1.1',
-                kind: 'join_game',
-                gameId: a.gameId,
-                playerId: a.playerId,
-                createIfNecessary: true,
-            }
-    }
-}
-
-type AsyncResult1_1<R> = util.AsyncResult<R, Error1_1>
+type AsyncResult1_0<R> = util.AsyncResult<R, Error1_0>
 
 export const SUM_COMBINER: collections.Combiner<NumberValue> = {
     identity(): NumberValue { return { value: 0 } },
@@ -157,125 +258,99 @@ export const SUM_COMBINER: collections.Combiner<NumberValue> = {
     }
 }
 
-async function integrate1_1_0MiddleHelper(
-    a: Action1_1, inputs: Inputs1_1_0): AsyncResult1_1<Outputs1_1_0> {
-    // Action1_1 + Game state + scuc state => Diffs of Games
-    const gameDiffsResult = await integrate1_1_0Helper(a, inputs);
-    if (gameDiffsResult.status !== 'ok') {
-        return gameDiffsResult
-    }
-    const games = collections.fromDiffs(gameDiffsResult.value);
-
-    // Diffs of games => Diffs of numbers indexed by short code.
-    const indexedShortCodes = collections.map(games, mapShortCode);
-
-    // Diffs of indexed short code count => diffs of sums to apply to DB.
-    const shortCodeUsageCount = collections.combine(indexedShortCodes, SUM_COMBINER, inputs.shortCodeUsageCount)
-
-    return util.ok({
-        games: await collections.toDiffs(games),
-        shortCodeUsageCount: await collections.toDiffs(shortCodeUsageCount),
-    })
-}
-
-async function integrate1_1_0Helper(a: Action1_1, inputs: Inputs1_1_0):
-    AsyncResult1_1<Diff<Game1_1>[]> {
-    const game = await readables.get(inputs.games, [a.gameId], defaultGame1_1());
+function integrate1_0_0Helper(a: Action1_0, gameOrDefault: util.Defaultable<Game1_0>):
+    util.Result<util.Defaultable<Game1_0>, Error1_0> {
+    const game = gameOrDefault.value;
     switch (a.kind) {
         case 'join_game':
-            if (game.state === 'UNCREATED') {
-                if (a.createIfNecessary) {
-                    return util.ok([{
-                        kind: 'replace',
-                        key: [a.gameId],
-                        oldValue: game,
-                        newValue: {
-                            state: 'CREATED',
-                            players: [a.playerId],
-                            shortCode: '',
-                        }
-                    }])
-                } else {
-                    return util.err({
-                        version: '1.1',
-                        status: 'GAME_NOT_FOUND',
-                        gameId: a.gameId,
-                    })
-                }
-            }
             if (game.players.indexOf(a.playerId) !== -1) {
-                return util.ok([])
+                return util.ok(gameOrDefault)
             }
-            return util.ok([{
-                kind: 'replace',
-                key: [a.gameId],
-                oldValue: game,
-                newValue: {
-                    ...game,
-                    players: [...game.players, a.playerId],
-                }
-            }])
+            return util.ok(util.defaultable_some({
+                ...game,
+                players: [...game.players, a.playerId],
+            }));
 
-        case 'create_game':
-            if (game.state !== 'UNCREATED') {
-                return util.err({
-                    version: '1.1',
-                    status: 'GAME_ALREADY_EXISTS', gameId: a.gameId
-                })
+        case 'start_game':
+            if (game.state !== 'UNSTARTED') {
+                return util.ok(gameOrDefault)
             }
-            if (a.shortCode === '') {
-                throw new Error("Validator should have caught this.")
+            const submissions: Record<string, model.Submission[]> = {};
+            for (const player of game.players) {
+                submissions[player] = [];
             }
-            const scCount = await readables.get(inputs.shortCodeUsageCount, [a.shortCode], { value: 0 });
-            if (scCount.value !== 0) {
-                return util.err({
-                    version: '1.1',
-                    status: 'SHORT_CODE_IN_USE',
-                    shortCode: a.shortCode,
-                })
-            }
-            return util.ok([{
-                kind: 'replace',
-                key: [a.gameId],
-                oldValue: game,
-                newValue: {
-                    state: 'CREATED',
-                    players: [],
-                    shortCode: a.shortCode
-                }
-            }])
+
+            return util.ok(util.defaultable_some({
+                state: 'STARTED',
+                players: game.players,
+                submissions,
+            }))
+        case 'make_move':
+            return makeMove(gameOrDefault, a)
     }
 }
 
-async function integrate1_1_1MiddleHelper(a: Action1_1, inputs: Inputs1_1_0): AsyncResult1_1<Outputs1_1_1> {
-    const outputs1_1OrError = await integrate1_1_0MiddleHelper(a, inputs);
-    if (outputs1_1OrError.status === 'err') {
-        return outputs1_1OrError;
+function makeMove(gameOrDefault: util.Defaultable<Game1_0>, action: model.MakeMoveAction1_0): util.Result<
+    util.Defaultable<Game1_0>, Error1_0> {
+    const game = gameOrDefault.value;
+    const playerId = action.playerId
+
+    if (game.state !== 'STARTED') {
+        return util.err({
+            version: '1.0',
+            status: 'GAME_NOT_STARTED',
+            gameId: action.gameId,
+        })
     }
-    const outputs1_1 = outputs1_1OrError.value;
 
-
-    return util.ok({
-        ...outputs1_1,
-        gamesByPlayer: await collections.toDiffs(collections.map(
-            collections.fromDiffs(outputs1_1.games), gameToGamesByPlayer))
-    })
-}
-
-function gameToGamesByPlayer([gameKey, game]: Item<Game1_1>): Item<Game1_1>[] {
-    if (game.state !== 'CREATED') {
-        return []
+    if (game.players.indexOf(playerId) === -1) {
+        return util.err({
+            version: '1.0',
+            status: 'PLAYER_NOT_IN_GAME',
+            gameId: action.gameId,
+            playerId: action.playerId,
+        })
     }
-    return util.sorted(game.players).map((playerId): Item<Game1_1> => [[playerId, ...gameKey], game])
-}
 
-function mapShortCode([key, game]: Item<Game1_1>): Item<NumberValue>[] {
-    if (game.state !== 'CREATED' || game.shortCode === '') {
-        return []
+    const roundNum = Math.min(...Object.values(game.submissions).map(s => s.length))
+    if (game.submissions[playerId].length !== roundNum) {
+        return util.err({
+            version: '1.0',
+            status: 'MOVE_PLAYED_OUT_OF_TURN',
+            gameId: action.gameId,
+            playerId: action.playerId,
+        })
     }
-    return [[[game.shortCode], { value: 1 }]]
-}
 
+    if (roundNum === game.players.length) {
+        return util.err({
+            version: '1.0',
+            status: 'GAME_IS_OVER',
+            gameId: action.gameId,
+        })
+    }
+
+    if (roundNum % 2 === 0 && action.submission.kind === 'drawing') {
+        return util.err({
+            version: '1.0',
+            status: 'INCORRECT_SUBMISSION_KIND',
+            wanted: 'word',
+            got: 'drawing',
+        })
+    }
+    if (roundNum % 2 === 1 && action.submission.kind === 'word') {
+        return util.err({
+            version: '1.0',
+            status: 'INCORRECT_SUBMISSION_KIND',
+            wanted: 'word',
+            got: 'drawing',
+        })
+    }
+
+    return util.ok(util.defaultable_some(produce(game, game => {
+        game.submissions[playerId].push(action.submission)
+    })))
+}
 
 type DeleteCollectionRequest = {
     collectionId: string

@@ -113,7 +113,7 @@ export type Tables = \\{
     actionTableMetadata: db.Table<model.ActionTableMetadata>
     {{- for collection in collections -}}
     {{ for table in collection.tables }}
-    state{ collection.id | ident}_{table.id}: db.Table<Live<model.{table.type}>>
+    {table.id}_{ collection.id | ident}: db.Table<Live<model.{table.type}>>
     {{- endfor -}}
     {{- endfor }}
 }
@@ -130,7 +130,7 @@ export function openAll(db: db.Database): Tables \\{
         }),
         {{- for collection in collections -}}
         {{ for table in collection.tables }}
-        state{ collection.id | ident}_{table.id}: db.open(\\{
+        {table.id}_{ collection.id | ident}: db.open(\\{
             schema: {table.schema | json},
             validator: validateLive(validateModel('{table.type}'))
         }),
@@ -153,7 +153,7 @@ export function getSecondaryLiveIntegrators(integrators: Integrators):
         {{ else -}}
         (ts: Tables, actionId: string, savedAction: model.SavedAction) =>
             integrateReplay(
-                'state-{collection.id}',
+                '{collection.id}',
                 getTrackedInputs{collection.id | ident},
                 integrators.integrate{collection.id | ident},
                 applyOutputs{collection.id | ident},
@@ -170,7 +170,7 @@ export function getAllReplayers(integrators: Integrators, actionId: string, save
         {{- for collection in collections }}
         (ts: Tables) =>
             integrateReplay(
-                'state-{collection.id}',
+                '{collection.id}',
                 getTrackedInputs{collection.id | ident},
                 integrators.integrate{collection.id | ident},
                 applyOutputs{collection.id | ident},
@@ -209,7 +209,7 @@ export function getTrackedInputs{collection.id | ident}(ts: Tables): [Set<string
     const inputs: Inputs{collection.id | ident} = \\{
     {{- for table in collection.tables -}}
         {{- if table.is_input }}
-        { table.id }: readables.tracked(ts.state{collection.id | ident}_{table.id}, track),
+        { table.id }: readables.tracked(ts.{table.id}_{collection.id | ident}, track),
         {{- endif -}}
     {{ endfor }}
     }
@@ -231,9 +231,9 @@ export function emptyOutputs{collection.id | ident}(): Outputs{collection.id | i
 }
 
 export function applyOutputs{collection.id | ident}(ts: Tables, actionId: string, outputs: Outputs{collection.id | ident}): void \\{
-    ts.actionTableMetadata.set([actionId, 'state-{collection.id}'], getChangelog{collection.id | ident}(outputs));
+    ts.actionTableMetadata.set([actionId, '{collection.id}'], getChangelog{collection.id | ident}(outputs));
 {{- for table in collection.tables }}
-    applyChanges(ts.state{collection.id | ident}_{table.id}, actionId, outputs.{table.id}.map(diffToChange))
+    applyChanges(ts.{table.id}_{collection.id | ident}, actionId, outputs.{table.id}.map(diffToChange))
 {{- endfor }}
 }
 
@@ -256,10 +256,10 @@ function getChangelog{collection.id | ident}(outputs: Outputs{collection.id | id
 export async function deleteCollection(runner: db.TxRunner, collectionId: string): Promise<void> \\{
     switch (collectionId) \\{
     {{ for collection in collections }}
-        case 'state-{collection.id}':
-            await deleteMeta(runner, 'state-{collection.id}')
+        case '{collection.id}':
+            await deleteMeta(runner, '{collection.id}')
         {{ for table in collection.tables }}
-            await deleteTable(runner, 'state{collection.id | ident}_{table.id}')
+            await deleteTable(runner, '{table.id}_{collection.id | ident}')
         {{- endfor }}
             break;
     {{- endfor }}

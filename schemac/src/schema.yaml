@@ -1,25 +1,17 @@
-primary_id: "1.1.1"
+primary_id: "1.0.0"
 collections:
-- id: "1.1.0"
+- id: "1.0.0"
   tables:
   - id: games
     schema: [games]
-    type: Game1_1
+    type: Game1_0
     input: true
-  - id: shortCodeUsageCount
-    schema: [shortCodes]
-    type: NumberValue
-    input: true
-- id: "1.1.1"
+- id: "1.0.1"
   tables:
   - id: games
     schema: [games]
-    type: Game1_1
-    input: true
-  - id: shortCodeUsageCount
-    schema: [shortCodes]
-    type: NumberValue
+    type: Game1_0
     input: true
   - id: gamesByPlayer
-    schema: [players, games]
-    type: Game1_1
+    schema: [player, games]
+    type: PlayerGame1_0
