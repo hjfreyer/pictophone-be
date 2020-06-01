@@ -30,23 +30,23 @@ export function openAll(db: db.Database): Tables {
             validator: validateModel('ActionTableMetadata')
         }),
         state1_1_0_games: db.open({
-            schema: ["state-1.1.0-games"],
+            schema: ["games-games-1.1.0"],
             validator: validateLive(validateModel('Game1_1'))
         }),
         state1_1_0_shortCodeUsageCount: db.open({
-            schema: ["state-1.1.0-scuc"],
+            schema: ["shortCodes-shortCodeUsageCount-1.1.0"],
             validator: validateLive(validateModel('NumberValue'))
         }),
         state1_1_1_games: db.open({
-            schema: ["state-1.1.1-games"],
+            schema: ["games-games-1.1.1"],
             validator: validateLive(validateModel('Game1_1'))
         }),
         state1_1_1_shortCodeUsageCount: db.open({
-            schema: ["state-1.1.1-scuc"],
+            schema: ["shortCodes-shortCodeUsageCount-1.1.1"],
             validator: validateLive(validateModel('NumberValue'))
         }),
         state1_1_1_gamesByPlayer: db.open({
-            schema: ["players", "state-1.1.1-games-by-player"],
+            schema: ["players", "games-gamesByPlayer-1.1.1"],
             validator: validateLive(validateModel('Game1_1'))
         }),
     }
@@ -134,12 +134,12 @@ function getChangelog1_1_0(outputs: Outputs1_1_0): model.ActionTableMetadata {
     return {
         tables: [
             {
-                schema: ["state-1.1.0-games"],
-                changes: outputs.games.map(diffToChange),
+                schema: ["games-games-1.1.0"],
+                diffs: outputs.games,
             },
             {
-                schema: ["state-1.1.0-scuc"],
-                changes: outputs.shortCodeUsageCount.map(diffToChange),
+                schema: ["shortCodes-shortCodeUsageCount-1.1.0"],
+                diffs: outputs.shortCodeUsageCount,
             },
         ]
     }
@@ -197,16 +197,16 @@ function getChangelog1_1_1(outputs: Outputs1_1_1): model.ActionTableMetadata {
     return {
         tables: [
             {
-                schema: ["state-1.1.1-games"],
-                changes: outputs.games.map(diffToChange),
+                schema: ["games-games-1.1.1"],
+                diffs: outputs.games,
             },
             {
-                schema: ["state-1.1.1-scuc"],
-                changes: outputs.shortCodeUsageCount.map(diffToChange),
+                schema: ["shortCodes-shortCodeUsageCount-1.1.1"],
+                diffs: outputs.shortCodeUsageCount,
             },
             {
-                schema: ["players", "state-1.1.1-games-by-player"],
-                changes: outputs.gamesByPlayer.map(diffToChange),
+                schema: ["players", "games-gamesByPlayer-1.1.1"],
+                diffs: outputs.gamesByPlayer,
             },
         ]
     }

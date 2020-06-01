@@ -1,25 +1,25 @@
+primary_id: "1.1.1"
 collections:
 - id: "1.1.0"
   tables:
   - id: games
-    schema: [state-1.1.0-games]
+    schema: [games]
     type: Game1_1
     input: true
   - id: shortCodeUsageCount
-    schema: [state-1.1.0-scuc]
+    schema: [shortCodes]
     type: NumberValue
     input: true
 - id: "1.1.1"
-  is_primary: true
   tables:
   - id: games
-    schema: [state-1.1.1-games]
+    schema: [games]
     type: Game1_1
     input: true
   - id: shortCodeUsageCount
-    schema: [state-1.1.1-scuc]
+    schema: [shortCodes]
     type: NumberValue
     input: true
   - id: gamesByPlayer
-    schema: [players, state-1.1.1-games-by-player]
+    schema: [players, games]
     type: Game1_1

@@ -1,23 +1,20 @@
 use serde::{Deserialize, Serialize};
 use std::io::{self, Read};
 
-#[derive(Serialize, Deserialize, Debug)]
-struct Config {
-    collections: Vec<Collection>,
+#[derive(Deserialize, Debug)]
+struct ConfigIn {
+    primary_id: String,
+    collections: Vec<CollectionIn>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct Collection {
+#[derive(Deserialize, Debug)]
+struct CollectionIn {
     id: String,
-
-    #[serde(default)]
-    is_primary: bool,
-
-    tables: Vec<Table>,
+    tables: Vec<TableIn>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-struct Table {
+#[derive(Deserialize, Debug)]
+struct TableIn {
     id: String,
     schema: Vec<String>,
     r#type: String,
@@ -26,9 +23,57 @@ struct Table {
     input: bool,
 }
 
-#[derive(Serialize)]
-struct Context {
-    collections: Vec<String>,
+#[derive(Serialize, Debug)]
+struct ConfigOut {
+    collections: Vec<CollectionOut>,
+}
+
+#[derive(Serialize, Debug)]
+struct CollectionOut {
+    id: String,
+    is_primary: bool,
+    tables: Vec<TableOut>,
+}
+
+#[derive(Serialize, Debug)]
+struct TableOut {
+    id: String,
+    schema: Vec<String>,
+    r#type: String,
+    is_input: bool,
+}
+
+fn convert(config: &ConfigIn) -> ConfigOut {
+    ConfigOut {
+        collections: config
+            .collections
+            .iter()
+            .map(|collection| CollectionOut {
+                id: collection.id.clone(),
+                is_primary: collection.id == config.primary_id,
+                tables: collection
+                    .tables
+                    .iter()
+                    .map(|table| TableOut {
+                        id: table.id.clone(),
+                        r#type: table.r#type.clone(),
+                        is_input: table.input,
+                        schema: {
+                            let mut res = table.schema.clone();
+                            let last = res.last_mut().unwrap();
+                            *last = format!(
+                                "{segment}-{table_id}-{version}",
+                                segment = *last,
+                                table_id = table.id,
+                                version = collection.id
+                            );
+                            res
+                        },
+                    })
+                    .collect(),
+            })
+            .collect(),
+    }
 }
 
 fn ident_formatter(
@@ -152,7 +197,7 @@ export function getPrimaryLiveIntegrator(integrators: Integrators):
 
 export type Inputs{collection.id | ident} = \\{
 {{- for table in collection.tables -}}
-    {{- if table.input }}
+    {{- if table.is_input }}
     { table.id }: Readable<model.{ table.type }>
     {{- endif -}}
 {{ endfor }}
@@ -163,7 +208,7 @@ export function getTrackedInputs{collection.id | ident}(ts: Tables): [Set<string
     const track = (actionId: string) => \\{ parentSet.add(actionId) };
     const inputs: Inputs{collection.id | ident} = \\{
     {{- for table in collection.tables -}}
-        {{- if table.input }}
+        {{- if table.is_input }}
         { table.id }: readables.tracked(ts.state{collection.id | ident}_{table.id}, track),
         {{- endif -}}
     {{ endfor }}
@@ -198,7 +243,7 @@ function getChangelog{collection.id | ident}(outputs: Outputs{collection.id | id
         {{- for table in collection.tables }}
             \\{
                 schema: {table.schema | json},
-                changes: outputs.{table.id}.map(diffToChange),
+                diffs: outputs.{table.id},
             },
         {{- endfor }}
         ]
@@ -227,12 +272,12 @@ fn main() {
     let mut buffer = String::new();
     io::stdin().read_to_string(&mut buffer).unwrap();
 
-    let config: Config = serde_yaml::from_str(&buffer).unwrap();
+    let config: ConfigIn = serde_yaml::from_str(&buffer).unwrap();
     let mut tt = tinytemplate::TinyTemplate::new();
     tt.add_template("hello", TEMPLATE).unwrap();
     tt.add_formatter("ident", ident_formatter);
     tt.add_formatter("json", json_formatter);
 
-    let rendered = tt.render("hello", &config).unwrap();
+    let rendered = tt.render("hello", &convert(&config)).unwrap();
     println!("{}", rendered);
 }
