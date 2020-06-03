@@ -160,7 +160,7 @@ export function err<R, E>(e: E): Result<R, E> {
     return { status: 'err', error: e }
 }
 
-export function or_else<R, E, D>(res: Result<R, E>, def: ()=> D): R | D {
+export function or_else<R, E, D>(res: Result<R, E>, def: () => D): R | D {
     if (res.status === 'ok') {
         return res.value
     } else {
@@ -168,7 +168,7 @@ export function or_else<R, E, D>(res: Result<R, E>, def: ()=> D): R | D {
     }
 }
 
-export function err_or_else<R, E, D>(res: Result<R, E>, def: ()=> D): E | D {
+export function err_or_else<R, E, D>(res: Result<R, E>, def: () => D): E | D {
     if (res.status === 'err') {
         return res.error
     } else {

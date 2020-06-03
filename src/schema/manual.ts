@@ -13,11 +13,11 @@ import * as readables from '../readables'
 import * as util from '../util'
 
 
-export function getDiffs<T>(meta: model.ActionTableMetadata, 
-    schema: string[], validator: (u:unknown)=> T): Diff<T>[] {
+export function getDiffs<T>(meta: model.ActionTableMetadata,
+    schema: string[], validator: (u: unknown) => T): Diff<T>[] {
     for (const tableDiff of meta.tables) {
         if (deepEqual(tableDiff.schema, schema)) {
-            return tableDiff.diffs.map(d=>validateDiff(validator)(d))
+            return tableDiff.diffs.map(d => validateDiff(validator)(d))
         }
     }
     throw new Error("No matching table");
@@ -29,22 +29,22 @@ export function replayInputs1_0_0(metas: AsyncIterable<model.Metadata1_0_0>): In
         ixaop.flatMap((diff): ItemIterable<model.Game1_0> => {
             switch (diff.kind) {
                 case 'add':
-                return ixa.of([diff.key, diff.value])
+                    return ixa.of([diff.key, diff.value])
                 case 'delete':
-                return ixa.empty()
+                    return ixa.empty()
                 case 'replace':
-                return  ixa.of([diff.key, diff.newValue])
+                    return ixa.of([diff.key, diff.newValue])
             }
         }),
-        ixaop.orderBy(([key, ])=>key, util.lexCompare),
+        ixaop.orderBy(([key,]) => key, util.lexCompare),
     );
     return {
         games: {
             schema: ["games-games-1.0.0"],
-            read(range : Range): ItemIterable<model.Game1_0> {
+            read(range: Range): ItemIterable<model.Game1_0> {
                 return gameItems.pipe(
-                    ixaop.skipWhile(([key, ]) => !ranges.contains(range, key)),
-                    ixaop.takeWhile(([key, ]) => ranges.contains(range, key)),
+                    ixaop.skipWhile(([key,]) => !ranges.contains(range, key)),
+                    ixaop.takeWhile(([key,]) => ranges.contains(range, key)),
                 )
             }
         }
@@ -90,8 +90,8 @@ export function readAll(ts: Tables): [Set<string>, Readables] {
     const parentSet = new Set<string>();
     const track = (actionId: string) => { parentSet.add(actionId) };
     const res: Readables = {
-        games_1_0_0: readables.tracked(ts.games_1_0_0, track),        
-        gamesByPlayer_1_0_1: readables.tracked(ts.gamesByPlayer_1_0_1, track),    
+        games_1_0_0: readables.tracked(ts.games_1_0_0, track),
+        gamesByPlayer_1_0_1: readables.tracked(ts.gamesByPlayer_1_0_1, track),
     }
     return [parentSet, res]
 }
@@ -166,7 +166,7 @@ export function getInputs1_0_0(ts: Readables): Inputs1_0_0 {
     }
 }
 export function getInputs1_0_1(ts: Readables): Inputs1_0_1 {
-    return {    }
+    return {}
 }
 
 export type Outputs1_0_0 = {
@@ -181,7 +181,7 @@ export function emptyOutputs1_0_0(): Outputs1_0_0 {
 
 export function getMetadata1_0_0(outputs: Outputs1_0_0): model.Metadata1_0_0 {
     return {
-        outputs: {  
+        outputs: {
             games: util.sorted(outputs.games, (d1, d2) => util.lexCompare(d1.key, d2.key))
         }
     }
@@ -202,7 +202,7 @@ export type Inputs1_0_1 = {}
 export function getTrackedInputs1_0_1(ts: Tables): [Set<string>, Inputs1_0_1] {
     const parentSet = new Set<string>();
     const track = (actionId: string) => { parentSet.add(actionId) };
-    const inputs: Inputs1_0_1 = {    }
+    const inputs: Inputs1_0_1 = {}
     return [parentSet, inputs]
 }
 

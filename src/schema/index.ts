@@ -1,15 +1,15 @@
 
 import * as db from '../db'
-import { Live, Diff, Change,Readable } from '../interfaces'
+import { Live, Diff, Change, Readable } from '../interfaces'
 import { validate as validateModel } from '../model/index.validator'
 import { AnyAction, AnyError, SavedAction } from '../model';
-import* as model from '../model';
+import * as model from '../model';
 import { sha256 } from 'js-sha256';
 import _ from 'lodash';
 import {
     Tables, openAll, readAll,
     //getSecondaryLiveIntegrators,
-     Integrators, //getAllReplayers
+    Integrators, //getAllReplayers
 } from './auto';
 import * as util from '../util'
 import * as ixa from "ix/asynciterable"
@@ -69,7 +69,7 @@ export class Framework {
 
             await this.tx(async (db: db.Database): Promise<void> => {
                 const collectionId = '1.0.0';
-                const ts =openAll(db);
+                const ts = openAll(db);
                 const meta = await readables.get(ts.meta_1_0_0, [actionId], null);
                 if (meta === null) {
                     // Have to backfill.
