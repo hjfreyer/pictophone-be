@@ -8,9 +8,22 @@ import * as db from '../db'
 import { Diff, ItemIterable, Live, Range, Readable } from '../interfaces'
 import * as model from '../model'
 import { validate as validateModel } from '../model/index.validator'
+import { validate as validateInterfaces } from './interfaces.validator'
 import * as ranges from '../ranges'
 import * as readables from '../readables'
 import * as util from '../util'
+
+import {
+    CollectionId,
+    Actions, Inputs, Outputs, Metadata1_0_0, Metadata1_0_1
+} from './interfaces'
+
+export type Inputs1_0_0 = Inputs['1.0.0']
+export type Inputs1_0_1 = Inputs['1.0.1']
+export type Action1_0_0 = Actions['1.0.0']
+export type Action1_0_1 = Actions['1.0.1']
+export type Outputs1_0_0 = Outputs['1.0.0']
+export type Outputs1_0_1 = Outputs['1.0.1']
 
 
 export function getDiffs<T>(meta: model.ActionTableMetadata,
@@ -23,7 +36,7 @@ export function getDiffs<T>(meta: model.ActionTableMetadata,
     throw new Error("No matching table");
 }
 
-export function replayInputs1_0_0(metas: AsyncIterable<model.Metadata1_0_0>): Inputs1_0_0 {
+export function replayInputs1_0_0(metas: AsyncIterable<Metadata1_0_0>): Inputs1_0_0 {
     const gameItems = ixa.from(metas).pipe(
         ixaop.flatMap(meta => ixa.from(meta.outputs.games)),
         ixaop.flatMap((diff): ItemIterable<model.Game1_0> => {
@@ -51,9 +64,14 @@ export function replayInputs1_0_0(metas: AsyncIterable<model.Metadata1_0_0>): In
     }
 }
 
+export function replayInputs1_0_1(metas: AsyncIterable<Metadata1_0_1>): Inputs1_0_1 {
+    return {}
+}
+
 export type Tables = {
     actions: db.Table<model.SavedAction>
-    meta_1_0_0: db.Table<model.Metadata1_0_0>
+    meta_1_0_0: db.Table<Metadata1_0_0>
+    meta_1_0_1: db.Table<Metadata1_0_1>
 
     games_1_0_0: db.Table<Live<model.Game1_0>>
     gamesByPlayer_1_0_1: db.Table<Live<model.PlayerGame1_0>>
@@ -73,7 +91,11 @@ export function openAll(db: db.Database): Tables {
         }),
         meta_1_0_0: db.open({
             schema: ['metadata-1.0.0'],
-            validator: validateModel('Metadata1_0_0')
+            validator: validateInterfaces('Metadata1_0_0')
+        }),
+        meta_1_0_1: db.open({
+            schema: ['metadata-1.0.1'],
+            validator: validateInterfaces('Metadata1_0_1')
         }),
         games_1_0_0: db.open({
             schema: ["games-games-1.0.0"],
@@ -96,14 +118,9 @@ export function readAll(ts: Tables): [Set<string>, Readables] {
     return [parentSet, res]
 }
 
-export type Action1_0_0 = model.AnyAction
-export type Action1_0_1 = {
-    games: Diff<model.Game1_0>[],
-}
-
 export interface Integrators {
     integrate1_0_0(action: Action1_0_0, inputs: Inputs1_0_0): Promise<util.Result<Outputs1_0_0, model.AnyError>>
-    // integrate1_0_1(action: Action1_0_1, inputs: Inputs1_0_1): Promise<util.Result<Outputs1_0_1, model.AnyError>>
+    integrate1_0_1(action: Action1_0_1, inputs: Inputs1_0_1): Promise<util.Result<Outputs1_0_1, model.AnyError>>
 }
 
 // export function getSecondaryLiveIntegrators(integrators: Integrators):
@@ -156,21 +173,21 @@ export interface Integrators {
 //         ts, action);
 // } 
 
-export type Inputs1_0_0 = {
-    games: Readable<model.Game1_0>
-}
-
 export function getInputs1_0_0(ts: Readables): Inputs1_0_0 {
     return {
         games: ts.games_1_0_0
     }
 }
-export function getInputs1_0_1(ts: Readables): Inputs1_0_1 {
-    return {}
+
+
+export function getInputs(ts: Readables, collection: CollectionId): Inputs[CollectionId] {
+    return {
+        games: ts.games_1_0_0
+    }
 }
 
-export type Outputs1_0_0 = {
-    games: Diff<model.Game1_0>[]
+export function getInputs1_0_1(ts: Readables): Inputs1_0_1 {
+    return {}
 }
 
 export function emptyOutputs1_0_0(): Outputs1_0_0 {
@@ -179,10 +196,18 @@ export function emptyOutputs1_0_0(): Outputs1_0_0 {
     }
 }
 
-export function getMetadata1_0_0(outputs: Outputs1_0_0): model.Metadata1_0_0 {
+export function getMetadata1_0_0(outputs: Outputs1_0_0): Metadata1_0_0 {
     return {
         outputs: {
             games: util.sorted(outputs.games, (d1, d2) => util.lexCompare(d1.key, d2.key))
+        }
+    }
+}
+
+export function getMetadata1_0_1(outputs: Outputs1_0_1): Metadata1_0_1 {
+    return {
+        outputs: {
+            gamesByPlayer: util.sorted(outputs.gamesByPlayer, (d1, d2) => util.lexCompare(d1.key, d2.key))
         }
     }
 }
@@ -192,22 +217,25 @@ export function applyOutputs1_0_0(ts: Tables, actionId: string, outputs: Outputs
     applyChanges(ts.games_1_0_0, actionId, outputs.games.map(diffToChange))
 }
 
+export function applyOutputs1_0_1(ts: Tables, actionId: string, outputs: Outputs1_0_1): void {
+    ts.meta_1_0_1.set([actionId], getMetadata1_0_1(outputs));
+    applyChanges(ts.gamesByPlayer_1_0_1, actionId, outputs.gamesByPlayer.map(diffToChange))
+}
+
 
 // END 1.0.0
 
 // BEGIN 1.0.1
 
-export type Inputs1_0_1 = {}
+
+
+
 
 export function getTrackedInputs1_0_1(ts: Tables): [Set<string>, Inputs1_0_1] {
     const parentSet = new Set<string>();
     const track = (actionId: string) => { parentSet.add(actionId) };
     const inputs: Inputs1_0_1 = {}
     return [parentSet, inputs]
-}
-
-export type Outputs1_0_1 = {
-    gamesByPlayer: Diff<model.PlayerGame1_0>[]
 }
 
 export function emptyOutputs1_0_1(): Outputs1_0_1 {

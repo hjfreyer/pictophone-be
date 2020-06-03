@@ -201,18 +201,13 @@ const FRAMEWORK = new Framework(db.runTransaction(fsDb), {
             games: gamesResult.value,
         })
     },
-    // async integrate1_0_1(action: model.AnyAction, inputs: Inputs1_0_1): Promise<util.Result<Outputs1_0_1, model.AnyError>> {
-    //     const gamesResult = await integrate1_0(action, inputs);
-    //     if (gamesResult.status !== 'ok') {
-    //         return gamesResult
-    //     }
-    //     const gamesByPlayer = collections.map(collections.fromDiffs(gamesResult.value), gameToPlayerGames);
+    async integrate1_0_1({ games }: { games: Diff<Game1_0>[] }, inputs: Inputs1_0_1): Promise<util.Result<Outputs1_0_1, model.AnyError>> {
+        const gamesByPlayer = collections.map(collections.fromDiffs(games), gameToPlayerGames);
 
-    //     return util.ok({
-    //         games: gamesResult.value,
-    //         gamesByPlayer: await collections.toDiffs(gamesByPlayer),
-    //     })
-    // }
+        return util.ok({
+            gamesByPlayer: await collections.toDiffs(gamesByPlayer),
+        })
+    }
 });
 
 

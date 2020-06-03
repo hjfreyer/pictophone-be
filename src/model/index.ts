@@ -57,14 +57,6 @@ export type SavedAction = {
 export type AnyAction = Action1_0
 export type AnyError = Error1_0
 
-export type Outputs1_0_0 = {
-    games: Diff<Game1_0>[]
-}
-
-export type Metadata1_0_0 = {
-    outputs: Outputs1_0_0
-}
-
 // Shared
 
 export type Submission = {

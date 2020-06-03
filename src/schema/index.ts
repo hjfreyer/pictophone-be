@@ -16,7 +16,8 @@ import * as ixa from "ix/asynciterable"
 import * as ixaop from "ix/asynciterable/operators"
 import * as readables from '../readables'
 import { getActionId } from '../base';
-import { getInputs1_0_0, getInputs1_0_1, Outputs1_0_0, Outputs1_0_1, applyOutputs1_0_0, emptyOutputs1_0_0, emptyOutputs1_0_1, replayInputs1_0_0, getMetadata1_0_0 } from './manual';
+import { getInputs1_0_0, getInputs1_0_1, Outputs1_0_0, Outputs1_0_1, applyOutputs1_0_0, emptyOutputs1_0_0, emptyOutputs1_0_1, replayInputs1_0_0, getMetadata1_0_0, replayInputs1_0_1, applyOutputs1_0_1, getMetadata1_0_1 } from './manual';
+import { Metadata1_0_0, Metadata1_0_1 } from './interfaces';
 import deepEqual from 'deep-equal';
 
 export * from './auto';
@@ -39,6 +40,27 @@ export class Framework {
 
             ts.actions.set([actionId], savedAction);
             applyOutputs1_0_0(ts, actionId, outs1_0_0);
+
+            // Replay 1.0.1
+            await (async () => {
+                const collectionId = '1.0.1';
+                const parentMetas = ixa.from(savedAction.parents).pipe(
+                    ixaop.map(p => readables.get(ts.meta_1_0_1, [p], null)),
+                )
+
+                if (await ixa.some(parentMetas, meta => meta === null)) {
+                    console.log(`- ${collectionId}: NOT READY TO LIVE-REPLAY`)
+                    return;
+                }
+
+                const inputs = replayInputs1_0_1(
+                    parentMetas as AsyncIterable<Metadata1_0_1>);
+                const res = await this.integrators.integrate1_0_1({
+                    games: outs1_0_0.games,
+                }, inputs);
+                applyOutputs1_0_1(ts, actionId, util.or_else(res, emptyOutputs1_0_1))
+            })();
+
 
             // const parentMetas1_0_1 = ixa.from(savedAction.parents).pipe(
             //     ixaop.map(p => readables.get(ts.actionTableMetadata, [p, '1.0.1'], null)),
@@ -67,6 +89,7 @@ export class Framework {
             const [actionId, savedAction] = nextActionOrNull;
             console.log(`REPLAY ${actionId}`)
 
+            // 1.0.0
             await this.tx(async (db: db.Database): Promise<void> => {
                 const collectionId = '1.0.0';
                 const ts = openAll(db);
@@ -83,7 +106,7 @@ export class Framework {
                     }
 
                     const inputs = replayInputs1_0_0(
-                        parentMetas as AsyncIterable<model.Metadata1_0_0>);
+                        parentMetas as AsyncIterable<Metadata1_0_0>);
                     const res = await this.integrators.integrate1_0_0(
                         savedAction.action, inputs);
                     applyOutputs1_0_0(ts, actionId, util.or_else(res, emptyOutputs1_0_0))
@@ -101,7 +124,7 @@ export class Framework {
                     }
 
                     const inputs = replayInputs1_0_0(
-                        parentMetas as AsyncIterable<model.Metadata1_0_0>);
+                        parentMetas as AsyncIterable<Metadata1_0_0>);
                     const res = await this.integrators.integrate1_0_0(
                         savedAction.action, inputs);
                     const outputs = util.or_else(res, emptyOutputs1_0_0)
@@ -112,6 +135,56 @@ export class Framework {
                     return;
                 }
             });
+
+            // 1.0.1
+            await this.tx(async (db: db.Database): Promise<void> => {
+                const collectionId = '1.0.1';
+                const ts = openAll(db);
+                const meta = await readables.get(ts.meta_1_0_1, [actionId], null);
+                if (meta === null) {
+                    // Have to backfill.
+                    const actionMeta = await readables.get(ts.meta_1_0_0, [actionId], null);
+                    const parentMetas = ixa.from(savedAction.parents).pipe(
+                        ixaop.map(p => readables.get(ts.meta_1_0_1, [p], null)),
+                    )
+
+                    if (actionMeta === null || await ixa.some(parentMetas, meta => meta === null)) {
+                        console.log(`- ${collectionId}: NOT READY TO REPLAY`)
+                        return;
+                    }
+
+                    const inputs = replayInputs1_0_1(
+                        parentMetas as AsyncIterable<Metadata1_0_1>);
+                    const res = await this.integrators.integrate1_0_1(
+                        actionMeta.outputs, inputs);
+                    applyOutputs1_0_1(ts, actionId, util.or_else(res, emptyOutputs1_0_1))
+                    console.log(`- ${collectionId}: REPLAYED`)
+                    return;
+                } else {
+                    // Already done, check we get the same answer.
+                    const actionMeta = await readables.get(ts.meta_1_0_0, [actionId], null);
+                    const parentMetas = ixa.from(savedAction.parents).pipe(
+                        ixaop.map(p => readables.get(ts.meta_1_0_1, [p], null)),
+                    )
+
+                    if (actionMeta === null || await ixa.some(parentMetas, meta => meta === null)) {
+                        console.log(`- ${collectionId}: NOT READY TO CHECK`)
+                        return;
+                    }
+
+                    const inputs = replayInputs1_0_1(
+                        parentMetas as AsyncIterable<Metadata1_0_1>);
+                    const res = await this.integrators.integrate1_0_1(
+                        actionMeta.outputs, inputs);
+                    const outputs = util.or_else(res, emptyOutputs1_0_1)
+                    if (!deepEqual(getMetadata1_0_1(outputs), meta)) {
+                        throw new Error(`- ${collectionId}: INCONSISTENT`)
+                    }
+                    console.log(`- ${collectionId}: CHECKED`)
+                    return;
+                }
+            });
+
             cursor = actionId;
         }
         console.log('DONE')
