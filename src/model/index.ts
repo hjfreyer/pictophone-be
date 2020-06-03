@@ -9,25 +9,6 @@ export interface LiveUnknown {
     value: unknown
 }
 
-export interface ActionTableMetadata {
-    tables: TableDiffs[]
-}
-
-export type DiffUnknown = {
-    key: string[]
-    kind: 'add'
-    value: unknown
-} | {
-    key: string[]
-    kind: 'delete'
-    value: unknown
-} | {
-    key: string[]
-    kind: 'replace'
-    oldValue: unknown
-    newValue: unknown
-}
-
 export type Diff<V> = {
     key: string[]
     kind: 'add'
@@ -41,12 +22,6 @@ export type Diff<V> = {
     kind: 'replace'
     oldValue: V
     newValue: V
-}
-
-
-export interface TableDiffs {
-    schema: string[]
-    diffs: DiffUnknown[]
 }
 
 export type SavedAction = {

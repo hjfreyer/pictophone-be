@@ -28,9 +28,10 @@ import * as ranges from './ranges'
 import { Readable, Diff, ItemIterable, Range, Key, Item, Live, Change } from './interfaces'
 import { strict as assert } from 'assert';
 import {
-    Framework, Outputs1_0_0, Inputs1_0_0, deleteCollection, Inputs1_0_1, Outputs1_0_1
+    Framework, deleteCollection
 } from './schema';
 import produce from 'immer';
+import { CollectionId, Outputs, SideInputs } from './schema/interfaces'
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -180,8 +181,8 @@ function getPlayerGameExport(game: Game1_0, playerId: string): model.PlayerGame1
     }
 }
 
-async function integrate1_0(action: model.AnyAction, inputs: Inputs1_0_0): Promise<util.Result<Diff<Game1_0>[], model.AnyError>> {
-    const gameOrDefault = await readables.getOrDefault(inputs.games, [action.gameId], defaultGame1_0());
+async function integrate1_0(action: model.AnyAction, games: Readable<Game1_0>): Promise<util.Result<Diff<Game1_0>[], model.AnyError>> {
+    const gameOrDefault = await readables.getOrDefault(games, [action.gameId], defaultGame1_0());
 
     const gameResult = integrate1_0_0Helper(action, gameOrDefault);
     if (gameResult.status !== 'ok') {
@@ -191,8 +192,8 @@ async function integrate1_0(action: model.AnyAction, inputs: Inputs1_0_0): Promi
 }
 
 const FRAMEWORK = new Framework(db.runTransaction(fsDb), {
-    async integrate1_0_0(action: model.AnyAction, inputs: Inputs1_0_0): Promise<util.Result<Outputs1_0_0, model.AnyError>> {
-        const gamesResult = await integrate1_0(action, inputs);
+    '1.0.0': async (action: model.AnyAction, inputs: SideInputs['1.0.0']): Promise<util.Result<Outputs['1.0.0'], model.AnyError>> => {
+        const gamesResult = await integrate1_0(action, inputs.games);
         if (gamesResult.status !== 'ok') {
             return gamesResult
         }
@@ -201,10 +202,16 @@ const FRAMEWORK = new Framework(db.runTransaction(fsDb), {
             games: gamesResult.value,
         })
     },
-    async integrate1_0_1({ games }: { games: Diff<Game1_0>[] }, inputs: Inputs1_0_1): Promise<util.Result<Outputs1_0_1, model.AnyError>> {
-        const gamesByPlayer = collections.map(collections.fromDiffs(games), gameToPlayerGames);
+    '1.0.1': async (action: model.AnyAction, inputs: SideInputs['1.0.1']): Promise<util.Result<Outputs['1.0.1'], model.AnyError>> => {
+        const gamesResult = await integrate1_0(action, inputs.games);
+        if (gamesResult.status !== 'ok') {
+            return gamesResult
+        }
+
+        const gamesByPlayer = collections.map(collections.fromDiffs(gamesResult.value), gameToPlayerGames);
 
         return util.ok({
+            games: gamesResult.value,
             gamesByPlayer: await collections.toDiffs(gamesByPlayer),
         })
     }
@@ -378,7 +385,7 @@ function batch(): Router {
     // })
 
     res.post('/delete/:collectionId', function(req: Request<DeleteCollectionRequest>, res, next) {
-        deleteCollection(db.runTransaction(fsDb), req.params.collectionId).then(result => {
+        deleteCollection(db.runTransaction(fsDb), req.params.collectionId as CollectionId).then(result => {
             res.status(200)
             res.json(result)
         }).catch(next)

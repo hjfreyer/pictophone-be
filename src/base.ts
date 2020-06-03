@@ -2,7 +2,7 @@
 import * as db from './db'
 import { Live, Diff, Change } from './interfaces'
 import { validate as validateModel } from './model/index.validator'
-import { AnyAction, AnyError, SavedAction, DiffUnknown } from './model';
+import { AnyAction, AnyError, SavedAction } from './model';
 import { sha256 } from 'js-sha256';
 import _ from 'lodash';
 import { Tables } from './schema';
@@ -22,26 +22,26 @@ export function validateLive<T>(validator: (u: unknown) => T): (u: unknown) => L
     }
 }
 
-export function validateDiff<T>(validator: (u: unknown) => T): (u: DiffUnknown) => Diff<T> {
-    return (diff: DiffUnknown): Diff<T> => {
-        switch (diff.kind) {
-            case 'add':
-            case 'delete':
-                return {
-                    kind: diff.kind,
-                    key: diff.key,
-                    value: validator(diff.value)
-                }
-            case 'replace':
-                return {
-                    kind: 'replace',
-                    key: diff.key,
-                    oldValue: validator(diff.oldValue),
-                    newValue: validator(diff.newValue),
-                }
-        }
-    }
-}
+// export function validateDiff<T>(validator: (u: unknown) => T): (u: DiffUnknown) => Diff<T> {
+//     return (diff: DiffUnknown): Diff<T> => {
+//         switch (diff.kind) {
+//             case 'add':
+//             case 'delete':
+//                 return {
+//                     kind: diff.kind,
+//                     key: diff.key,
+//                     value: validator(diff.value)
+//                 }
+//             case 'replace':
+//                 return {
+//                     kind: 'replace',
+//                     key: diff.key,
+//                     oldValue: validator(diff.oldValue),
+//                     newValue: validator(diff.newValue),
+//                 }
+//         }
+//     }
+// }
 
 export function applyChanges<T>(t: db.Table<Live<T>>, actionId: string, changes: Change<T>[]): void {
     for (const change of changes) {
