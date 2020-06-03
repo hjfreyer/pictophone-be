@@ -1,12 +1,21 @@
 primary_id: "1.0.0"
 collections:
 - id: "1.0.0"
-  tables:
+  actions:
+  - kind: raw
+  outputs:
   - id: games
     schema: [games]
     type: Game1_0
     input: true
+  inputs:
+  - collection_id: "1.0.0"
+    table_id: games
+
 - id: "1.0.1"
+  actions:
+  - kind: delta
+    
   tables:
   - id: games
     schema: [games]

@@ -3,6 +3,7 @@ import { strict as assert } from 'assert';
 
 import * as ix from "ix/iterable"
 import * as ixop from "ix/iterable/operators"
+import { OperatorFunction } from 'ix/interfaces';
 
 
 export type Comparator<T> = (a: T, b: T) => number
@@ -159,6 +160,22 @@ export function err<R, E>(e: E): Result<R, E> {
     return { status: 'err', error: e }
 }
 
+export function or_else<R, E, D>(res: Result<R, E>, def: ()=> D): R | D {
+    if (res.status === 'ok') {
+        return res.value
+    } else {
+        return def()
+    }
+}
+
+export function err_or_else<R, E, D>(res: Result<R, E>, def: ()=> D): E | D {
+    if (res.status === 'err') {
+        return res.error
+    } else {
+        return def()
+    }
+}
+
 export interface Defaultable<T> {
     is_default: boolean
     value: T
@@ -187,4 +204,29 @@ export function defaultable_none<T>(def: T): Defaultable<T> {
         is_default: true,
         value: def,
     }
+}
+
+class NarrowIterable<TSource, TResult extends TSource> extends ix.IterableX<TResult> {
+    constructor(
+        private source: Iterable<TSource>,
+        private predicate: (value: TSource, index: number) => value is TResult) {
+        super();
+    }
+
+    *[Symbol.iterator]() {
+        let i = 0;
+        for (const item of this.source) {
+            if (this.predicate(item, i++)) {
+                yield item;
+            }
+        }
+    }
+}
+
+export function narrow<TSource, TResult extends TSource>(
+    selector: (value: TSource, index: number) => value is TResult
+): OperatorFunction<TSource, TResult> {
+    return function narrowOperatorFunction(source: Iterable<TSource>): ix.IterableX<TResult> {
+        return new NarrowIterable<TSource, TResult>(source, selector);
+    };
 }

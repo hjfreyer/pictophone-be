@@ -10,7 +10,7 @@ export interface LiveUnknown {
 }
 
 export interface ActionTableMetadata {
-    tables: TableChanges[]
+    tables: TableDiffs[]
 }
 
 export type DiffUnknown = {
@@ -28,7 +28,23 @@ export type DiffUnknown = {
     newValue: unknown
 }
 
-export interface TableChanges {
+export type Diff<V> = {
+    key: string[]
+    kind: 'add'
+    value: V
+} | {
+    key: string[]
+    kind: 'delete'
+    value: V
+} | {
+    key: string[]
+    kind: 'replace'
+    oldValue: V
+    newValue: V
+}
+
+
+export interface TableDiffs {
     schema: string[]
     diffs: DiffUnknown[]
 }
@@ -40,6 +56,14 @@ export type SavedAction = {
 
 export type AnyAction = Action1_0
 export type AnyError = Error1_0
+
+export type Outputs1_0_0 = {
+    games: Diff<Game1_0>[]
+}
+
+export type Metadata1_0_0 = {
+    outputs: Outputs1_0_0
+}
 
 // Shared
 
