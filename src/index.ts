@@ -76,6 +76,7 @@ function numPoints(drawing: Drawing): number {
 function getHttpCode(error: AnyError): number {
     switch (error.status) {
         case 'GAME_NOT_STARTED':
+        case 'GAME_ALREADY_STARTED':
         case 'MOVE_PLAYED_OUT_OF_TURN':
         case 'GAME_IS_OVER':
         case 'INCORRECT_SUBMISSION_KIND':
@@ -191,6 +192,16 @@ async function integrate1_0(action: model.AnyAction, games: Readable<Game1_0>): 
     return util.ok(newDiff([action.gameId], gameOrDefault, gameResult.value));
 }
 
+async function integrate1_0_2(action: model.AnyAction, games: Readable<Game1_0>): Promise<util.Result<Diff<Game1_0>[], model.AnyError>> {
+    const gameOrDefault = await readables.getOrDefault(games, [action.gameId], defaultGame1_0());
+
+    const gameResult = integrate1_0_2Helper(action, gameOrDefault);
+    if (gameResult.status !== 'ok') {
+        return gameResult
+    }
+    return util.ok(newDiff([action.gameId], gameOrDefault, gameResult.value));
+}
+
 const FRAMEWORK = new Framework(db.runTransaction(fsDb), {
     '1.0.0': async (action: model.AnyAction, inputs: SideInputs['1.0.0']): Promise<util.Result<Outputs['1.0.0'], model.AnyError>> => {
         const gamesResult = await integrate1_0(action, inputs.games);
@@ -204,6 +215,19 @@ const FRAMEWORK = new Framework(db.runTransaction(fsDb), {
     },
     '1.0.1': async (action: model.AnyAction, inputs: SideInputs['1.0.1']): Promise<util.Result<Outputs['1.0.1'], model.AnyError>> => {
         const gamesResult = await integrate1_0(action, inputs.games);
+        if (gamesResult.status !== 'ok') {
+            return gamesResult
+        }
+
+        const gamesByPlayer = collections.map(collections.fromDiffs(gamesResult.value), gameToPlayerGames);
+
+        return util.ok({
+            games: gamesResult.value,
+            gamesByPlayer: await collections.toDiffs(gamesByPlayer),
+        })
+    },
+    '1.0.2': async (action: model.AnyAction, inputs: SideInputs['1.0.2']): Promise<util.Result<Outputs['1.0.2'], model.AnyError>> => {
+        const gamesResult = await integrate1_0_2(action, inputs.games);
         if (gamesResult.status !== 'ok') {
             return gamesResult
         }
@@ -265,6 +289,47 @@ function integrate1_0_0Helper(a: Action1_0, gameOrDefault: util.Defaultable<Game
     const game = gameOrDefault.value;
     switch (a.kind) {
         case 'join_game':
+            if (game.players.indexOf(a.playerId) !== -1) {
+                return util.ok(gameOrDefault)
+            }
+            return util.ok(util.defaultable_some({
+                ...game,
+                players: [...game.players, a.playerId],
+            }));
+
+        case 'start_game':
+            if (game.state !== 'UNSTARTED') {
+                return util.ok(gameOrDefault)
+            }
+            const submissions: Record<string, model.Submission[]> = {};
+            for (const player of game.players) {
+                submissions[player] = [];
+            }
+
+            return util.ok(util.defaultable_some({
+                state: 'STARTED',
+                players: game.players,
+                submissions,
+            }))
+        case 'make_move':
+            return makeMove(gameOrDefault, a)
+    }
+}
+
+
+function integrate1_0_2Helper(a: Action1_0, gameOrDefault: util.Defaultable<Game1_0>):
+    util.Result<util.Defaultable<Game1_0>, Error1_0> {
+    const game = gameOrDefault.value;
+    switch (a.kind) {
+        case 'join_game':
+            if (game.state !== 'UNSTARTED') {
+                return util.err({
+                    version: '1.0',
+                    status: 'GAME_ALREADY_STARTED',
+                    gameId: a.gameId,
+                })
+            }
+
             if (game.players.indexOf(a.playerId) !== -1) {
                 return util.ok(gameOrDefault)
             }

@@ -104,6 +104,10 @@ export type Error1_0 = {
     status: 'INCORRECT_SUBMISSION_KIND'
     wanted: Submission['kind']
     got: Submission['kind']
+} | {
+    version: '1.0'
+    status: 'GAME_ALREADY_STARTED'
+    gameId: string
 }
 
 export type BoringPlayerGame1_0 = {
