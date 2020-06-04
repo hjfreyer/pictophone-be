@@ -2,34 +2,44 @@
 import * as model from '../model'
 import { Diff, ItemIterable, Live, Range, Readable } from '../interfaces'
 
-export type CollectionId = '1.0.0' | '1.0.1' | '1.0.2';
+export type CollectionId = keyof IOSpec;
 
-export type SideInputs = {
+export type IOSpec = {
     '1.0.0': {
-        games: Readable<model.Game1_0>
-    },
+        live: {
+            games: model.Game1_0
+        },
+        exports: {},
+    }
     '1.0.1': {
-        games: Readable<model.Game1_0>
-        gamesByPlayer: Readable<model.PlayerGame1_0>
+        live: {
+            games: model.Game1_0
+            gamesByPlayer: model.PlayerGame1_0
+        },
+        exports: {},
     },
     '1.0.2': {
-        games: Readable<model.Game1_0>
-        gamesByPlayer: Readable<model.PlayerGame1_0>
+        live: {
+            games: model.Game1_0
+            gamesByPlayer: model.PlayerGame1_0
+        },
+        exports: {
+            gamesByPlayer: model.PlayerGame1_0
+        },
+    },
+    '1.1.0': {
+        live: {
+            games: model.Game1_1
+            gamesByPlayer: model.PlayerGame1_1
+        },
+        exports: {},
     },
 }
 
 export type Outputs = {
-    '1.0.0': {
-        games: Diff<model.Game1_0>[]
-    },
-    '1.0.1': {
-        games: Diff<model.Game1_0>[]
-        gamesByPlayer: Diff<model.PlayerGame1_0>[]
-    },
-    '1.0.2': {
-        games: Diff<model.Game1_0>[]
-        gamesByPlayer: Diff<model.PlayerGame1_0>[]
-    },
+    [C in CollectionId]: {
+        [T in keyof IOSpec[C]['live']]: Diff<IOSpec[C]['live'][T]>[]
+    }
 }
 
 export type Metadata = {
@@ -41,3 +51,4 @@ export type Metadata = {
 export type Metadata1_0_0 = Metadata['1.0.0']
 export type Metadata1_0_1 = Metadata['1.0.1']
 export type Metadata1_0_2 = Metadata['1.0.2']
+export type Metadata1_1_0 = Metadata['1.1.0']

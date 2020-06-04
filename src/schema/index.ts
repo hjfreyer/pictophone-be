@@ -14,11 +14,12 @@ import * as util from '../util';
 import {
     Integrators, openAll, readAll, Tables
 } from './auto';
-import { SideInputs } from './interfaces';
+import { } from './interfaces';
 import { CollectionId } from './interfaces.validator';
-import { COLLECTION_IDS, PRIMARY_COLLECTION_ID, SECONDARY_COLLECTION_IDS, SPEC } from './manual';
+import { SideInputs, COLLECTION_IDS, PRIMARY_COLLECTION_ID, SECONDARY_COLLECTION_IDS, SPEC } from './manual';
 
 export * from './auto';
+export * from './interfaces';
 
 export function sortedDiffs<T>(diffs: Iterable<Diff<T>>): Diff<T>[] {
     return util.sorted(diffs, (d1, d2) => util.lexCompare(d1.key, d2.key));
@@ -29,14 +30,14 @@ async function livePrimary(collectionId: CollectionId, ts: Tables,
     const [parents, rs] = readAll(ts);
 
     const outsOrError = await integrators[collectionId](action, rs[collectionId] as any);
-    const outs = util.or_else(outsOrError, SPEC[collectionId].emptyOutputs);
+    const outs = util.or_else(outsOrError as any, SPEC[collectionId].emptyOutputs as any);
 
     // Save the action and metadata.
     const savedAction: SavedAction = { parents: util.sorted(parents), action }
     const actionId = getActionId(savedAction)
     SPEC[collectionId].applyOutputs(ts, actionId, outs as any);
 
-    return [actionId, savedAction, util.err_or_else(outsOrError, () => null)];
+    return [actionId, savedAction, util.err_or_else(outsOrError as any, () => null)];
 }
 
 async function liveReplay(collectionId: CollectionId,
@@ -46,7 +47,7 @@ async function liveReplay(collectionId: CollectionId,
     const [parents, rs] = readAll(ts);
 
     const parentMetas = ixa.from(savedAction.parents).pipe(
-        ixaop.map(p => readables.get(ts[collectionId].meta, [p], null)),
+        ixaop.map(p => readables.get(ts[collectionId].meta as any, [p], null)),
     )
 
     if (await ixa.some(parentMetas, meta => meta === null)) {
@@ -55,7 +56,7 @@ async function liveReplay(collectionId: CollectionId,
     }
 
     const res = await integrators[collectionId](savedAction.action, rs[collectionId] as any);
-    SPEC[collectionId].applyOutputs(ts, actionId, util.or_else(res, SPEC[collectionId].emptyOutputs) as any);
+    SPEC[collectionId].applyOutputs(ts, actionId, util.or_else(res as any, SPEC[collectionId].emptyOutputs as any) as any);
 }
 
 async function replayOrCheck(collectionId: CollectionId,
@@ -64,7 +65,7 @@ async function replayOrCheck(collectionId: CollectionId,
     actionId: string, savedAction: SavedAction): Promise<void> {
     const ts = openAll(db);
     const parentMetas = ixa.from(savedAction.parents).pipe(
-        ixaop.map(p => readables.get(ts[collectionId].meta, [p], null)),
+        ixaop.map(p => readables.get(ts[collectionId].meta as any, [p], null)),
     )
 
     if (await ixa.some(parentMetas, meta => meta === null)) {
@@ -73,10 +74,10 @@ async function replayOrCheck(collectionId: CollectionId,
     }
     const inputs: SideInputs[CollectionId] = SPEC[collectionId].replaySideInputs(
         parentMetas as any);
-    const outputs = util.or_else(await integrators[collectionId](
-        savedAction.action, inputs as any), SPEC[collectionId].emptyOutputs);
+    const outputs = util.or_else((await integrators[collectionId](
+        savedAction.action, inputs as any)) as any, SPEC[collectionId].emptyOutputs as any);
 
-    const meta = await readables.get(ts[collectionId].meta, [actionId], null);
+    const meta = await readables.get(ts[collectionId].meta as any, [actionId], null);
     if (meta === null) {
         // Have to backfill.
         SPEC[collectionId].applyOutputs(ts, actionId, outputs as any);
@@ -125,7 +126,11 @@ export class Framework {
             console.log(`REPLAY ${actionId}`)
 
             for (const collectionId of COLLECTION_IDS) {
-                await this.tx((db: db.Database) => replayOrCheck(collectionId, db, this.integrators, actionId, savedAction))
+                try {
+                    await this.tx((db: db.Database) => replayOrCheck(collectionId, db, this.integrators, actionId, savedAction))
+                } catch (e) {
+                    console.log(`error replaying collection ${collectionId}:`, e)
+                }
             }
             cursor = actionId;
         }

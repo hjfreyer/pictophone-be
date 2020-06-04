@@ -7,52 +7,28 @@ import * as model from '../model'
 import { validate as validateModel } from '../model/index.validator'
 import * as readables from '../readables'
 import * as util from '../util'
-import { Metadata, Outputs, SideInputs } from './interfaces'
+import { Metadata, Outputs, IOSpec, CollectionId } from './interfaces'
 import { validate as validateInterfaces } from './interfaces.validator'
 
-export const COLLECTION_IDS = ['1.0.0', '1.0.1', '1.0.2'] as ['1.0.0', '1.0.1', '1.0.2']
+export const COLLECTION_IDS = ['1.0.0', '1.0.1', '1.0.2', '1.1.0'] as ['1.0.0', '1.0.1', '1.0.2', '1.1.0']
 export const PRIMARY_COLLECTION_ID = '1.0.2'
-export const SECONDARY_COLLECTION_IDS = ['1.0.0', '1.0.1'] as ['1.0.0', '1.0.1']
+export const SECONDARY_COLLECTION_IDS = ['1.0.0', '1.0.1', '1.1.0'] as ['1.0.0', '1.0.1', '1.1.0']
 
 export type Tables = {
-    '1.0.0': {
-        meta: db.Table<Metadata['1.0.0']>
+    [C in CollectionId]: {
+        meta: db.Table<Metadata[C]>
         live: {
-            games: db.Table<Live<model.Game1_0>>
+            [T in keyof IOSpec[C]['live']]: db.Table<Live<IOSpec[C]['live'][T]>>
         }
-        exports: {}
-    },
-    '1.0.1': {
-        meta: db.Table<Metadata['1.0.1']>
-        live: {
-            games: db.Table<Live<model.Game1_0>>
-            gamesByPlayer: db.Table<Live<model.PlayerGame1_0>>
-        }
-        exports: {}
-    },
-    '1.0.2': {
-        meta: db.Table<Metadata['1.0.2']>
-        live: {
-            games: db.Table<Live<model.Game1_0>>
-            gamesByPlayer: db.Table<Live<model.PlayerGame1_0>>
-        },
         exports: {
-            gamesByPlayer: db.Table<Live<model.PlayerGame1_0>>
+            [T in keyof IOSpec[C]['exports']]: db.Table<Live<IOSpec[C]['exports'][T]>>
         }
-    },
+    }
 }
 
-export type Readables = {
-    '1.0.0': {
-        games: Readable<model.Game1_0>
-    }
-    '1.0.1': {
-        games: Readable<model.Game1_0>
-        gamesByPlayer: Readable<model.PlayerGame1_0>
-    }
-    '1.0.2': {
-        games: Readable<model.Game1_0>
-        gamesByPlayer: Readable<model.PlayerGame1_0>
+export type SideInputs = {
+    [C in CollectionId]: {
+        [T in keyof IOSpec[C]['live']]: Readable<IOSpec[C]['live'][T]>
     }
 }
 
@@ -60,7 +36,6 @@ export const SPEC = {
     '1.0.0': {
         schemata: {
             games: ["games-games-1.0.0"],
-
         },
         replaySideInputs(metas: AsyncIterable<Metadata['1.0.0']>): SideInputs['1.0.0'] {
             return {
@@ -147,6 +122,37 @@ export const SPEC = {
             applyChanges(ts['1.0.2'].exports.gamesByPlayer, actionId, outputs.gamesByPlayer.map(diffToChange))
         },
     },
+    '1.1.0': {
+        schemata: {
+            games: ["games-games-1.1.0"],
+            gamesByPlayer: ["players", "games-gamesByPlayer-1.1.0"],
+        },
+        replaySideInputs(metas: AsyncIterable<Metadata['1.1.0']>): SideInputs['1.1.0'] {
+            return {
+                games: readableFromDiffs(metas, meta => meta.outputs.games, this.schemata.games),
+                gamesByPlayer: readableFromDiffs(metas, meta => meta.outputs.gamesByPlayer, this.schemata.gamesByPlayer),
+            };
+        },
+        emptyOutputs(): Outputs['1.1.0'] {
+            return {
+                games: [],
+                gamesByPlayer: [],
+            }
+        },
+        outputToMetadata(outputs: Outputs['1.1.0']): Metadata['1.1.0'] {
+            return {
+                outputs: {
+                    games: util.sorted(outputs.games, (d1, d2) => util.lexCompare(d1.key, d2.key)),
+                    gamesByPlayer: util.sorted(outputs.gamesByPlayer, (d1, d2) => util.lexCompare(d1.key, d2.key)),
+                }
+            }
+        },
+        applyOutputs(ts: Tables, actionId: string, outputs: Outputs['1.1.0']): void {
+            ts['1.1.0'].meta.set([actionId], this.outputToMetadata(outputs));
+            applyChanges(ts['1.1.0'].live.games, actionId, outputs.games.map(diffToChange))
+            applyChanges(ts['1.1.0'].live.gamesByPlayer, actionId, outputs.gamesByPlayer.map(diffToChange))
+        },
+    },
 }
 
 export function openAll(db: db.Database): Tables {
@@ -203,14 +209,31 @@ export function openAll(db: db.Database): Tables {
                     validator: validateLive(validateModel('PlayerGame1_0'))
                 })
             }
+        },
+        '1.1.0': {
+            meta: db.open({
+                schema: ['metadata-1.1.0'],
+                validator: validateInterfaces('Metadata1_1_0')
+            }),
+            live: {
+                games: db.open({
+                    schema: SPEC['1.1.0'].schemata.games,
+                    validator: validateLive(validateModel('Game1_1'))
+                }),
+                gamesByPlayer: db.open({
+                    schema: SPEC['1.1.0'].schemata.gamesByPlayer,
+                    validator: validateLive(validateModel('PlayerGame1_1'))
+                })
+            },
+            exports: {}
         }
     }
 }
 
-export function readAll(ts: Tables): [Set<string>, Readables] {
+export function readAll(ts: Tables): [Set<string>, SideInputs] {
     const parentSet = new Set<string>();
     const track = (actionId: string) => { parentSet.add(actionId) };
-    const res: Readables = {
+    const res: SideInputs = {
         '1.0.0': {
             games: readables.tracked(ts['1.0.0'].live['games'], track),
         },
@@ -222,15 +245,15 @@ export function readAll(ts: Tables): [Set<string>, Readables] {
             games: readables.tracked(ts['1.0.2'].live['games'], track),
             gamesByPlayer: readables.tracked(ts['1.0.2'].live['gamesByPlayer'], track),
         },
+        '1.1.0': {
+            games: readables.tracked(ts['1.1.0'].live['games'], track),
+            gamesByPlayer: readables.tracked(ts['1.1.0'].live['gamesByPlayer'], track),
+        },
     }
     return [parentSet, res]
 }
 
-export interface Integrators {
-    '1.0.0': (action: model.AnyAction, inputs: SideInputs['1.0.0']) =>
-        Promise<util.Result<Outputs['1.0.0'], model.AnyError>>
-    '1.0.1': (action: model.AnyAction, inputs: SideInputs['1.0.1']) =>
-        Promise<util.Result<Outputs['1.0.1'], model.AnyError>>
-    '1.0.2': (action: model.AnyAction, inputs: SideInputs['1.0.2']) =>
-        Promise<util.Result<Outputs['1.0.2'], model.AnyError>>
+export type Integrators = {
+    [K in CollectionId]: (action: model.AnyAction, inputs: SideInputs[K]) =>
+        Promise<util.Result<Outputs[K], model.AnyError>>
 }
