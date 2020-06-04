@@ -102,8 +102,11 @@ export class Framework {
             actionTable.set([actionId], savedAction);
 
             for (const collectionId of SECONDARY_COLLECTION_IDS) {
-                await liveReplay(collectionId, ts, this.integrators, actionId, savedAction);
-
+                try {
+                    await liveReplay(collectionId, ts, this.integrators, actionId, savedAction);
+                } catch (e) {
+                    console.log(`error while live replaying secondary collection ${collectionId}:`, e)
+                }
             }
 
             return maybeError;

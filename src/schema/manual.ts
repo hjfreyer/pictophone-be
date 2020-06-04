@@ -11,8 +11,8 @@ import { Metadata, Outputs, SideInputs } from './interfaces'
 import { validate as validateInterfaces } from './interfaces.validator'
 
 export const COLLECTION_IDS = ['1.0.0', '1.0.1', '1.0.2'] as ['1.0.0', '1.0.1', '1.0.2']
-export const PRIMARY_COLLECTION_ID = '1.0.0'
-export const SECONDARY_COLLECTION_IDS = ['1.0.1', '1.0.2'] as ['1.0.1', '1.0.2']
+export const PRIMARY_COLLECTION_ID = '1.0.2'
+export const SECONDARY_COLLECTION_IDS = ['1.0.0', '1.0.1'] as ['1.0.0', '1.0.1']
 
 export type Tables = {
     '1.0.0': {
