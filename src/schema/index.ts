@@ -16,7 +16,7 @@ import {
 } from './auto';
 import { } from './interfaces';
 import { CollectionId } from './interfaces.validator';
-import { SideInputs, COLLECTION_IDS, PRIMARY_COLLECTION_ID, SECONDARY_COLLECTION_IDS, SPEC } from './manual';
+import { replayAll, SideInputs, COLLECTION_IDS, PRIMARY_COLLECTION_ID, SECONDARY_COLLECTION_IDS, SPEC, SpecEntry, liveReplaySecondaries } from './manual';
 
 export * from './auto';
 export * from './interfaces';
@@ -25,68 +25,82 @@ export function sortedDiffs<T>(diffs: Iterable<Diff<T>>): Diff<T>[] {
     return util.sorted(diffs, (d1, d2) => util.lexCompare(d1.key, d2.key));
 }
 
-async function livePrimary(collectionId: CollectionId, ts: Tables,
+async function livePrimary<C extends CollectionId, SchemaType, MetadataType, SideInputsType, OutputsType>(
+    specEntry: SpecEntry<C, SchemaType, MetadataType, SideInputsType, OutputsType>,
+    ts: Tables,
     integrators: Integrators, action: model.AnyAction): Promise<[string, SavedAction, model.AnyError | null]> {
     const [parents, rs] = readAll(ts);
 
-    const outsOrError = await integrators[collectionId](action, rs[collectionId] as any);
-    const outs = util.or_else(outsOrError as any, SPEC[collectionId].emptyOutputs as any);
+    const outsOrError = await specEntry.selectIntegrator(integrators)(action, specEntry.selectSideInputs(rs));
+    const outs = util.or_else(outsOrError, specEntry.emptyOutputs);
 
     // Save the action and metadata.
     const savedAction: SavedAction = { parents: util.sorted(parents), action }
     const actionId = getActionId(savedAction)
-    SPEC[collectionId].applyOutputs(ts, actionId, outs as any);
+    specEntry.applyOutputs(ts, actionId, outs);
 
-    return [actionId, savedAction, util.err_or_else(outsOrError as any, () => null)];
+    return [actionId, savedAction, util.err_or_else(outsOrError, () => null)];
 }
 
-async function liveReplay(collectionId: CollectionId,
+export async function liveReplay<C extends CollectionId, SchemaType, MetadataType, SideInputsType, OutputsType>(
+    specEntry: SpecEntry<C, SchemaType, MetadataType, SideInputsType, OutputsType>,
     ts: Tables,
     integrators: Integrators,
     actionId: string, savedAction: SavedAction): Promise<void> {
-    const [parents, rs] = readAll(ts);
+    try {
 
-    const parentMetas = ixa.from(savedAction.parents).pipe(
-        ixaop.map(p => readables.get(ts[collectionId].meta as any, [p], null)),
-    )
+        const [parents, rs] = readAll(ts);
 
-    if (await ixa.some(parentMetas, meta => meta === null)) {
-        console.log(`- ${collectionId}: NOT READY TO LIVE-REPLAY`)
-        return;
+        const parentMetas = ixa.from(savedAction.parents).pipe(
+            ixaop.map(p => readables.get(specEntry.selectMetadata(ts), [p], null)),
+        )
+
+        if (await ixa.some(parentMetas, meta => meta === null)) {
+            console.log(`- ${specEntry.collectionId}: NOT READY TO LIVE-REPLAY`)
+            return;
+        }
+
+        const res = await specEntry.selectIntegrator(integrators)(savedAction.action, specEntry.selectSideInputs(rs));
+        specEntry.applyOutputs(ts, actionId, util.or_else(res, specEntry.emptyOutputs));
+    } catch (e) {
+        console.log(`error while live replaying secondary collection ${specEntry.collectionId}:`, e)
     }
-
-    const res = await integrators[collectionId](savedAction.action, rs[collectionId] as any);
-    SPEC[collectionId].applyOutputs(ts, actionId, util.or_else(res as any, SPEC[collectionId].emptyOutputs as any) as any);
 }
 
-async function replayOrCheck(collectionId: CollectionId,
-    db: db.Database,
+export async function replayOrCheck<C extends CollectionId, SchemaType, MetadataType, SideInputsType, OutputsType>(
+    specEntry: SpecEntry<C, SchemaType, MetadataType, SideInputsType, OutputsType>,
+    tx: db.TxRunner,
     integrators: Integrators,
     actionId: string, savedAction: SavedAction): Promise<void> {
-    const ts = openAll(db);
-    const parentMetas = ixa.from(savedAction.parents).pipe(
-        ixaop.map(p => readables.get(ts[collectionId].meta as any, [p], null)),
-    )
+    try {
+        await tx(async (db: db.Database): Promise<void> => {
+            const ts = openAll(db);
+            const parentMetas = ixa.from(savedAction.parents).pipe(
+                ixaop.map(p => readables.get(specEntry.selectMetadata(ts), [p], null)),
+            )
 
-    if (await ixa.some(parentMetas, meta => meta === null)) {
-        console.log(`- ${collectionId}: NOT READY TO REPLAY`)
-        return;
-    }
-    const inputs: SideInputs[CollectionId] = SPEC[collectionId].replaySideInputs(
-        parentMetas as any);
-    const outputs = util.or_else((await integrators[collectionId](
-        savedAction.action, inputs as any)) as any, SPEC[collectionId].emptyOutputs as any);
+            if (await ixa.some(parentMetas, meta => meta === null)) {
+                console.log(`- ${specEntry.collectionId}: NOT READY TO REPLAY`)
+                return;
+            }
+            const inputs: SideInputsType = specEntry.replaySideInputs(parentMetas as AsyncIterable<MetadataType>);
+            const outputs = util.or_else((await specEntry.selectIntegrator(integrators)(
+                savedAction.action, inputs)), specEntry.emptyOutputs);
 
-    const meta = await readables.get(ts[collectionId].meta as any, [actionId], null);
-    if (meta === null) {
-        // Have to backfill.
-        SPEC[collectionId].applyOutputs(ts, actionId, outputs as any);
-        console.log(`- ${collectionId}: REPLAYED`)
-    } else {
-        if (!deepEqual(SPEC[collectionId].outputToMetadata(outputs as any), meta)) {
-            throw new Error(`- ${collectionId}: INCONSISTENT`)
-        }
-        console.log(`- ${collectionId}: CHECKED`)
+            const meta = await readables.get(specEntry.selectMetadata(ts), [actionId], null);
+            if (meta === null) {
+                // Have to backfill.
+                specEntry.applyOutputs(ts, actionId, outputs);
+                console.log(`- ${specEntry.collectionId}: REPLAYED`)
+            } else {
+                if (!deepEqual(specEntry.outputToMetadata(outputs), meta)) {
+                    throw new Error(`- ${specEntry.collectionId}: INCONSISTENT`)
+                }
+                console.log(`- ${specEntry.collectionId}: CHECKED`)
+            }
+        });
+    } catch (e) {
+        console.log(`error replaying collection ${specEntry.collectionId}:`, e)
     }
 }
 
@@ -99,16 +113,10 @@ export class Framework {
             const ts = openAll(db);
 
             const [actionId, savedAction, maybeError] =
-                await livePrimary(PRIMARY_COLLECTION_ID, ts, this.integrators, action);
+                await livePrimary(SPEC[PRIMARY_COLLECTION_ID], ts, this.integrators, action);
             actionTable.set([actionId], savedAction);
 
-            for (const collectionId of SECONDARY_COLLECTION_IDS) {
-                try {
-                    await liveReplay(collectionId, ts, this.integrators, actionId, savedAction);
-                } catch (e) {
-                    console.log(`error while live replaying secondary collection ${collectionId}:`, e)
-                }
-            }
+            await liveReplaySecondaries(ts, this.integrators, actionId, savedAction);
 
             return maybeError;
         });
@@ -125,13 +133,7 @@ export class Framework {
             const [actionId, savedAction] = nextActionOrNull;
             console.log(`REPLAY ${actionId}`)
 
-            for (const collectionId of COLLECTION_IDS) {
-                try {
-                    await this.tx((db: db.Database) => replayOrCheck(collectionId, db, this.integrators, actionId, savedAction))
-                } catch (e) {
-                    console.log(`error replaying collection ${collectionId}:`, e)
-                }
-            }
+            await replayAll(this.tx, this.integrators, actionId, savedAction)
             cursor = actionId;
         }
         console.log('DONE')

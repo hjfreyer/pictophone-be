@@ -1,5 +1,5 @@
 
-import { readableFromDiffs, sortedDiffs } from '.'
+import { readableFromDiffs, sortedDiffs, liveReplay, replayOrCheck } from '.'
 import { applyChanges, diffToChange, validateLive } from '../base'
 import * as db from '../db'
 import { Live, Readable } from '../interfaces'
@@ -32,11 +32,53 @@ export type SideInputs = {
     }
 }
 
-export const SPEC = {
+export async function liveReplaySecondaries(
+    ts: Tables, integrators: Integrators, actionId: string, savedAction: model.SavedAction): Promise<void> {
+    await liveReplay(SPEC['1.0.0'], ts, integrators, actionId, savedAction);
+    await liveReplay(SPEC['1.0.1'], ts, integrators, actionId, savedAction);
+    await liveReplay(SPEC['1.1.0'], ts, integrators, actionId, savedAction);
+}
+
+export async function replayAll(tx: db.TxRunner,
+    integrators: Integrators,
+    actionId: string, savedAction: model.SavedAction): Promise<void> {
+    await replayOrCheck(SPEC['1.0.0'], tx, integrators, actionId, savedAction);
+    await replayOrCheck(SPEC['1.0.1'], tx, integrators, actionId, savedAction);
+    await replayOrCheck(SPEC['1.0.2'], tx, integrators, actionId, savedAction);
+    await replayOrCheck(SPEC['1.1.0'], tx, integrators, actionId, savedAction);
+}
+
+
+type ToSchemaType<Live> = {
+    [K in keyof Live]: string[]
+}
+
+export type SpecType = {
+    [C in CollectionId]: SpecEntry<C, ToSchemaType<IOSpec[C]['live']>, Metadata[C], SideInputs[C], Outputs[C]>
+}
+
+export interface SpecEntry<C extends CollectionId, SchemaType, MetadataType, SideInputsType, OutputsType> {
+    collectionId: C
+    schemata: SchemaType
+    selectMetadata(ts: Tables): db.Table<MetadataType>
+    selectSideInputs(rs: SideInputs): SideInputsType
+    selectIntegrator(integrators: Integrators): (action: model.AnyAction, inputs: SideInputsType) =>
+        Promise<util.Result<OutputsType, model.AnyError>>
+    replaySideInputs(metas: AsyncIterable<MetadataType>): SideInputsType
+    emptyOutputs(): OutputsType
+    outputToMetadata(outputs: OutputsType): MetadataType
+    applyOutputs(ts: Tables, actionId: string, outputs: OutputsType): void
+}
+
+export const SPEC: SpecType = {
     '1.0.0': {
+        collectionId: '1.0.0',
         schemata: {
             games: ["games-games-1.0.0"],
         },
+        selectMetadata(ts: Tables) { return ts['1.0.0'].meta },
+        selectSideInputs(rs: SideInputs) { return rs['1.0.0'] },
+        selectIntegrator(integrators: Integrators) { return integrators['1.0.0'] },
         replaySideInputs(metas: AsyncIterable<Metadata['1.0.0']>): SideInputs['1.0.0'] {
             return {
                 games: readableFromDiffs(metas, meta => meta.outputs.games, this.schemata.games),
@@ -60,10 +102,14 @@ export const SPEC = {
         },
     },
     '1.0.1': {
+        collectionId: '1.0.1',
         schemata: {
             games: ["games-games-1.0.1"],
             gamesByPlayer: ["players", "games-gamesByPlayer-1.0.1"],
         },
+        selectMetadata(ts: Tables) { return ts['1.0.1'].meta },
+        selectSideInputs(rs: SideInputs) { return rs['1.0.1'] },
+        selectIntegrator(integrators: Integrators) { return integrators['1.0.1'] },
         replaySideInputs(metas: AsyncIterable<Metadata['1.0.1']>): SideInputs['1.0.1'] {
             return {
                 games: readableFromDiffs(metas, meta => meta.outputs.games, this.schemata.games),
@@ -91,10 +137,14 @@ export const SPEC = {
         },
     },
     '1.0.2': {
+        collectionId: '1.0.2',
         schemata: {
             games: ["games-games-1.0.2"],
             gamesByPlayer: ["players", "games-gamesByPlayer-1.0.2"],
         },
+        selectMetadata(ts: Tables) { return ts['1.0.2'].meta },
+        selectSideInputs(rs: SideInputs) { return rs['1.0.2'] },
+        selectIntegrator(integrators: Integrators) { return integrators['1.0.2'] },
         replaySideInputs(metas: AsyncIterable<Metadata['1.0.2']>): SideInputs['1.0.2'] {
             return {
                 games: readableFromDiffs(metas, meta => meta.outputs.games, this.schemata.games),
@@ -123,10 +173,14 @@ export const SPEC = {
         },
     },
     '1.1.0': {
+        collectionId: '1.1.0',
         schemata: {
             games: ["games-games-1.1.0"],
             gamesByPlayer: ["players", "games-gamesByPlayer-1.1.0"],
         },
+        selectMetadata(ts: Tables) { return ts['1.1.0'].meta },
+        selectSideInputs(rs: SideInputs) { return rs['1.1.0'] },
+        selectIntegrator(integrators: Integrators) { return integrators['1.1.0'] },
         replaySideInputs(metas: AsyncIterable<Metadata['1.1.0']>): SideInputs['1.1.0'] {
             return {
                 games: readableFromDiffs(metas, meta => meta.outputs.games, this.schemata.games),
