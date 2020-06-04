@@ -441,6 +441,13 @@ function batch(): Router {
         }).catch(next)
     })
 
+    res.post('/reexport', function(req: Request<{}>, res, next) {
+        FRAMEWORK.handleReexport().then(result => {
+            res.status(200)
+            res.json(result)
+        }).catch(next)
+    })
+
     // res.post('/backfill', function(_req: Request<{}>, res, next) {
     //     const cursor = _req.body as BackwardsCheckCursor
     //     backfill(db, cursor).then(result => {

@@ -20,6 +20,7 @@ export type Tables = {
         live: {
             games: db.Table<Live<model.Game1_0>>
         }
+        exports: {}
     },
     '1.0.1': {
         meta: db.Table<Metadata['1.0.1']>
@@ -27,11 +28,15 @@ export type Tables = {
             games: db.Table<Live<model.Game1_0>>
             gamesByPlayer: db.Table<Live<model.PlayerGame1_0>>
         }
+        exports: {}
     },
     '1.0.2': {
         meta: db.Table<Metadata['1.0.2']>
         live: {
             games: db.Table<Live<model.Game1_0>>
+            gamesByPlayer: db.Table<Live<model.PlayerGame1_0>>
+        },
+        exports: {
             gamesByPlayer: db.Table<Live<model.PlayerGame1_0>>
         }
     },
@@ -139,6 +144,7 @@ export const SPEC = {
             ts['1.0.2'].meta.set([actionId], this.outputToMetadata(outputs));
             applyChanges(ts['1.0.2'].live.games, actionId, outputs.games.map(diffToChange))
             applyChanges(ts['1.0.2'].live.gamesByPlayer, actionId, outputs.gamesByPlayer.map(diffToChange))
+            applyChanges(ts['1.0.2'].exports.gamesByPlayer, actionId, outputs.gamesByPlayer.map(diffToChange))
         },
     },
 }
@@ -155,7 +161,9 @@ export function openAll(db: db.Database): Tables {
                     schema: SPEC['1.0.0'].schemata.games,
                     validator: validateLive(validateModel('Game1_0'))
                 })
-            }
+            },
+            exports: {},
+
         },
         '1.0.1': {
             meta: db.open({
@@ -171,7 +179,8 @@ export function openAll(db: db.Database): Tables {
                     schema: SPEC['1.0.1'].schemata.gamesByPlayer,
                     validator: validateLive(validateModel('PlayerGame1_0'))
                 })
-            }
+            },
+            exports: {},
         },
         '1.0.2': {
             meta: db.open({
@@ -185,6 +194,12 @@ export function openAll(db: db.Database): Tables {
                 }),
                 gamesByPlayer: db.open({
                     schema: SPEC['1.0.2'].schemata.gamesByPlayer,
+                    validator: validateLive(validateModel('PlayerGame1_0'))
+                })
+            },
+            exports: {
+                gamesByPlayer: db.open({
+                    schema: ['players', 'games-gamesByPlayer-1.0'],
                     validator: validateLive(validateModel('PlayerGame1_0'))
                 })
             }

@@ -131,6 +131,38 @@ export class Framework {
         }
         console.log('DONE')
     }
+
+    async handleReexport(): Promise<void> {
+        await copyTable(this.tx,
+            (db) => openAll(db)['1.0.2'].live.gamesByPlayer,
+            (db) => openAll(db)['1.0.2'].exports.gamesByPlayer)
+    }
+}
+
+export async function copyTable<T>(tx: db.TxRunner,
+    srcTableGetter: (db: db.Database) => db.Table<T>,
+    dstTableGetter: (db: db.Database) => db.Table<T>): Promise<void> {
+    // TODO: Single TX = no bueno. Can also be a lot more efficient by taking
+    // advantage of the fact that both collections are sorted (i.e. do merge
+    // and diff).
+    await tx(async (db: db.Database): Promise<void> => {
+        const srcTable = srcTableGetter(db);
+        const dstTable = dstTableGetter(db);
+
+        for await (const [key, value] of readables.readAll(srcTable)) {
+            dstTable.set(key, value);
+        }
+    })
+    await tx(async (db: db.Database): Promise<void> => {
+        const srcTable = srcTableGetter(db);
+        const dstTable = dstTableGetter(db);
+
+        for await (const [key,] of readables.readAll(dstTable)) {
+            if ((await readables.getOrDefault(srcTable, key, null)).is_default) {
+                dstTable.delete(key);
+            }
+        }
+    })
 }
 
 export async function deleteCollection(runner: db.TxRunner, collectionId: CollectionId): Promise<void> {
