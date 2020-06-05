@@ -15,6 +15,9 @@ struct ConfigIn {
 struct CollectionIn {
     id: String,
     tables: Vec<TableIn>,
+
+    #[serde(default)]
+    is_deprecated: bool,
 }
 
 #[derive(Deserialize, Debug)]
@@ -52,6 +55,7 @@ struct ConfigOut {
 struct CollectionOut {
     id: String,
     is_primary: bool,
+    is_deprecated: bool,
     tables: Vec<TableOut>,
 }
 
@@ -91,6 +95,7 @@ fn convert(config: &ConfigIn) -> ConfigOut {
             .map(|collection| CollectionOut {
                 id: collection.id.clone(),
                 is_primary: collection.id == config.primary_id,
+                is_deprecated: collection.is_deprecated,
                 tables: collection
                     .tables
                     .iter()
@@ -164,7 +169,9 @@ fn json_formatter(
 
 static AUTO_TEMPLATE : &'static str = "// DON'T EDIT THIS FILE, IT IS AUTO GENERATED
 
-import \\{ Integrators, liveReplay, readableFromDiffs, replayOrCheck, SideInputs, sortedDiffs, SpecType, Tables, copyTable, checkTableEquality } from '.'
+import \\{ Integrators, liveReplay, readableFromDiffs, replayOrCheck, 
+    SideInputs, sortedDiffs, SpecType, Tables, copyTable, checkTableEquality,
+    deleteCollection } from '.'
 import \\{ applyChanges, diffToChange, validateLive } from '../base'
 import * as db from '../db'
 import * as model from '../model'
@@ -182,16 +189,22 @@ export const COLLECTION_IDS =
 
 export async function liveReplaySecondaries(
     ts: Tables, integrators: Integrators, actionId: string, savedAction: model.SavedAction): Promise<void> \\{
-    {{-for cid in secondary_collection_ids}}
-    await liveReplay(SPEC[{ cid | json }], ts, integrators, actionId, savedAction);
+    {{-for c in collections-}}
+    {{-if c.is_primary }}{{ else-}}
+    {{-if c.is_deprecated }}{{ else }}
+    await liveReplay(SPEC[{ c.id | json }], ts, integrators, actionId, savedAction);
+    {{-endif-}}
+    {{-endif-}}
     {{-endfor }}
 }
 
 export async function replayAll(
     tx: db.TxRunner, integrators: Integrators,
     actionId: string, savedAction: model.SavedAction): Promise<void> \\{
-    {{-for collection in collections}}
+    {{-for collection in collections-}}
+    {{-if collection.is_deprecated }}{{ else }}
     await replayOrCheck(SPEC[{ collection.id | json }], tx, integrators, actionId, savedAction);
+    {{-endif-}}
     {{-endfor }}
 }
 
@@ -215,6 +228,15 @@ export async function checkExports(tx : db.TxRunner) : Promise<void> \\{
         (db) => openAll(db)[{ss.collection_id | json}].live[{ss.table_id | json}])
     {{- endfor }}
     {{- endfor }}
+}
+
+export async function purgeDeprecated(tx : db.TxRunner) : Promise<void> \\{
+    {{-for collection in collections-}}
+    {{-if collection.is_deprecated }}
+    console.log('DELETING: {collection.id}');
+    await deleteCollection(tx, { collection.id | json });
+    {{-endif-}}
+    {{-endfor }}
 }
 
 export const SPEC: SpecType = \\{

@@ -27,7 +27,6 @@ export type IOSpec = {
             gamesByPlayer: model.PlayerGame1_0
         }
         exports: {
-            gamesByPlayer: model.PlayerGame1_0
         }
     }
     "1.1.0": {
@@ -36,7 +35,6 @@ export type IOSpec = {
             gamesByPlayer: model.PlayerGame1_1
         }
         exports: {
-            gamesByPlayer: model.PlayerGame1_1
         }
     }
     "1.1.1": {
@@ -46,6 +44,8 @@ export type IOSpec = {
             gamesByPlayer1_0: model.PlayerGame1_0
         }
         exports: {
+            gamesByPlayer1_1: model.PlayerGame1_1
+            gamesByPlayer1_0: model.PlayerGame1_0
         }
     }
 }
