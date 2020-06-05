@@ -13,7 +13,8 @@ import * as readables from '../readables';
 import * as util from '../util';
 import {
     openAll, readAll, replayAll, COLLECTION_IDS, PRIMARY_COLLECTION_ID, SECONDARY_COLLECTION_IDS, SPEC,
-    liveReplaySecondaries
+    liveReplaySecondaries,
+    reexportAll,
 
 } from './auto';
 import { Metadata, IOSpec, Outputs } from './interfaces';
@@ -186,9 +187,7 @@ export class Framework {
     }
 
     async handleReexport(): Promise<void> {
-        await copyTable(this.tx,
-            (db) => openAll(db)['1.0.2'].live.gamesByPlayer,
-            (db) => openAll(db)['1.0.2'].exports.gamesByPlayer)
+        await reexportAll(this.tx);
     }
 }
 

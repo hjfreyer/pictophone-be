@@ -23,7 +23,7 @@ struct ExportIn {
     primary_source: TableId,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 struct TableId {
     collection_id: String,
     table_id: String,
@@ -42,6 +42,7 @@ struct ConfigOut {
     secondary_collection_ids: Vec<String>,
     all_collection_ids: Vec<String>,
     collections: Vec<CollectionOut>,
+    exports: Vec<ExportOut>,
 }
 
 #[derive(Serialize, Debug)]
@@ -57,6 +58,11 @@ struct TableOut {
     schema: Vec<String>,
     r#type: String,
     export_schema: Option<Vec<String>>,
+}
+
+#[derive(Serialize, Debug)]
+struct ExportOut {
+    source: TableId,
 }
 
 fn convert(config: &ConfigIn) -> ConfigOut {
@@ -118,6 +124,13 @@ fn convert(config: &ConfigIn) -> ConfigOut {
                     .collect(),
             })
             .collect(),
+        exports: config
+            .exports
+            .iter()
+            .map(|export| ExportOut {
+                source: export.primary_source.clone(),
+            })
+            .collect(),
     }
 }
 
@@ -144,7 +157,7 @@ fn json_formatter(
 
 static AUTO_TEMPLATE : &'static str = "// DON'T EDIT THIS FILE, IT IS AUTO GENERATED
 
-import \\{ Integrators, liveReplay, readableFromDiffs, replayOrCheck, SideInputs, sortedDiffs, SpecType, Tables } from '.'
+import \\{ Integrators, liveReplay, readableFromDiffs, replayOrCheck, SideInputs, sortedDiffs, SpecType, Tables, copyTable } from '.'
 import \\{ applyChanges, diffToChange, validateLive } from '../base'
 import * as db from '../db'
 import * as model from '../model'
@@ -173,6 +186,14 @@ export async function replayAll(
     {{-for collection in collections}}
     await replayOrCheck(SPEC[{ collection.id | json }], tx, integrators, actionId, savedAction);
     {{-endfor }}
+}
+
+export async function reexportAll(tx : db.TxRunner) : Promise<void> \\{
+    {{- for e in exports }}
+    await copyTable(tx,
+        (db) => openAll(db)[{e.source.collection_id | json}].live[{e.source.table_id | json}],
+        (db) => openAll(db)[{e.source.collection_id | json}].exports[{e.source.table_id | json}])
+    {{- endfor }}
 }
 
 export const SPEC: SpecType = \\{

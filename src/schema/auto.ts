@@ -1,6 +1,6 @@
 // DON'T EDIT THIS FILE, IT IS AUTO GENERATED
 
-import { Integrators, liveReplay, readableFromDiffs, replayOrCheck, SideInputs, sortedDiffs, SpecType, Tables } from '.'
+import { Integrators, liveReplay, readableFromDiffs, replayOrCheck, SideInputs, sortedDiffs, SpecType, Tables, copyTable } from '.'
 import { applyChanges, diffToChange, validateLive } from '../base'
 import * as db from '../db'
 import * as model from '../model'
@@ -32,6 +32,15 @@ export async function replayAll(
     await replayOrCheck(SPEC["1.0.2"], tx, integrators, actionId, savedAction);
     await replayOrCheck(SPEC["1.1.0"], tx, integrators, actionId, savedAction);
     await replayOrCheck(SPEC["1.1.1"], tx, integrators, actionId, savedAction);
+}
+
+export async function reexportAll(tx: db.TxRunner): Promise<void> {
+    await copyTable(tx,
+        (db) => openAll(db)["1.0.2"].live["gamesByPlayer"],
+        (db) => openAll(db)["1.0.2"].exports["gamesByPlayer"])
+    await copyTable(tx,
+        (db) => openAll(db)["1.1.0"].live["gamesByPlayer"],
+        (db) => openAll(db)["1.1.0"].exports["gamesByPlayer"])
 }
 
 export const SPEC: SpecType = {
