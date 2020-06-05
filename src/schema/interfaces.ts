@@ -6,37 +6,6 @@ import { Diff } from '../interfaces'
 export type CollectionId = keyof IOSpec;
 
 export type IOSpec = {
-    "1.0.0": {
-        live: {
-            games: model.Game1_0
-        }
-        exports: {
-        }
-    }
-    "1.0.1": {
-        live: {
-            games: model.Game1_0
-            gamesByPlayer: model.PlayerGame1_0
-        }
-        exports: {
-        }
-    }
-    "1.0.2": {
-        live: {
-            games: model.Game1_0
-            gamesByPlayer: model.PlayerGame1_0
-        }
-        exports: {
-        }
-    }
-    "1.1.0": {
-        live: {
-            games: model.Game1_1
-            gamesByPlayer: model.PlayerGame1_1
-        }
-        exports: {
-        }
-    }
     "1.1.1": {
         live: {
             games: model.Game1_1
@@ -61,8 +30,4 @@ export type Metadata = {
         outputs: Outputs[K]
     }
 }
-export type Metadata1_0_0 = Metadata["1.0.0"]
-export type Metadata1_0_1 = Metadata["1.0.1"]
-export type Metadata1_0_2 = Metadata["1.0.2"]
-export type Metadata1_1_0 = Metadata["1.1.0"]
 export type Metadata1_1_1 = Metadata["1.1.1"]
