@@ -10,10 +10,10 @@ import { Metadata, Outputs } from './interfaces'
 import { validate as validateInterfaces } from './interfaces.validator'
 
 export const PRIMARY_COLLECTION_ID = "1.0.2";
-export const SECONDARY_COLLECTION_IDS = ["1.0.0", "1.0.1", "1.1.0"] as ["1.0.0", "1.0.1", "1.1.0"];
+export const SECONDARY_COLLECTION_IDS = ["1.0.0", "1.0.1", "1.1.0", "1.1.1"] as ["1.0.0", "1.0.1", "1.1.0", "1.1.1"];
 export const COLLECTION_IDS =
-    ["1.0.0", "1.0.1", "1.0.2", "1.1.0"] as
-    ["1.0.0", "1.0.1", "1.0.2", "1.1.0"];
+    ["1.0.0", "1.0.1", "1.0.2", "1.1.0", "1.1.1"] as
+    ["1.0.0", "1.0.1", "1.0.2", "1.1.0", "1.1.1"];
 
 
 export async function liveReplaySecondaries(
@@ -21,6 +21,7 @@ export async function liveReplaySecondaries(
     await liveReplay(SPEC["1.0.0"], ts, integrators, actionId, savedAction);
     await liveReplay(SPEC["1.0.1"], ts, integrators, actionId, savedAction);
     await liveReplay(SPEC["1.1.0"], ts, integrators, actionId, savedAction);
+    await liveReplay(SPEC["1.1.1"], ts, integrators, actionId, savedAction);
 }
 
 export async function replayAll(
@@ -30,6 +31,7 @@ export async function replayAll(
     await replayOrCheck(SPEC["1.0.1"], tx, integrators, actionId, savedAction);
     await replayOrCheck(SPEC["1.0.2"], tx, integrators, actionId, savedAction);
     await replayOrCheck(SPEC["1.1.0"], tx, integrators, actionId, savedAction);
+    await replayOrCheck(SPEC["1.1.1"], tx, integrators, actionId, savedAction);
 }
 
 export const SPEC: SpecType = {
@@ -155,6 +157,7 @@ export const SPEC: SpecType = {
                 "gamesByPlayer": ["players", "games-gamesByPlayer-1.1.0"],
             },
             exports: {
+                "gamesByPlayer": ["players", "games-gamesByPlayer-1.1"],
             }
         },
         selectMetadata(ts: Tables) { return ts[this.collectionId].meta },
@@ -184,6 +187,51 @@ export const SPEC: SpecType = {
             ts[this.collectionId].meta.set([actionId], this.outputToMetadata(outputs));
             applyChanges(ts[this.collectionId].live["games"], actionId, outputs["games"].map(diffToChange))
             applyChanges(ts[this.collectionId].live["gamesByPlayer"], actionId, outputs["gamesByPlayer"].map(diffToChange))
+            applyChanges(ts[this.collectionId].exports["gamesByPlayer"], actionId, outputs["gamesByPlayer"].map(diffToChange))
+        },
+    },
+    "1.1.1": {
+        collectionId: "1.1.1",
+        schemata: {
+            live: {
+                "games": ["games-games-1.1.1"],
+                "gamesByPlayer1_1": ["players", "games-gamesByPlayer1_1-1.1.1"],
+                "gamesByPlayer1_0": ["players", "games-gamesByPlayer1_0-1.1.1"],
+            },
+            exports: {
+            }
+        },
+        selectMetadata(ts: Tables) { return ts[this.collectionId].meta },
+        selectSideInputs(rs: SideInputs) { return rs[this.collectionId] },
+        selectIntegrator(integrators: Integrators) { return integrators[this.collectionId] },
+        replaySideInputs(metas: AsyncIterable<Metadata["1.1.1"]>): SideInputs["1.1.1"] {
+            return {
+                "games": readableFromDiffs(metas, meta => meta.outputs["games"], this.schemata.live["games"]),
+                "gamesByPlayer1_1": readableFromDiffs(metas, meta => meta.outputs["gamesByPlayer1_1"], this.schemata.live["gamesByPlayer1_1"]),
+                "gamesByPlayer1_0": readableFromDiffs(metas, meta => meta.outputs["gamesByPlayer1_0"], this.schemata.live["gamesByPlayer1_0"]),
+            }
+        },
+        emptyOutputs(): Outputs["1.1.1"] {
+            return {
+                "games": [],
+                "gamesByPlayer1_1": [],
+                "gamesByPlayer1_0": [],
+            }
+        },
+        outputToMetadata(outputs: Outputs["1.1.1"]): Metadata["1.1.1"] {
+            return {
+                outputs: {
+                    "games": sortedDiffs(outputs["games"]),
+                    "gamesByPlayer1_1": sortedDiffs(outputs["gamesByPlayer1_1"]),
+                    "gamesByPlayer1_0": sortedDiffs(outputs["gamesByPlayer1_0"]),
+                }
+            }
+        },
+        applyOutputs(ts: Tables, actionId: string, outputs: Outputs["1.1.1"]): void {
+            ts[this.collectionId].meta.set([actionId], this.outputToMetadata(outputs));
+            applyChanges(ts[this.collectionId].live["games"], actionId, outputs["games"].map(diffToChange))
+            applyChanges(ts[this.collectionId].live["gamesByPlayer1_1"], actionId, outputs["gamesByPlayer1_1"].map(diffToChange))
+            applyChanges(ts[this.collectionId].live["gamesByPlayer1_0"], actionId, outputs["gamesByPlayer1_0"].map(diffToChange))
         },
     },
 };
@@ -260,6 +308,32 @@ export function openAll(db: db.Database): Tables {
                 }),
             },
             exports: {
+                "gamesByPlayer": db.open({
+                    schema: SPEC["1.1.0"].schemata.exports["gamesByPlayer"],
+                    validator: validateLive(validateModel("PlayerGame1_1"))
+                }),
+            },
+        },
+        "1.1.1": {
+            meta: db.open({
+                schema: ['metadata-1.1.1'],
+                validator: validateInterfaces('Metadata1_1_1')
+            }),
+            live: {
+                "games": db.open({
+                    schema: SPEC["1.1.1"].schemata.live["games"],
+                    validator: validateLive(validateModel("Game1_1"))
+                }),
+                "gamesByPlayer1_1": db.open({
+                    schema: SPEC["1.1.1"].schemata.live["gamesByPlayer1_1"],
+                    validator: validateLive(validateModel("PlayerGame1_1"))
+                }),
+                "gamesByPlayer1_0": db.open({
+                    schema: SPEC["1.1.1"].schemata.live["gamesByPlayer1_0"],
+                    validator: validateLive(validateModel("PlayerGame1_0"))
+                }),
+            },
+            exports: {
             },
         },
     }
@@ -283,6 +357,11 @@ export function readAll(ts: Tables): [Set<string>, SideInputs] {
         "1.1.0": {
             "games": readables.tracked(ts["1.1.0"].live["games"], track),
             "gamesByPlayer": readables.tracked(ts["1.1.0"].live["gamesByPlayer"], track),
+        },
+        "1.1.1": {
+            "games": readables.tracked(ts["1.1.1"].live["games"], track),
+            "gamesByPlayer1_1": readables.tracked(ts["1.1.1"].live["gamesByPlayer1_1"], track),
+            "gamesByPlayer1_0": readables.tracked(ts["1.1.1"].live["gamesByPlayer1_0"], track),
         },
     }
     return [parentSet, res]

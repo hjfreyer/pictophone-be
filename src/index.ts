@@ -288,6 +288,18 @@ function getPlayerGameExport1_1(game: Game1_1, playerId: string): model.PlayerGa
     }
 }
 
+
+function gameToPlayerGames1_1to1_0(item: Item<Game1_1>): Iterable<Item<model.PlayerGame1_0>> {
+    return ix.from(gameToPlayerGames1_1(item)).pipe(
+        ixop.map(([key, pg]: Item<model.PlayerGame1_1>): Item<model.PlayerGame1_0> => {
+            return [key, {
+                ...pg,
+                players: pg.players.map(p => p.id)
+            }]
+        }),
+    );
+}
+
 const FRAMEWORK = new Framework(db.runTransaction(fsDb), {
     '1.0.0': async (action: model.AnyAction, inputs: SideInputs['1.0.0']): Promise<util.Result<Outputs['1.0.0'], model.AnyError>> => {
         const gamesResult = await integrate1_0(action, inputs.games);
@@ -337,7 +349,22 @@ const FRAMEWORK = new Framework(db.runTransaction(fsDb), {
             games: gamesResult.value,
             gamesByPlayer: await collections.toDiffs(gamesByPlayer),
         })
-    }
+    },
+    '1.1.1': async (action: model.AnyAction, inputs: SideInputs['1.1.1']): Promise<util.Result<Outputs['1.1.1'], model.AnyError>> => {
+        const gamesResult = await integrate1_1_0(action, inputs.games);
+        if (gamesResult.status !== 'ok') {
+            return gamesResult
+        }
+
+        const gamesByPlayer1_1 = collections.map(collections.fromDiffs(gamesResult.value), gameToPlayerGames1_1);
+        const gamesByPlayer1_0 = collections.map(collections.fromDiffs(gamesResult.value), gameToPlayerGames1_1to1_0);
+
+        return util.ok({
+            games: gamesResult.value,
+            gamesByPlayer1_0: await collections.toDiffs(gamesByPlayer1_0),
+            gamesByPlayer1_1: await collections.toDiffs(gamesByPlayer1_1),
+        })
+    },
 });
 
 

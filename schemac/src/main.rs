@@ -74,14 +74,13 @@ fn convert(config: &ConfigIn) -> ConfigOut {
                     .map(|table| TableOut {
                         id: table.id.clone(),
                         r#type: table.r#type.clone(),
-                        export_schema: table.export_as.clone().map(|export_version| {
+                        export_schema: table.export_as.clone().map(|export_id| {
                             let mut res = table.schema.clone();
                             let last = res.last_mut().unwrap();
                             *last = format!(
-                                "{segment}-{table_id}-{version}",
+                                "{segment}-{export_id}",
                                 segment = *last,
-                                table_id = table.id,
-                                version = export_version
+                                export_id = export_id
                             );
                             res
                         }),

@@ -21,7 +21,7 @@ collections:
   - id: gamesByPlayer
     schema: [players, games]
     type: PlayerGame1_0
-    export_as: "1.0"
+    export_as: "gamesByPlayer-1.0"
 - id: "1.1.0"
   tables:
   - id: games
@@ -30,3 +30,15 @@ collections:
   - id: gamesByPlayer
     schema: [players, games]
     type: PlayerGame1_1
+    export_as: "gamesByPlayer-1.1"
+- id: "1.1.1"
+  tables:
+  - id: games
+    schema: [games]
+    type: Game1_1
+  - id: gamesByPlayer1_1
+    schema: [players, games]
+    type: PlayerGame1_1
+  - id: gamesByPlayer1_0
+    schema: [players, games]
+    type: PlayerGame1_0
