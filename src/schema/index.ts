@@ -14,7 +14,7 @@ import * as util from '../util';
 import {
     openAll, readAll, replayAll, COLLECTION_IDS, PRIMARY_COLLECTION_ID, SECONDARY_COLLECTION_IDS, SPEC,
     liveReplaySecondaries,
-    reexportAll, checkExports,
+    reexportAll, checkExports, purgeDeprecated
 
 } from './auto';
 import { Metadata, IOSpec, Outputs } from './interfaces';
@@ -193,6 +193,10 @@ export class Framework {
 
     async handleCheck(): Promise<void> {
         await checkExports(this.tx);
+    }
+
+    async handlePurge(): Promise<void> {
+        await purgeDeprecated(this.tx);
     }
 }
 

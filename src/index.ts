@@ -713,6 +713,12 @@ function batch(): Router {
             res.json(result)
         }).catch(next)
     })
+    res.post('/purge', function(req: Request<{}>, res, next) {
+        FRAMEWORK.handlePurge().then(result => {
+            res.status(200)
+            res.json(result)
+        }).catch(next)
+    })
 
     // res.post('/backfill', function(_req: Request<{}>, res, next) {
     //     const cursor = _req.body as BackwardsCheckCursor

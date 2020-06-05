@@ -13,8 +13,8 @@ import * as readables from '../readables'
 import { Metadata, Outputs } from './interfaces'
 import { validate as validateInterfaces } from './interfaces.validator'
 
-export const PRIMARY_COLLECTION_ID = "1.1.0";
-export const SECONDARY_COLLECTION_IDS = ["1.0.0", "1.0.1", "1.0.2", "1.1.1"] as ["1.0.0", "1.0.1", "1.0.2", "1.1.1"];
+export const PRIMARY_COLLECTION_ID = "1.1.1";
+export const SECONDARY_COLLECTION_IDS = ["1.0.0", "1.0.1", "1.0.2", "1.1.0"] as ["1.0.0", "1.0.1", "1.0.2", "1.1.0"];
 export const COLLECTION_IDS =
     ["1.0.0", "1.0.1", "1.0.2", "1.1.0", "1.1.1"] as
     ["1.0.0", "1.0.1", "1.0.2", "1.1.0", "1.1.1"];
@@ -23,7 +23,6 @@ export const COLLECTION_IDS =
 export async function liveReplaySecondaries(
     ts: Tables, integrators: Integrators, actionId: string, savedAction: model.SavedAction): Promise<void> {
     await liveReplay(SPEC["1.0.2"], ts, integrators, actionId, savedAction);
-    await liveReplay(SPEC["1.1.1"], ts, integrators, actionId, savedAction);
 }
 
 export async function replayAll(
