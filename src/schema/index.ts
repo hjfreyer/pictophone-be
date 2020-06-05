@@ -4,7 +4,7 @@ import * as ixa from "ix/asynciterable";
 import * as ixaop from "ix/asynciterable/operators";
 import { getActionId } from '../base';
 import * as db from '../db';
-import { Diff, ItemIterable, Range, Readable } from '../interfaces';
+import { Diff, ItemIterable, Range, Readable, Live } from '../interfaces';
 import * as model from '../model';
 import { AnyAction, AnyError, SavedAction } from '../model';
 import { validate as validateModel } from '../model/index.validator';
@@ -12,14 +12,60 @@ import * as ranges from '../ranges';
 import * as readables from '../readables';
 import * as util from '../util';
 import {
-    Integrators, openAll, readAll, Tables
+    openAll, readAll, replayAll, COLLECTION_IDS, PRIMARY_COLLECTION_ID, SECONDARY_COLLECTION_IDS, SPEC,
+    liveReplaySecondaries
+
 } from './auto';
-import { } from './interfaces';
+import { Metadata, IOSpec, Outputs } from './interfaces';
 import { CollectionId } from './interfaces.validator';
-import { replayAll, SideInputs, COLLECTION_IDS, PRIMARY_COLLECTION_ID, SECONDARY_COLLECTION_IDS, SPEC, SpecEntry, liveReplaySecondaries } from './manual';
 
 export * from './auto';
 export * from './interfaces';
+
+export type Tables = {
+    [C in CollectionId]: {
+        meta: db.Table<Metadata[C]>
+        live: {
+            [T in keyof IOSpec[C]['live']]: db.Table<Live<IOSpec[C]['live'][T]>>
+        }
+        exports: {
+            [T in keyof IOSpec[C]['exports']]: db.Table<Live<IOSpec[C]['exports'][T]>>
+        }
+    }
+}
+
+export type SideInputs = {
+    [C in CollectionId]: {
+        [T in keyof IOSpec[C]['live']]: Readable<IOSpec[C]['live'][T]>
+    }
+}
+
+type ToSchemaType<Live, Exports> = {
+    live: { [K in keyof Live]: string[] }
+    exports: { [K in keyof Exports]: string[] }
+}
+
+export type SpecType = {
+    [C in CollectionId]: SpecEntry<C, ToSchemaType<IOSpec[C]['live'], IOSpec[C]['exports']>, Metadata[C], SideInputs[C], Outputs[C]>
+}
+
+export interface SpecEntry<C extends CollectionId, SchemaType, MetadataType, SideInputsType, OutputsType> {
+    collectionId: C
+    schemata: SchemaType
+    selectMetadata(ts: Tables): db.Table<MetadataType>
+    selectSideInputs(rs: SideInputs): SideInputsType
+    selectIntegrator(integrators: Integrators): (action: model.AnyAction, inputs: SideInputsType) =>
+        Promise<util.Result<OutputsType, model.AnyError>>
+    replaySideInputs(metas: AsyncIterable<MetadataType>): SideInputsType
+    emptyOutputs(): OutputsType
+    outputToMetadata(outputs: OutputsType): MetadataType
+    applyOutputs(ts: Tables, actionId: string, outputs: OutputsType): void
+}
+
+export type Integrators = {
+    [K in CollectionId]: (action: model.AnyAction, inputs: SideInputs[K]) =>
+        Promise<util.Result<Outputs[K], model.AnyError>>
+}
 
 export function sortedDiffs<T>(diffs: Iterable<Diff<T>>): Diff<T>[] {
     return util.sorted(diffs, (d1, d2) => util.lexCompare(d1.key, d2.key));

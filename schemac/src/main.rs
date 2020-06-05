@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
-use std::io::{self, Read};
+use std::env;
+use std::fs;
+use std::io;
+use std::path;
 
 #[derive(Deserialize, Debug)]
 struct ConfigIn {
@@ -18,13 +21,14 @@ struct TableIn {
     id: String,
     schema: Vec<String>,
     r#type: String,
-
-    #[serde(default)]
-    input: bool,
+    export_as: Option<String>,
 }
 
 #[derive(Serialize, Debug)]
 struct ConfigOut {
+    primary_collection_id: String,
+    secondary_collection_ids: Vec<String>,
+    all_collection_ids: Vec<String>,
     collections: Vec<CollectionOut>,
 }
 
@@ -40,11 +44,24 @@ struct TableOut {
     id: String,
     schema: Vec<String>,
     r#type: String,
-    is_input: bool,
+    export_schema: Option<Vec<String>>,
 }
 
 fn convert(config: &ConfigIn) -> ConfigOut {
     ConfigOut {
+        primary_collection_id: config.primary_id.clone(),
+        secondary_collection_ids: config
+            .collections
+            .iter()
+            .map(|collection| collection.id.clone())
+            .filter(|id| *id != config.primary_id)
+            .collect(),
+        all_collection_ids: config
+            .collections
+            .iter()
+            .map(|collection| collection.id.clone())
+            .collect(),
+
         collections: config
             .collections
             .iter()
@@ -57,7 +74,17 @@ fn convert(config: &ConfigIn) -> ConfigOut {
                     .map(|table| TableOut {
                         id: table.id.clone(),
                         r#type: table.r#type.clone(),
-                        is_input: table.input,
+                        export_schema: table.export_as.clone().map(|export_version| {
+                            let mut res = table.schema.clone();
+                            let last = res.last_mut().unwrap();
+                            *last = format!(
+                                "{segment}-{table_id}-{version}",
+                                segment = *last,
+                                table_id = table.id,
+                                version = export_version
+                            );
+                            res
+                        }),
                         schema: {
                             let mut res = table.schema.clone();
                             let last = res.last_mut().unwrap();
@@ -97,187 +124,217 @@ fn json_formatter(
     Ok(())
 }
 
-static TEMPLATE : &'static str = "// DON'T EDIT THIS FILE, IT IS AUTO GENERATED
+static AUTO_TEMPLATE : &'static str = "// DON'T EDIT THIS FILE, IT IS AUTO GENERATED
 
+import \\{ Integrators, liveReplay, readableFromDiffs, replayOrCheck, SideInputs, sortedDiffs, SpecType, Tables } from '.'
+import \\{ applyChanges, diffToChange, validateLive } from '../base'
 import * as db from '../db'
-import * as util from '../util'
-import \\{ Live, Diff, Change, Readable } from '../interfaces'
 import * as model from '../model'
 import \\{ validate as validateModel } from '../model/index.validator'
-import \\{ validateLive, applyChanges, diffToChange } from '../base'
 import * as readables from '../readables'
-import \\{ deleteTable, deleteMeta, integrateLive, integrateReplay } from '.'
+import \\{ Metadata, Outputs } from './interfaces'
+import \\{ validate as validateInterfaces } from './interfaces.validator'
 
-export type Tables = \\{
-    actions: db.Table<model.SavedAction>
-    actionTableMetadata: db.Table<model.ActionTableMetadata>
-    {{- for collection in collections -}}
-    {{ for table in collection.tables }}
-    {table.id}_{ collection.id | ident}: db.Table<Live<model.{table.type}>>
-    {{- endfor -}}
-    {{- endfor }}
+export const PRIMARY_COLLECTION_ID = { primary_collection_id | json };
+export const SECONDARY_COLLECTION_IDS = { secondary_collection_ids | json }  as { secondary_collection_ids | json };
+export const COLLECTION_IDS =
+    { all_collection_ids | json } as
+    { all_collection_ids | json };
+
+
+export async function liveReplaySecondaries(
+    ts: Tables, integrators: Integrators, actionId: string, savedAction: model.SavedAction): Promise<void> \\{
+    {{-for cid in secondary_collection_ids}}
+    await liveReplay(SPEC[{ cid | json }], ts, integrators, actionId, savedAction);
+    {{-endfor }}
 }
+
+export async function replayAll(
+    tx: db.TxRunner, integrators: Integrators,
+    actionId: string, savedAction: model.SavedAction): Promise<void> \\{
+    {{-for collection in collections}}
+    await replayOrCheck(SPEC[{ collection.id | json }], tx, integrators, actionId, savedAction);
+    {{-endfor }}
+}
+
+export const SPEC: SpecType = \\{
+    {{-for c in collections }}
+    { c.id | json }: \\{
+        collectionId: { c.id | json },
+        schemata: \\{
+            live: \\{
+                {{-for t in c.tables }}
+                {t.id | json}: {t.schema | json},
+                {{-endfor }}
+            },
+            exports: \\{
+                {{-for t in c.tables-}}
+                {{-if t.export_schema }}
+                {t.id | json}: {t.export_schema | json},
+                {{-endif-}}
+                {{-endfor }}
+            }
+        },
+        selectMetadata(ts: Tables) \\{ return ts[this.collectionId].meta },
+        selectSideInputs(rs: SideInputs) \\{ return rs[this.collectionId] },
+        selectIntegrator(integrators: Integrators) \\{ return integrators[this.collectionId] },
+        replaySideInputs(metas: AsyncIterable<Metadata[{ c.id | json }]>): SideInputs[{ c.id | json }] \\{
+            return \\{
+                {{-for t in c.tables }}
+                {t.id | json}: readableFromDiffs(metas, meta => meta.outputs[{t.id | json}], this.schemata.live[{t.id | json}]),
+                {{-endfor }}
+            }
+        },
+        emptyOutputs(): Outputs[{ c.id | json }] \\{
+            return \\{
+                {{-for t in c.tables }}
+                {t.id | json}: [],
+                {{-endfor }}
+            }
+        },
+        outputToMetadata(outputs: Outputs[{ c.id | json }]): Metadata[{ c.id | json }] \\{
+            return \\{
+                outputs: \\{
+                    {{-for t in c.tables }}
+                    {t.id | json}: sortedDiffs(outputs[{t.id | json}]),
+                    {{-endfor }}
+                }
+            }
+        },
+        applyOutputs(ts: Tables, actionId: string, outputs: Outputs[{ c.id | json }]): void \\{
+            ts[this.collectionId].meta.set([actionId], this.outputToMetadata(outputs));
+            {{-for t in c.tables }}
+            applyChanges(ts[this.collectionId].live[{t.id | json}], actionId, outputs[{t.id | json}].map(diffToChange))
+            {{-if t.export_schema }}
+            applyChanges(ts[this.collectionId].exports[{t.id | json}], actionId, outputs[{t.id | json}].map(diffToChange))
+            {{-endif-}}
+            {{-endfor }}
+       },
+    },
+    {{-endfor }}
+};
 
 export function openAll(db: db.Database): Tables \\{
     return \\{
-        actions: db.open(\\{
-            schema: ['actions'],
-            validator: validateModel('SavedAction')
-        }),
-        actionTableMetadata: db.open(\\{
-            schema: ['actions', '_META_'],
-            validator: validateModel('ActionTableMetadata')
-        }),
-        {{- for collection in collections -}}
-        {{ for table in collection.tables }}
-        {table.id}_{ collection.id | ident}: db.open(\\{
-            schema: {table.schema | json},
-            validator: validateLive(validateModel('{table.type}'))
-        }),
-        {{- endfor -}}
-        {{ endfor }}
+        {{-for c in collections }}
+        { c.id | json }: \\{
+            meta: db.open(\\{
+                schema: ['metadata-{c.id}'],
+                validator: validateInterfaces('Metadata{c.id | ident}')
+            }),
+            live: \\{
+                {{-for t in c.tables }}
+                {t.id | json}: db.open(\\{
+                    schema: SPEC[{c.id | json}].schemata.live[{t.id | json}],
+                    validator: validateLive(validateModel({t.type | json}))
+                }),
+                {{-endfor }}
+            },
+            exports: \\{
+                {{-for t in c.tables-}}
+                {{-if t.export_schema }}
+                {t.id | json}: db.open(\\{
+                    schema: SPEC[{c.id | json}].schemata.exports[{ t.id | json }],
+                    validator: validateLive(validateModel({t.type | json}))
+                }),
+                {{-endif-}}
+                {{-endfor }}
+            },
+        },
+        {{-endfor }}
     }
 }
 
-export interface Integrators \\{
-    {{- for collection in collections }}
-    integrate{ collection.id | ident}(action: model.AnyAction, inputs: Inputs{ collection.id | ident}): Promise<util.Result<Outputs{ collection.id | ident}, model.AnyError>>
-    {{- endfor }}
-}
-
-export function getSecondaryLiveIntegrators(integrators: Integrators):
-    ((ts: Tables, actionId: string, savedAction: model.SavedAction) => Promise<void>)[] \\{
-    return [
-        {{- for collection in collections }}
-        {{ if collection.is_primary -}}
-        {{ else -}}
-        (ts: Tables, actionId: string, savedAction: model.SavedAction) =>
-            integrateReplay(
-                '{collection.id}',
-                getTrackedInputs{collection.id | ident},
-                integrators.integrate{collection.id | ident},
-                applyOutputs{collection.id | ident},
-                emptyOutputs{collection.id | ident},
-                ts, actionId, savedAction),
-        {{- endif }}
-        {{- endfor }}
-    ]
-}
-
-export function getAllReplayers(integrators: Integrators, actionId: string, savedAction: model.SavedAction):
-    ((ts: Tables) => Promise<void>)[] \\{
-    return [
-        {{- for collection in collections }}
-        (ts: Tables) =>
-            integrateReplay(
-                '{collection.id}',
-                getTrackedInputs{collection.id | ident},
-                integrators.integrate{collection.id | ident},
-                applyOutputs{collection.id | ident},
-                emptyOutputs{collection.id | ident},
-                ts, actionId, savedAction),
-        {{- endfor }}
-    ]
-}
-
-{{ for collection in collections }}
-// BEGIN {collection.id}
-
-{{ if collection.is_primary -}}
-export function getPrimaryLiveIntegrator(integrators: Integrators):
-    (ts: Tables, action: model.AnyAction) => Promise<[string, model.SavedAction, model.AnyError | null]> \\{
-    return (ts, action) => integrateLive(
-        getTrackedInputs{collection.id | ident},
-        integrators.integrate{collection.id | ident},
-        applyOutputs{collection.id | ident},
-        emptyOutputs{collection.id | ident},
-        ts, action);
-}
-{{- endif -}}
-
-export type Inputs{collection.id | ident} = \\{
-{{- for table in collection.tables -}}
-    {{- if table.is_input }}
-    { table.id }: Readable<model.{ table.type }>
-    {{- endif -}}
-{{ endfor }}
-}
-
-export function getTrackedInputs{collection.id | ident}(ts: Tables): [Set<string>, Inputs{collection.id | ident}] \\{
+export function readAll(ts: Tables): [Set<string>, SideInputs] \\{
     const parentSet = new Set<string>();
     const track = (actionId: string) => \\{ parentSet.add(actionId) };
-    const inputs: Inputs{collection.id | ident} = \\{
-    {{- for table in collection.tables -}}
-        {{- if table.is_input }}
-        { table.id }: readables.tracked(ts.{table.id}_{collection.id | ident}, track),
-        {{- endif -}}
-    {{ endfor }}
+    const res: SideInputs = \\{
+        {{-for c in collections }}
+        { c.id | json }: \\{
+            {{-for t in c.tables }}
+            {t.id | json}: readables.tracked(ts[{c.id | json}].live[{t.id | json}], track),
+            {{-endfor }}
+        },
+        {{-endfor }}
     }
-    return [parentSet, inputs]
+    return [parentSet, res]
+}
+";
+
+static DATA_TEMPLATE: &'static str = "// DON'T EDIT THIS FILE, IT IS AUTO GENERATED
+
+import * as model from '../model'
+import \\{ Diff } from '../interfaces'
+
+export type CollectionId = keyof IOSpec;
+
+export type IOSpec = \\{
+    {{-for collection in collections }}
+    { collection.id | json }: \\{
+        live: \\{
+            {{-for table in collection.tables }}
+            { table.id }: model.{ table.type }
+            {{-endfor }}
+        }
+        exports: \\{
+            {{-for table in collection.tables-}}
+            {{-if table.export_schema }}
+            { table.id }: model.{ table.type }
+            {{-endif-}}
+            {{-endfor }}
+        }
+    }
+    {{-endfor }}
 }
 
-export type Outputs{collection.id | ident} = \\{
-{{- for table in collection.tables }}
-    { table.id }: Diff<model.{ table.type }>[]
-{{- endfor }}
-}
-
-export function emptyOutputs{collection.id | ident}(): Outputs{collection.id | ident} \\{
-    return \\{
-{{- for table in collection.tables }}
-        { table.id }: [],
-{{- endfor }}
+export type Outputs = \\{
+    [C in CollectionId]: \\{
+        [T in keyof IOSpec[C]['live']]: Diff<IOSpec[C]['live'][T]>[]
     }
 }
 
-export function applyOutputs{collection.id | ident}(ts: Tables, actionId: string, outputs: Outputs{collection.id | ident}): void \\{
-    ts.actionTableMetadata.set([actionId, '{collection.id}'], getChangelog{collection.id | ident}(outputs));
-{{- for table in collection.tables }}
-    applyChanges(ts.{table.id}_{collection.id | ident}, actionId, outputs.{table.id}.map(diffToChange))
-{{- endfor }}
-}
-
-function getChangelog{collection.id | ident}(outputs: Outputs{collection.id | ident}): model.ActionTableMetadata \\{
-    return \\{
-        tables: [
-        {{- for table in collection.tables }}
-            \\{
-                schema: {table.schema | json},
-                diffs: outputs.{table.id},
-            },
-        {{- endfor }}
-        ]
+export type Metadata = \\{
+    [K in keyof Outputs]: \\{
+        outputs: Outputs[K]
     }
 }
 
-// END {collection.id}
-{{ endfor }}
+{{-for collection in collections }}
+export type Metadata{ collection.id | ident } = Metadata[{collection.id | json}]
+{{-endfor }}
+";
 
-export async function deleteCollection(runner: db.TxRunner, collectionId: string): Promise<void> \\{
-    switch (collectionId) \\{
-    {{ for collection in collections }}
-        case '{collection.id}':
-            await deleteMeta(runner, '{collection.id}')
-        {{ for table in collection.tables }}
-            await deleteTable(runner, '{table.id}_{collection.id | ident}')
-        {{- endfor }}
-            break;
-    {{- endfor }}
-        default:
-            throw new Error('invalid option')
-    }
-}";
+#[derive(Debug)]
+enum Error {
+    UsageError,
+    IOError(io::Error),
+    ParsingError(serde_yaml::Error),
+}
 
-fn main() {
-    let mut buffer = String::new();
-    io::stdin().read_to_string(&mut buffer).unwrap();
+fn main() -> Result<(), Error> {
+    let args: Vec<String> = env::args().collect();
 
-    let config: ConfigIn = serde_yaml::from_str(&buffer).unwrap();
+    let schema_path = path::Path::new(args.get(1).ok_or(Error::UsageError)?);
+
+    let contents = fs::read_to_string(schema_path).map_err(Error::IOError)?;
+
+    let config: ConfigIn = serde_yaml::from_str(&contents).map_err(Error::ParsingError)?;
     let mut tt = tinytemplate::TinyTemplate::new();
-    tt.add_template("hello", TEMPLATE).unwrap();
+    tt.add_template("auto", AUTO_TEMPLATE).unwrap();
+    tt.add_template("data", DATA_TEMPLATE).unwrap();
     tt.add_formatter("ident", ident_formatter);
     tt.add_formatter("json", json_formatter);
 
-    let rendered = tt.render("hello", &convert(&config)).unwrap();
-    println!("{}", rendered);
+    let output = convert(&config);
+    fs::write(
+        schema_path.parent().unwrap().join("auto.ts"),
+        tt.render("auto", &output).unwrap(),
+    )
+    .map_err(Error::IOError)?;
+    fs::write(
+        schema_path.parent().unwrap().join("interfaces.ts"),
+        tt.render("data", &output).unwrap(),
+    )
+    .map_err(Error::IOError)?;
+    Ok(())
 }
