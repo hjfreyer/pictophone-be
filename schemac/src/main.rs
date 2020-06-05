@@ -8,6 +8,7 @@ use std::path;
 struct ConfigIn {
     primary_id: String,
     collections: Vec<CollectionIn>,
+    exports: Vec<ExportIn>,
 }
 
 #[derive(Deserialize, Debug)]
@@ -17,11 +18,22 @@ struct CollectionIn {
 }
 
 #[derive(Deserialize, Debug)]
+struct ExportIn {
+    id: String,
+    primary_source: TableId,
+}
+
+#[derive(Deserialize, Debug)]
+struct TableId {
+    collection_id: String,
+    table_id: String,
+}
+
+#[derive(Deserialize, Debug)]
 struct TableIn {
     id: String,
     schema: Vec<String>,
     r#type: String,
-    export_as: Option<String>,
 }
 
 #[derive(Serialize, Debug)]
@@ -74,16 +86,23 @@ fn convert(config: &ConfigIn) -> ConfigOut {
                     .map(|table| TableOut {
                         id: table.id.clone(),
                         r#type: table.r#type.clone(),
-                        export_schema: table.export_as.clone().map(|export_id| {
-                            let mut res = table.schema.clone();
-                            let last = res.last_mut().unwrap();
-                            *last = format!(
-                                "{segment}-{export_id}",
-                                segment = *last,
-                                export_id = export_id
-                            );
-                            res
-                        }),
+                        export_schema: {
+                            let export_match = config.exports.iter().find(|export| {
+                                export.primary_source.collection_id == collection.id
+                                    && export.primary_source.table_id == table.id
+                            });
+
+                            export_match.map(|export| {
+                                let mut res = table.schema.clone();
+                                let last = res.last_mut().unwrap();
+                                *last = format!(
+                                    "{segment}-{export_id}",
+                                    segment = *last,
+                                    export_id = export.id
+                                );
+                                res
+                            })
+                        },
                         schema: {
                             let mut res = table.schema.clone();
                             let last = res.last_mut().unwrap();

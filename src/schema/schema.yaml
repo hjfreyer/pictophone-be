@@ -1,4 +1,13 @@
 primary_id: "1.0.2"
+exports:
+- id: "gamesByPlayer-1.0"
+  primary_source:
+    collection_id: "1.0.2"
+    table_id: gamesByPlayer
+- id: "gamesByPlayer-1.1"
+  primary_source:
+    collection_id: "1.1.0"
+    table_id: gamesByPlayer
 collections:
 - id: "1.0.0"
   tables:
@@ -21,7 +30,6 @@ collections:
   - id: gamesByPlayer
     schema: [players, games]
     type: PlayerGame1_0
-    export_as: "gamesByPlayer-1.0"
 - id: "1.1.0"
   tables:
   - id: games
@@ -30,7 +38,6 @@ collections:
   - id: gamesByPlayer
     schema: [players, games]
     type: PlayerGame1_1
-    export_as: "gamesByPlayer-1.1"
 - id: "1.1.1"
   tables:
   - id: games
