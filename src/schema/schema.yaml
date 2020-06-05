@@ -4,10 +4,16 @@ exports:
   primary_source:
     collection_id: "1.0.2"
     table_id: gamesByPlayer
+  secondary_sources:
+  - collection_id: "1.1.1"
+    table_id: gamesByPlayer1_0
 - id: "gamesByPlayer-1.1"
   primary_source:
     collection_id: "1.1.0"
     table_id: gamesByPlayer
+  secondary_sources:
+  - collection_id: "1.1.1"
+    table_id: gamesByPlayer1_1
 collections:
 - id: "1.0.0"
   tables:

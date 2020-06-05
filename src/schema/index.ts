@@ -14,11 +14,12 @@ import * as util from '../util';
 import {
     openAll, readAll, replayAll, COLLECTION_IDS, PRIMARY_COLLECTION_ID, SECONDARY_COLLECTION_IDS, SPEC,
     liveReplaySecondaries,
-    reexportAll,
+    reexportAll, checkExports,
 
 } from './auto';
 import { Metadata, IOSpec, Outputs } from './interfaces';
 import { CollectionId } from './interfaces.validator';
+import { strict as assert } from 'assert';
 
 export * from './auto';
 export * from './interfaces';
@@ -189,6 +190,10 @@ export class Framework {
     async handleReexport(): Promise<void> {
         await reexportAll(this.tx);
     }
+
+    async handleCheck(): Promise<void> {
+        await checkExports(this.tx);
+    }
 }
 
 export async function copyTable<T>(tx: db.TxRunner,
@@ -212,6 +217,43 @@ export async function copyTable<T>(tx: db.TxRunner,
         for await (const [key,] of readables.readAll(dstTable)) {
             if ((await readables.getOrDefault(srcTable, key, null)).is_default) {
                 dstTable.delete(key);
+            }
+        }
+    })
+}
+
+export async function checkTableEquality<T>(tx: db.TxRunner,
+    srcTableGetter: (db: db.Database) => db.Table<T>,
+    dstTableGetter: (db: db.Database) => db.Table<T>): Promise<void> {
+    // TODO: Single TX = no bueno. Can also be a lot more efficient by taking
+    // advantage of the fact that both collections are sorted (i.e. do merge
+    // and diff).
+    await tx(async (db: db.Database): Promise<void> => {
+        const srcTable = srcTableGetter(db);
+        const dstTable = dstTableGetter(db);
+
+        for await (const [key, value] of readables.readAll(srcTable)) {
+            const dstVal = await readables.get(dstTable, key, null);
+            try {
+                assert.deepEqual(value, dstVal);
+            } catch (e) {
+                console.log(key);
+                throw e;
+            }
+
+        }
+    })
+    await tx(async (db: db.Database): Promise<void> => {
+        const srcTable = srcTableGetter(db);
+        const dstTable = dstTableGetter(db);
+
+        for await (const [key, value] of readables.readAll(dstTable)) {
+            const srcVal = await readables.get(srcTable, key, null);
+            try {
+                assert.deepEqual(srcVal, value);
+            } catch (e) {
+                console.log(key);
+                throw e;
             }
         }
     })

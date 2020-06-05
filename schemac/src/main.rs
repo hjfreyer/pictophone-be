@@ -21,6 +21,9 @@ struct CollectionIn {
 struct ExportIn {
     id: String,
     primary_source: TableId,
+
+    #[serde(default)]
+    secondary_sources: Vec<TableId>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -62,7 +65,9 @@ struct TableOut {
 
 #[derive(Serialize, Debug)]
 struct ExportOut {
-    source: TableId,
+    id: String,
+    primary_source: TableId,
+    secondary_sources: Vec<TableId>,
 }
 
 fn convert(config: &ConfigIn) -> ConfigOut {
@@ -128,7 +133,9 @@ fn convert(config: &ConfigIn) -> ConfigOut {
             .exports
             .iter()
             .map(|export| ExportOut {
-                source: export.primary_source.clone(),
+                id: export.id.clone(),
+                primary_source: export.primary_source.clone(),
+                secondary_sources: export.secondary_sources.clone(),
             })
             .collect(),
     }
@@ -157,7 +164,7 @@ fn json_formatter(
 
 static AUTO_TEMPLATE : &'static str = "// DON'T EDIT THIS FILE, IT IS AUTO GENERATED
 
-import \\{ Integrators, liveReplay, readableFromDiffs, replayOrCheck, SideInputs, sortedDiffs, SpecType, Tables, copyTable } from '.'
+import \\{ Integrators, liveReplay, readableFromDiffs, replayOrCheck, SideInputs, sortedDiffs, SpecType, Tables, copyTable, checkTableEquality } from '.'
 import \\{ applyChanges, diffToChange, validateLive } from '../base'
 import * as db from '../db'
 import * as model from '../model'
@@ -191,8 +198,22 @@ export async function replayAll(
 export async function reexportAll(tx : db.TxRunner) : Promise<void> \\{
     {{- for e in exports }}
     await copyTable(tx,
-        (db) => openAll(db)[{e.source.collection_id | json}].live[{e.source.table_id | json}],
-        (db) => openAll(db)[{e.source.collection_id | json}].exports[{e.source.table_id | json}])
+        (db) => openAll(db)[{e.primary_source.collection_id | json}].live[{e.primary_source.table_id | json}],
+        (db) => openAll(db)[{e.primary_source.collection_id | json}].exports[{e.primary_source.table_id | json}])
+    {{- endfor }}
+}
+
+export async function checkExports(tx : db.TxRunner) : Promise<void> \\{
+    {{- for e in exports }}
+    // { e.id }
+    await checkTableEquality(tx,
+        (db) => openAll(db)[{e.primary_source.collection_id | json}].live[{e.primary_source.table_id | json}],
+        (db) => openAll(db)[{e.primary_source.collection_id | json}].exports[{e.primary_source.table_id | json}])
+    {{- for ss in e.secondary_sources }}
+    await checkTableEquality(tx,
+        (db) => openAll(db)[{e.primary_source.collection_id | json}].live[{e.primary_source.table_id | json}],
+        (db) => openAll(db)[{ss.collection_id | json}].live[{ss.table_id | json}])
+    {{- endfor }}
     {{- endfor }}
 }
 

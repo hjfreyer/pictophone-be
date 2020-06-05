@@ -1,6 +1,6 @@
 // DON'T EDIT THIS FILE, IT IS AUTO GENERATED
 
-import { Integrators, liveReplay, readableFromDiffs, replayOrCheck, SideInputs, sortedDiffs, SpecType, Tables, copyTable } from '.'
+import { Integrators, liveReplay, readableFromDiffs, replayOrCheck, SideInputs, sortedDiffs, SpecType, Tables, copyTable, checkTableEquality } from '.'
 import { applyChanges, diffToChange, validateLive } from '../base'
 import * as db from '../db'
 import * as model from '../model'
@@ -41,6 +41,23 @@ export async function reexportAll(tx: db.TxRunner): Promise<void> {
     await copyTable(tx,
         (db) => openAll(db)["1.1.0"].live["gamesByPlayer"],
         (db) => openAll(db)["1.1.0"].exports["gamesByPlayer"])
+}
+
+export async function checkExports(tx: db.TxRunner): Promise<void> {
+    // gamesByPlayer-1.0
+    await checkTableEquality(tx,
+        (db) => openAll(db)["1.0.2"].live["gamesByPlayer"],
+        (db) => openAll(db)["1.0.2"].exports["gamesByPlayer"])
+    await checkTableEquality(tx,
+        (db) => openAll(db)["1.0.2"].live["gamesByPlayer"],
+        (db) => openAll(db)["1.1.1"].live["gamesByPlayer1_0"])
+    // gamesByPlayer-1.1
+    await checkTableEquality(tx,
+        (db) => openAll(db)["1.1.0"].live["gamesByPlayer"],
+        (db) => openAll(db)["1.1.0"].exports["gamesByPlayer"])
+    await checkTableEquality(tx,
+        (db) => openAll(db)["1.1.0"].live["gamesByPlayer"],
+        (db) => openAll(db)["1.1.1"].live["gamesByPlayer1_1"])
 }
 
 export const SPEC: SpecType = {
