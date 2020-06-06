@@ -29,7 +29,7 @@ export type SavedAction = {
     action: AnyAction
 }
 
-export type AnyAction = Action1_0
+export type AnyAction = Action1_0 | Action1_1
 export type AnyError = Error1_0
 
 // 1.0

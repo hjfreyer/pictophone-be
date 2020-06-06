@@ -186,7 +186,7 @@ function getPlayerGameExport(game: Game1_0, playerId: string): model.PlayerGame1
 async function integrate1_1_0(action: model.AnyAction, games: Readable<Game1_1>): Promise<util.Result<Diff<Game1_1>[], model.AnyError>> {
     const gameOrDefault = await readables.getOrDefault(games, [action.gameId], defaultGame1_1());
 
-    const gameResult = integrate1_1_0Helper(upgradeAction1_0(action), gameOrDefault);
+    const gameResult = integrate1_1_0Helper(upgradeAction(action), gameOrDefault);
     if (gameResult.status !== 'ok') {
         return gameResult
     }
@@ -298,7 +298,6 @@ const FRAMEWORK = new Framework(db.runTransaction(fsDb), {
     },
 });
 
-
 app.options('/action', cors())
 app.post('/action', cors(), function(req: Request<Dictionary<string>>, res, next) {
     FRAMEWORK.handleAction(validateModel('AnyAction')(req.body)).then((resp) => {
@@ -364,6 +363,15 @@ function upgradeAction1_0(a: model.Action1_0): model.Action1_1 {
             }
     }
 }
+function upgradeAction(a: model.AnyAction): model.Action1_1 {
+    switch (a.version) {
+        case '1.0':
+            a = upgradeAction1_0(a)
+        case '1.1':
+            return a
+    }
+}
+
 
 function integrate1_1_0Helper(a: model.Action1_1, gameOrDefault: util.Defaultable<model.Game1_1>):
     util.Result<util.Defaultable<model.Game1_1>, model.Error1_1> {
