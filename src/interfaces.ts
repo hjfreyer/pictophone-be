@@ -19,6 +19,10 @@ export interface Readable<T> {
     read(range: Range): ItemIterable<T>
 }
 
+export interface KV<T> {
+    key: string[],
+    value: T
+}
 export type Diff<V> = {
     key: string[]
     kind: 'add'

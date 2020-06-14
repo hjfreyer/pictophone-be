@@ -57,7 +57,7 @@ app.listen(port, function() {
 })
 
 interface Inputs2 {
-    fetchByLabel(label: string[]): Promise<Option<[string, state1_1_1.Annotations]>>
+    fetchByLabel(label: string[]): Promise<Option<[string, state1_1_1.Game]>>
 }
 
 import { validate as validate1_0 } from './model/1.0.validator';
@@ -81,6 +81,10 @@ export type Tables = {
     "EXP,1.1,gamesByPlayer": db.Table<import('./model/1.1').PlayerGame>
 }
 
+export interface CollectionImpl {
+
+}
+
 export function openAll(db: db.Database): Tables {
     return {
         "ACTIONS": db.open({
@@ -88,30 +92,33 @@ export function openAll(db: db.Database): Tables {
             validator: validateSchema('SavedAction')
         }),
         "ANNOTATIONS,1.1.1": db.open({
-            schema: ['annotations-1.1.2'],
+            schema: ['annotations-1.1.4'],
             validator: VALIDATORS['1.1.1']('Annotations')
         }),
         "LABELS,1.1.1,games": db.open({
-            schema: ['games-games-1.1.2'],
+            schema: ['games-games-1.1.4'],
             validator: validateSchema('Reference')
         }),
 
         "EXP,1.0,gamesByPlayer": db.open({
-            schema: ['players', 'games-gamesByPlayer-1.0-test'],
+            schema: ['players', 'games-gamesByPlayer-1.0-1.1.4'],
             validator: VALIDATORS['1.0']('PlayerGame'),
         }),
         "EXP,1.1,gamesByPlayer": db.open({
-            schema: ['players', 'games-gamesByPlayer-1.1-test'],
+            schema: ['players', 'games-gamesByPlayer-1.1-1.1.4'],
             validator: VALIDATORS['1.1']('PlayerGame'),
         }),
     }
 }
 
 interface IntegrationResult {
-    parents: string[]
+    parents: Record<string, Parent>
+    annotations: state1_1_1.Annotations
+    result: Result<SideEffects, state1_1_1.Error>
+}
+
+interface Parent {
     labels: string[][]
-    newState: Result<state1_1_1.State, state1_1_1.Error>
-    sideEffects: SideEffects
 }
 
 interface SideEffects {
@@ -121,34 +128,32 @@ interface SideEffects {
 
 
 async function integrator(action: AnyAction, inputs: Inputs2): Promise<IntegrationResult> {
-    const prev = option.from(await inputs.fetchByLabel([action.gameId]));
-    const parents = prev.map(([actionId,]) => [actionId]).or_else(() => [])
-    const oldGameOrDefault = prev
-        .map(([, prev]) => result.fromData(prev).unwrap().games[action.gameId]!)
-        .with_default(defaultGame1_1);
+    const maybePrevAnnotation = option.from(await inputs.fetchByLabel([action.gameId]));
+    const parents: Record<string, Parent> = maybePrevAnnotation.split({
+        onSome: ([actionId,]) => ({ [actionId]: { labels: [[action.gameId]] } }),
+        onNone: () => ({}),
+    })
 
+    const oldGameOrDefault = maybePrevAnnotation
+        .map(([, oldGame]) => oldGame)
+        .with_default(defaultGame1_1);
 
     const maybeNewGameOrError = integrate1_1_1Helper(convertAction(action), oldGameOrDefault);
     return result.from(maybeNewGameOrError).split({
-        onErr: (err) => ({
+        onErr: (err): IntegrationResult => ({
             parents,
-            labels: [],
-            newState: result.err(err),
-            sideEffects: {
-                gamesByPlayer1_0: [],
-                gamesByPlayer1_1: []
-            }
+            annotations: { games: [] },
+            result: result.err(err)
         }),
-        onOk: (maybeNewGame) => {
+        onOk: (maybeNewGame): IntegrationResult => {
             return option.from(maybeNewGame).split({
-                onNone: () => ({
+                onNone: (): IntegrationResult => ({
                     parents,
-                    labels: [],
-                    newState: result.ok({ games: {} }),
-                    sideEffects: {
+                    annotations: { games: [] },
+                    result: result.ok({
                         gamesByPlayer1_0: [],
                         gamesByPlayer1_1: []
-                    }
+                    })
                 }),
                 onSome(newGame): IntegrationResult {
                     const gameDiff = newDiff([action.gameId], oldGameOrDefault, defaultable.of(newGame, defaultGame1_1()));
@@ -158,12 +163,13 @@ async function integrator(action: AnyAction, inputs: Inputs2): Promise<Integrati
 
                     return {
                         parents,
-                        labels: [[action.gameId]],
-                        newState: result.ok({ games: { [action.gameId]: newGame } }),
-                        sideEffects: {
+                        annotations: {
+                            games: [{ key: [action.gameId], value: newGame }]
+                        },
+                        result: result.ok({
                             gamesByPlayer1_0: gamesByPlayer1_0Diffs.map(diffToChange),
                             gamesByPlayer1_1: gamesByPlayer1_1Diffs.map(diffToChange),
-                        }
+                        })
                     }
                 }
             })
@@ -177,32 +183,37 @@ function doAction(action: AnyAction): Promise<Result<{}, AnyError>> {
     return db.runTransaction(fsDb)(async (db: db.Database): Promise<Result<{}, AnyError>> => {
         const ts = openAll(db);
         const inputs: Inputs2 = {
-            async fetchByLabel(label: string[]): Promise<Option<[string, state1_1_1.Annotations]>> {
+            async fetchByLabel(label: string[]): Promise<Option<[string, state1_1_1.Game]>> {
                 const maybeRef = await readables.getOption(ts["LABELS,1.1.1,games"], label);
                 return await option.from(maybeRef).mapAsync(async ref => {
-                    const annos = await readables.getOption(ts["ANNOTATIONS,1.1.1"], [ref.actionId]);
-                    return [ref.actionId, option.from(annos).unwrap()]
+                    const annos = option.from(await readables.getOption(ts["ANNOTATIONS,1.1.1"], [ref.actionId])).unwrap();
+
+                    // TODO: generalize:
+                    return [ref.actionId, annos.games[0].value]
                 })
             }
         }
 
         const intResult = await integrator(action, inputs);
         const savedAction: SavedAction = {
-            parents: intResult.parents,
+            parents: Object.keys(intResult.parents),
             action,
         };
         const actionId = getActionId(savedAction);
         const ref: Reference = { actionId }
 
         ts["ACTIONS"].set([actionId], savedAction)
-        ts["ANNOTATIONS,1.1.1"].set([actionId], intResult.newState.data)
-        for (const label of intResult.labels) {
-            ts["LABELS,1.1.1,games"].set(label, ref)
+        ts["ANNOTATIONS,1.1.1"].set([actionId], intResult.annotations)
+        for (const { key } of intResult.annotations.games) {
+            ts["LABELS,1.1.1,games"].set(key, ref)
         }
-        applyChangesSimple(ts["EXP,1.0,gamesByPlayer"], intResult.sideEffects.gamesByPlayer1_0)
-        applyChangesSimple(ts["EXP,1.1,gamesByPlayer"], intResult.sideEffects.gamesByPlayer1_1)
 
-        return result.from(intResult.newState).map(() => ({}));
+        return result.from(intResult.result).map((sideEffects) => {
+            applyChangesSimple(ts["EXP,1.0,gamesByPlayer"], sideEffects.gamesByPlayer1_0)
+            applyChangesSimple(ts["EXP,1.1,gamesByPlayer"], sideEffects.gamesByPlayer1_1)
+
+            return {}
+        })
     })
 }
 
@@ -210,14 +221,16 @@ function replayAction(actionId: string, action: SavedAction): Promise<void> {
     return db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
         const ts = openAll(db);
         const inputs: Inputs2 = {
-            async fetchByLabel(label: string[]): Promise<Option<[string, state1_1_1.Annotations]>> {
+            async fetchByLabel(label: string[]): Promise<Option<[string, state1_1_1.Game]>> {
                 const maybeRef = await readables.getOption(ts["LABELS,1.1.1,games"], label);
                 return await option.from(maybeRef).mapAsync(async ref => {
                     if (action.parents.indexOf(ref.actionId) === -1) {
                         throw new Error(`Illegal parent fetch`)
                     }
-                    const annos = await readables.getOption(ts["ANNOTATIONS,1.1.1"], [ref.actionId]);
-                    return [ref.actionId, option.from(annos).unwrap()]
+                    const annos = option.from(await readables.getOption(ts["ANNOTATIONS,1.1.1"], [ref.actionId])).unwrap();
+
+                    // TODO: generalize:
+                    return [ref.actionId, annos.games[0].value]
                 })
             }
         }
@@ -225,12 +238,15 @@ function replayAction(actionId: string, action: SavedAction): Promise<void> {
         const intResult = await integrator(action.action, inputs);
         const ref: Reference = { actionId }
 
-        ts["ANNOTATIONS,1.1.1"].set([actionId], intResult.newState.data)
-        for (const label of intResult.labels) {
-            ts["LABELS,1.1.1,games"].set(label, ref)
+        ts["ANNOTATIONS,1.1.1"].set([actionId], intResult.annotations)
+        for (const { key } of intResult.annotations.games) {
+            ts["LABELS,1.1.1,games"].set(key, ref)
         }
-        applyChangesSimple(ts["EXP,1.0,gamesByPlayer"], intResult.sideEffects.gamesByPlayer1_0)
-        applyChangesSimple(ts["EXP,1.1,gamesByPlayer"], intResult.sideEffects.gamesByPlayer1_1)
+
+        result.from(intResult.result).map((sideEffects) => {
+            applyChangesSimple(ts["EXP,1.0,gamesByPlayer"], sideEffects.gamesByPlayer1_0)
+            applyChangesSimple(ts["EXP,1.1,gamesByPlayer"], sideEffects.gamesByPlayer1_1)
+        })
     })
 }
 
