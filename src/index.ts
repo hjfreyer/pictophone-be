@@ -27,8 +27,7 @@ import * as readables from './readables'
 import * as ranges from './ranges'
 import { Readable, Diff, ItemIterable, Range, Key, Item, Live, Change } from './interfaces'
 import { strict as assert } from 'assert';
-import {Option} from './option';
-import * as option from './option';
+import {Option, option, Result, result, Defaultable, defaultable} from './util';
 import {
 SavedAction, Reference, AnyAction, AnyError
 //     SideInputs, CollectionId, Outputs,
@@ -79,10 +78,14 @@ export type Tables = {
 
 
 async function integrator(action : AnyAction, inputs: Inputs2): Promise<IntegrationResult> {
-    const prev = await inputs.fetchByLabel([action.gameId]);
-    const parents = option.from(prev).map(([actionId,])=>[actionId]).or_else(() => [])
+    const prev = option.from(await inputs.fetchByLabel([action.gameId]));
+    const parents = prev.map(([actionId,])=>[actionId]).or_else(() => [])
+    const gameOrDefault = prev
+        .map(([,prev]) => result.from(prev).unwrap().games[action.gameId]!)
+        .with_default(defaultGame1_1);
+    
 
-    const gameOrDefault = await readables.getOrDefault(games, [action.gameId], defaultGame1_1());
+    // const gameOrDefault = await readables.getOrDefault(games, [action.gameId], defaultGame1_1());
 }
 
 async function doAction(action : AnyAction): Promise<AnyError | null> {
@@ -130,7 +133,7 @@ export function newDiff<T>(key: Key, oldValue: util.Defaultable<T>, newValue: ut
 //     if (gameResult.status !== 'ok') {
 //         return gameResult
 //     }
-//     return util.ok(newDiff([action.gameId], gameOrDefault, gameResult.value));
+//     return result.ok(newDiff([action.gameId], gameOrDefault, gameResult.value));
 // }
 
 // function gameToPlayerGames1_1([[gameId], game]: Item<state1_1_1.Game>): Iterable<Item<model1_1.PlayerGame>> {
@@ -311,13 +314,13 @@ function upgradeAction1_0(a: model1_0.Action): model1_1.Action {
 // }
 
 
-function integrate1_1_0Helper(a: model1_1.Action, gameOrDefault: util.Defaultable<state1_1_1.Game>):
+function integrate1_1_0Helper(a: model1_1.Action, gameOrDefault: Defaultable<state1_1_1.Game>):
     util.Result<util.Defaultable<state1_1_1.Game>, model1_1.Error> {
     const game = gameOrDefault.value;
     switch (a.kind) {
         case 'join_game':
             if (game.state !== 'UNSTARTED') {
-                return util.err({
+                return result.err({
                     version: '1.0',
                     status: 'GAME_ALREADY_STARTED',
                                status_code: 400,
@@ -326,9 +329,9 @@ function integrate1_1_0Helper(a: model1_1.Action, gameOrDefault: util.Defaultabl
             }
 
             if (game.players.some(p => p.id === a.playerId)) {
-                return util.ok(gameOrDefault)
+                return result.ok(gameOrDefault)
             }
-            return util.ok(util.defaultable_some({
+            return result.ok(defaultable.some({
                 ...game,
                 players: [...game.players, {
                     id: a.playerId,
@@ -338,9 +341,9 @@ function integrate1_1_0Helper(a: model1_1.Action, gameOrDefault: util.Defaultabl
 
         case 'start_game':
             if (game.state !== 'UNSTARTED') {
-                return util.ok(gameOrDefault)
+                return result.ok(gameOrDefault)
             }
-            return util.ok(util.defaultable_some({
+            return result.ok(defaultable.some({
                 state: 'STARTED',
                 players: game.players.map(p => ({
                     ...p,
@@ -362,7 +365,7 @@ function makeMove1_1(gameOrDefault: util.Defaultable<state1_1_1.Game>, action: m
     const playerId = action.playerId
 
     if (game.state !== 'STARTED') {
-        return util.err({
+        return result.err({
             version: '1.0',
             status: 'GAME_NOT_STARTED',
            status_code: 400,
@@ -373,7 +376,7 @@ function makeMove1_1(gameOrDefault: util.Defaultable<state1_1_1.Game>, action: m
     const player = findById(game.players, playerId)
 
     if (player === null) {
-        return util.err({
+        return result.err({
             version: '1.0',
             status: 'PLAYER_NOT_IN_GAME',
            status_code: 403,
@@ -384,7 +387,7 @@ function makeMove1_1(gameOrDefault: util.Defaultable<state1_1_1.Game>, action: m
 
     const roundNum = Math.min(...game.players.map(p => p.submissions.length))
     if (player.submissions.length !== roundNum) {
-        return util.err({
+        return result.err({
             version: '1.0',
             status: 'MOVE_PLAYED_OUT_OF_TURN',
                status_code: 400,
@@ -394,7 +397,7 @@ function makeMove1_1(gameOrDefault: util.Defaultable<state1_1_1.Game>, action: m
     }
 
     if (roundNum === game.players.length) {
-        return util.err({
+        return result.err({
             version: '1.0',
             status: 'GAME_IS_OVER',
               status_code: 400,
@@ -403,7 +406,7 @@ function makeMove1_1(gameOrDefault: util.Defaultable<state1_1_1.Game>, action: m
     }
 
     if (roundNum % 2 === 0 && action.submission.kind === 'drawing') {
-        return util.err({
+        return result.err({
             version: '1.0',
             status: 'INCORRECT_SUBMISSION_KIND',
             status_code: 400,
@@ -412,7 +415,7 @@ function makeMove1_1(gameOrDefault: util.Defaultable<state1_1_1.Game>, action: m
         })
     }
     if (roundNum % 2 === 1 && action.submission.kind === 'word') {
-        return util.err({
+        return result.err({
             version: '1.0',
             status: 'INCORRECT_SUBMISSION_KIND',
             status_code: 400,
@@ -421,7 +424,7 @@ function makeMove1_1(gameOrDefault: util.Defaultable<state1_1_1.Game>, action: m
         })
     }
 
-    return util.ok(util.defaultable_some(produce(game, game => {
+    return result.ok(defaultable.some(produce(game, game => {
         findById(game.players, playerId)!.submissions.push(action.submission)
     })))
 }

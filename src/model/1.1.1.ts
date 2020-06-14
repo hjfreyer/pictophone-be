@@ -128,8 +128,6 @@ export type Submission = {
 
 export type Game = UnstartedGame | StartedGame
 
-export interface Annotations {
-    error: Result<{
-        games: Record<string, Game>
-    }, Error>
-}
+export type Annotations = Result<{
+    games: Record<string, Game>
+}, Error>

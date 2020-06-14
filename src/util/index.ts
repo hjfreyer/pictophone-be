@@ -5,6 +5,16 @@ import * as ix from "ix/iterable"
 import * as ixop from "ix/iterable/operators"
 import { OperatorFunction } from 'ix/interfaces';
 
+
+export {Option} from './option';
+export * as option from './option';
+
+export {Result} from './result';
+export * as result from './result';
+
+export {Defaultable} from './defaultable';
+export * as defaultable from './defaultable';
+
 export type Comparator<T> = (a: T, b: T) => number
 
 export function mapValues<V1, V2>(obj: { [k: string]: V1 },
@@ -139,70 +149,6 @@ export function sorted<T>(i: Iterable<T>, cmp?: Comparator<T>): T[] {
     const res = Array.from(i)
     res.sort(cmp)
     return res
-}
-
-export type AsyncResult<R, E> = Promise<Result<R, E>>
-
-export type Result<R, E> = {
-    status: 'ok',
-    value: R,
-} | {
-    status: 'err'
-    error: E
-}
-
-export function ok<R, E>(r: R): Result<R, E> {
-    return { status: 'ok', value: r }
-}
-
-export function err<R, E>(e: E): Result<R, E> {
-    return { status: 'err', error: e }
-}
-
-export function or_else<R, E, D>(res: Result<R, E>, def: () => D): R | D {
-    if (res.status === 'ok') {
-        return res.value
-    } else {
-        return def()
-    }
-}
-
-export function err_or_else<R, E, D>(res: Result<R, E>, def: () => D): E | D {
-    if (res.status === 'err') {
-        return res.error
-    } else {
-        return def()
-    }
-}
-
-export interface Defaultable<T> {
-    is_default: boolean
-    value: T
-}
-
-export function defaultable_from_nullable<T>(value: T | null, def: T): Defaultable<T> {
-    return {
-        is_default: value === null,
-        value: value === null ? def : value,
-    }
-}
-
-export function defaultable_to_nullable<T>(d: Defaultable<T>): T | null {
-    return d.is_default ? null : d.value
-}
-
-export function defaultable_some<T>(value: T): Defaultable<T> {
-    return {
-        is_default: false,
-        value,
-    }
-}
-
-export function defaultable_none<T>(def: T): Defaultable<T> {
-    return {
-        is_default: true,
-        value: def,
-    }
 }
 
 class NarrowIterable<TSource, TResult extends TSource> extends ix.IterableX<TResult> {
