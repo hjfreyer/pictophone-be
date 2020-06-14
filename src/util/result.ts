@@ -14,30 +14,30 @@ export type Result<R, E> = {
 }
 
 export class ResultView<R, E> {
-    constructor(public data : ResultData<R,E>) {}
+    constructor(public data: ResultData<R, E>) { }
 
-or_else<D>(def: () => D): R | D {
-    if (this.data.status === 'ok') {
+    or_else<D>(def: () => D): R | D {
+        if (this.data.status === 'ok') {
+            return this.data.value
+        } else {
+            return def()
+        }
+    }
+
+    err_or_else<D>(def: () => D): E | D {
+        if (this.data.status === 'err') {
+            return this.data.error
+        } else {
+            return def()
+        }
+    }
+
+    unwrap(): R {
+        if (this.data.status === 'err') {
+            throw this.data.error
+        }
         return this.data.value
-    } else {
-        return def()
     }
-}
-
-err_or_else<D>(def: () => D): E | D {
-    if (this.data.status === 'err') {
-        return this.data.error
-    } else {
-        return def()
-    }
-}
-
-unwrap(): R {
-    if (this.data.status === 'err') {
-        throw this.data.error
-    }
-    return this.data.value
-}
 }
 
 export function from<R, E>(r: Result<R, E>): ResultView<R, E> {

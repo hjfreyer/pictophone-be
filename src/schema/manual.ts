@@ -3,8 +3,10 @@
 // import {
 //     readableFromDiffs, copyTable, checkTableEquality
 // } from '.'
-import { applyChanges, diffToChange, //validateLive, 
-getActionId } from '../base'
+import {
+    applyChanges, diffToChange, //validateLive, 
+    getActionId
+} from '../base'
 // import * as db from '../db'
 // import * as model from '../model'
 // import * as readables from '../readables'

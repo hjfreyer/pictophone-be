@@ -6,13 +6,13 @@ import * as ixop from "ix/iterable/operators"
 import { OperatorFunction } from 'ix/interfaces';
 
 
-export {Option} from './option';
+export { Option } from './option';
 export * as option from './option';
 
-export {Result} from './result';
+export { Result } from './result';
 export * as result from './result';
 
-export {Defaultable} from './defaultable';
+export { Defaultable } from './defaultable';
 export * as defaultable from './defaultable';
 
 export type Comparator<T> = (a: T, b: T) => number

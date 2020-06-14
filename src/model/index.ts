@@ -1,15 +1,17 @@
 // Base
 
-export {Action as Action1_0, Error as Error1_0} from './1.0'
-export {Action as Action1_1, Error as Error1_1} from './1.1'
+export { Action as Action1_0, Error as Error1_0 } from './1.0'
+export { Action as Action1_1, Error as Error1_1 } from './1.1'
 
-export {PlayerGame as PlayerGame1_0,
+export {
+    PlayerGame as PlayerGame1_0,
 } from './1.0';
-export {PlayerGame as PlayerGame1_1,
-MakeMoveAction as    MakeMoveAction1_1
+export {
+    PlayerGame as PlayerGame1_1,
+    MakeMoveAction as MakeMoveAction1_1
 
 } from './1.1';
-export {Game as Game1_1} from './1.1.1';
+export { Game as Game1_1 } from './1.1.1';
 
 // export interface NumberValue {
 //     value: number

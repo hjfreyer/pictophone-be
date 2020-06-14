@@ -27,15 +27,15 @@ import * as readables from './readables'
 import * as ranges from './ranges'
 import { Readable, Diff, ItemIterable, Range, Key, Item, Live, Change } from './interfaces'
 import { strict as assert } from 'assert';
-import {Option, option, Result, result, Defaultable, defaultable} from './util';
+import { Option, option, Result, result, Defaultable, defaultable } from './util';
 import {
-SavedAction, Reference, AnyAction, AnyError
-//     SideInputs, CollectionId, Outputs,
-//     Framework, deleteCollection, AnyAction,AnyError,
+    SavedAction, Reference, AnyAction, AnyError
+    //     SideInputs, CollectionId, Outputs,
+    //     Framework, deleteCollection, AnyAction,AnyError,
 } from './schema';
 import produce from 'immer';
 
-import { validate as validateSchema} from './schema/interfaces.validator'
+import { validate as validateSchema } from './schema/interfaces.validator'
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -77,19 +77,19 @@ export type Tables = {
 
 
 
-async function integrator(action : AnyAction, inputs: Inputs2): Promise<IntegrationResult> {
+async function integrator(action: AnyAction, inputs: Inputs2): Promise<IntegrationResult> {
     const prev = option.from(await inputs.fetchByLabel([action.gameId]));
-    const parents = prev.map(([actionId,])=>[actionId]).or_else(() => [])
+    const parents = prev.map(([actionId,]) => [actionId]).or_else(() => [])
     const gameOrDefault = prev
-        .map(([,prev]) => result.from(prev).unwrap().games[action.gameId]!)
+        .map(([, prev]) => result.from(prev).unwrap().games[action.gameId]!)
         .with_default(defaultGame1_1);
-    
+
 
     // const gameOrDefault = await readables.getOrDefault(games, [action.gameId], defaultGame1_1());
 }
 
-async function doAction(action : AnyAction): Promise<AnyError | null> {
-    
+async function doAction(action: AnyAction): Promise<AnyError | null> {
+
 }
 
 
@@ -323,7 +323,7 @@ function integrate1_1_0Helper(a: model1_1.Action, gameOrDefault: Defaultable<sta
                 return result.err({
                     version: '1.0',
                     status: 'GAME_ALREADY_STARTED',
-                               status_code: 400,
+                    status_code: 400,
                     gameId: a.gameId,
                 })
             }
@@ -368,8 +368,8 @@ function makeMove1_1(gameOrDefault: util.Defaultable<state1_1_1.Game>, action: m
         return result.err({
             version: '1.0',
             status: 'GAME_NOT_STARTED',
-           status_code: 400,
-             gameId: action.gameId,
+            status_code: 400,
+            gameId: action.gameId,
         })
     }
 
@@ -379,8 +379,8 @@ function makeMove1_1(gameOrDefault: util.Defaultable<state1_1_1.Game>, action: m
         return result.err({
             version: '1.0',
             status: 'PLAYER_NOT_IN_GAME',
-           status_code: 403,
-             gameId: action.gameId,
+            status_code: 403,
+            gameId: action.gameId,
             playerId: action.playerId,
         })
     }
@@ -390,8 +390,8 @@ function makeMove1_1(gameOrDefault: util.Defaultable<state1_1_1.Game>, action: m
         return result.err({
             version: '1.0',
             status: 'MOVE_PLAYED_OUT_OF_TURN',
-               status_code: 400,
-         gameId: action.gameId,
+            status_code: 400,
+            gameId: action.gameId,
             playerId: action.playerId,
         })
     }
@@ -400,8 +400,8 @@ function makeMove1_1(gameOrDefault: util.Defaultable<state1_1_1.Game>, action: m
         return result.err({
             version: '1.0',
             status: 'GAME_IS_OVER',
-              status_code: 400,
-             gameId: action.gameId,
+            status_code: 400,
+            gameId: action.gameId,
         })
     }
 

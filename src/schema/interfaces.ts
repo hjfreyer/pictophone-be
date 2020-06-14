@@ -26,28 +26,28 @@ export type CollectionId = "1.1.1";
 
 
 export type Outputs = {
-    '1.1.1':{
-            private: {
-                games: Diff<import('../model/1.1.1').Game>[]
-            }
-            '1.0': {
-                error: import('../model/1.0').Error | null
-                tables: {
-                    gamesByPlayer: Diff<import('../model/1.0').PlayerGame>[]
-                }
-            }
-            '1.1': {
-                error: import('../model/1.1').Error | null
-                tables: {
-                    gamesByPlayer: Diff<import('../model/1.1').PlayerGame>[]
-                }
+    '1.1.1': {
+        private: {
+            games: Diff<import('../model/1.1.1').Game>[]
+        }
+        '1.0': {
+            error: import('../model/1.0').Error | null
+            tables: {
+                gamesByPlayer: Diff<import('../model/1.0').PlayerGame>[]
             }
         }
+        '1.1': {
+            error: import('../model/1.1').Error | null
+            tables: {
+                gamesByPlayer: Diff<import('../model/1.1').PlayerGame>[]
+            }
+        }
+    }
 }
 
 
 export type Metadata = {
-[K in keyof Outputs]: {
+    [K in keyof Outputs]: {
         outputs: Outputs[K]
     }
 }
