@@ -1,26 +1,26 @@
 
 import * as db from './db'
 import { Live, Diff, Change } from './interfaces'
-import { validate } from './schema/interfaces.validator'
+// import { validate } from './schema/interfaces.validator'
 import { AnyAction, AnyError, SavedAction } from './schema/interfaces';
 import { sha256 } from 'js-sha256';
 import _ from 'lodash';
-import { Tables } from './schema';
+// import { Tables } from './schema';
 import * as util from './util'
 import * as ixa from "ix/asynciterable"
 import * as ixaop from "ix/asynciterable/operators"
 import * as readables from './readables'
 
 
-export function validateLive<T>(validator: (u: unknown) => T): (u: unknown) => Live<T> {
-    return (outerUnknown: unknown): Live<T> => {
-        const outer = validate('LiveUnknown')(outerUnknown)
-        if (outer.value === null) {
-            return { actionId: outer.actionId, value: null };
-        }
-        return { actionId: outer.actionId, value: validator(outer.value) }
-    }
-}
+// export function validateLive<T>(validator: (u: unknown) => T): (u: unknown) => Live<T> {
+//     return (outerUnknown: unknown): Live<T> => {
+//         const outer = validate('LiveUnknown')(outerUnknown)
+//         if (outer.value === null) {
+//             return { actionId: outer.actionId, value: null };
+//         }
+//         return { actionId: outer.actionId, value: validator(outer.value) }
+//     }
+// }
 
 // export function validateDiff<T>(validator: (u: unknown) => T): (u: DiffUnknown) => Diff<T> {
 //     return (diff: DiffUnknown): Diff<T> => {

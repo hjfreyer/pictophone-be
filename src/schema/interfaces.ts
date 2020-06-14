@@ -65,3 +65,7 @@ export interface LiveUnknown {
     actionId: string
     value: unknown
 }
+
+export interface Reference {
+    actionId: string
+}

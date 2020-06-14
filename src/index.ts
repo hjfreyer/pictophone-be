@@ -29,11 +29,15 @@ import * as readables from './readables'
 import * as ranges from './ranges'
 import { Readable, Diff, ItemIterable, Range, Key, Item, Live, Change } from './interfaces'
 import { strict as assert } from 'assert';
+import {Option} from './option';
+import * as option from './option';
 import {
-    SideInputs, CollectionId, Outputs,
-    Framework, deleteCollection, AnyAction,AnyError,
+SavedAction, Reference, AnyAction, AnyError
+//     SideInputs, CollectionId, Outputs,
+//     Framework, deleteCollection, AnyAction,AnyError,
 } from './schema';
 import produce from 'immer';
+
 import { validate as validateSchema} from './schema/interfaces.validator'
 
 admin.initializeApp({
@@ -52,6 +56,40 @@ const port = process.env.PORT || 3000
 app.listen(port, function() {
     console.log(`Example app listening on port ${port}!`)
 })
+
+interface Inputs2 {
+    fetchByLabel(label: string[]): Promise<Option<[string, state1_1_1.Annotations]>>
+}
+
+interface IntegrationResult {
+    parents: string[]
+    labels: string[][]
+    annotations: state1_1_1.Annotations
+}
+
+
+export type Tables = {
+    "ACTIONS": db.Table<SavedAction>
+    "ANNOTATIONS,1.1.1": db.Table<state1_1_1.Annotations>
+    "LABELS,1.1.1,games": db.Table<Reference>
+    // "IMPLEXP,1.1.1,1.0,gamesByPlayer": db.Table<import('../model/1.0').PlayerGame>
+    // "IMPLEXP,1.1.1,1.1,gamesByPlayer": db.Table<import('../model/1.1').PlayerGame>
+    // "EXP,1.0,gamesByPlayer": db.Table<import('../model/1.0').PlayerGame>
+    // "EXP,1.1,gamesByPlayer": db.Table<import('../model/1.1').PlayerGame>
+}
+
+
+
+async function integrator(action : AnyAction, inputs: Inputs2): Promise<IntegrationResult> {
+    const prev = await inputs.fetchByLabel([action.gameId]);
+    const parents = option.from(prev).map(([actionId,])=>[actionId]).or_else(() => [])
+
+    const gameOrDefault = await readables.getOrDefault(games, [action.gameId], defaultGame1_1());
+}
+
+async function doAction(action : AnyAction): Promise<AnyError | null> {
+    
+}
 
 
 export function newDiff<T>(key: Key, oldValue: util.Defaultable<T>, newValue: util.Defaultable<T>): Diff<T>[] {
@@ -87,154 +125,147 @@ export function newDiff<T>(key: Key, oldValue: util.Defaultable<T>, newValue: ut
     throw new Error("unreachable")
 }
 
-async function integrate1_1_0(action: AnyAction, games: Readable<state1_1_1.Game>): Promise<util.Result<Diff<state1_1_1.Game>[], AnyError>> {
-    const gameOrDefault = await readables.getOrDefault(games, [action.gameId], defaultGame1_1());
+// async function integrate1_1_0(action: AnyAction, games: Readable<state1_1_1.Game>): Promise<util.Result<Diff<state1_1_1.Game>[], AnyError>> {
+//     const gameOrDefault = await readables.getOrDefault(games, [action.gameId], defaultGame1_1());
 
-    const gameResult = integrate1_1_0Helper(upgradeAction(action), gameOrDefault);
-    if (gameResult.status !== 'ok') {
-        return gameResult
-    }
-    return util.ok(newDiff([action.gameId], gameOrDefault, gameResult.value));
-}
+//     const gameResult = integrate1_1_0Helper(upgradeAction(action), gameOrDefault);
+//     if (gameResult.status !== 'ok') {
+//         return gameResult
+//     }
+//     return util.ok(newDiff([action.gameId], gameOrDefault, gameResult.value));
+// }
 
-function gameToPlayerGames1_1([[gameId], game]: Item<state1_1_1.Game>): Iterable<Item<model1_1.PlayerGame>> {
-    return ix.from(game.players).pipe(
-        ixop.map(({ id }): Item<model1_1.PlayerGame> =>
-            [[id, gameId], getPlayerGameExport1_1(game, id)])
-    )
-}
+// function gameToPlayerGames1_1([[gameId], game]: Item<state1_1_1.Game>): Iterable<Item<model1_1.PlayerGame>> {
+//     return ix.from(game.players).pipe(
+//         ixop.map(({ id }): Item<model1_1.PlayerGame> =>
+//             [[id, gameId], getPlayerGameExport1_1(game, id)])
+//     )
+// }
 
-function getPlayerGameExport1_1(game: state1_1_1.Game, playerId: string): model1_1.PlayerGame {
-    if (game.state === 'UNSTARTED') {
-        const sanitizedPlayers: model1_1.ExportedPlayer[] = game.players.map(p => ({
-            id: p.id,
-            displayName: p.displayName,
-        }))
-        return {
-            state: 'UNSTARTED',
-            players: sanitizedPlayers,
-        }
-    }
+// function getPlayerGameExport1_1(game: state1_1_1.Game, playerId: string): model1_1.PlayerGame {
+//     if (game.state === 'UNSTARTED') {
+//         const sanitizedPlayers: model1_1.ExportedPlayer[] = game.players.map(p => ({
+//             id: p.id,
+//             displayName: p.displayName,
+//         }))
+//         return {
+//             state: 'UNSTARTED',
+//             players: sanitizedPlayers,
+//         }
+//     }
 
-    // Repeated because TS isn't smart enough to understand this code works whether 
-    // the game is started or not.
-    const sanitizedPlayers: model1_1.ExportedPlayer[] = game.players.map(p => ({
-        id: p.id,
-        displayName: p.displayName,
-    }))
+//     // Repeated because TS isn't smart enough to understand this code works whether 
+//     // the game is started or not.
+//     const sanitizedPlayers: model1_1.ExportedPlayer[] = game.players.map(p => ({
+//         id: p.id,
+//         displayName: p.displayName,
+//     }))
 
-    const numPlayers = game.players.length
-    const roundNum = Math.min(...game.players.map(p => p.submissions.length))
+//     const numPlayers = game.players.length
+//     const roundNum = Math.min(...game.players.map(p => p.submissions.length))
 
-    // Game is over.
-    if (roundNum === numPlayers) {
-        const series: model1_0.ExportedSeries[] = game.players.map(() => ({ entries: [] }))
-        for (let rIdx = 0; rIdx < numPlayers; rIdx++) {
-            for (let pIdx = 0; pIdx < numPlayers; pIdx++) {
-                series[(pIdx + rIdx) % numPlayers].entries.push({
-                    playerId: game.players[pIdx].id,
-                    submission: game.players[pIdx].submissions[rIdx]
-                })
-            }
-        }
+//     // Game is over.
+//     if (roundNum === numPlayers) {
+//         const series: model1_0.ExportedSeries[] = game.players.map(() => ({ entries: [] }))
+//         for (let rIdx = 0; rIdx < numPlayers; rIdx++) {
+//             for (let pIdx = 0; pIdx < numPlayers; pIdx++) {
+//                 series[(pIdx + rIdx) % numPlayers].entries.push({
+//                     playerId: game.players[pIdx].id,
+//                     submission: game.players[pIdx].submissions[rIdx]
+//                 })
+//             }
+//         }
 
-        return {
-            state: 'GAME_OVER',
-            players: sanitizedPlayers,
-            series,
-        }
-    }
+//         return {
+//             state: 'GAME_OVER',
+//             players: sanitizedPlayers,
+//             series,
+//         }
+//     }
 
-    const player = findById(game.players, playerId)!;
-    if (player.submissions.length === 0) {
-        return {
-            state: 'FIRST_PROMPT',
-            players: sanitizedPlayers,
-        }
-    }
+//     const player = findById(game.players, playerId)!;
+//     if (player.submissions.length === 0) {
+//         return {
+//             state: 'FIRST_PROMPT',
+//             players: sanitizedPlayers,
+//         }
+//     }
 
-    if (player.submissions.length === roundNum) {
-        const playerIdx = game.players.findIndex(p => p.id === playerId)
-        if (playerIdx === -1) {
-            throw new Error('baad')
-        }
-        const nextPlayerIdx = (playerIdx + 1) % game.players.length
-        return {
-            state: 'RESPOND_TO_PROMPT',
-            players: sanitizedPlayers,
-            prompt: game.players[nextPlayerIdx].submissions[roundNum - 1]
-        }
-    }
+//     if (player.submissions.length === roundNum) {
+//         const playerIdx = game.players.findIndex(p => p.id === playerId)
+//         if (playerIdx === -1) {
+//             throw new Error('baad')
+//         }
+//         const nextPlayerIdx = (playerIdx + 1) % game.players.length
+//         return {
+//             state: 'RESPOND_TO_PROMPT',
+//             players: sanitizedPlayers,
+//             prompt: game.players[nextPlayerIdx].submissions[roundNum - 1]
+//         }
+//     }
 
-    return {
-        state: 'WAITING_FOR_PROMPT',
-        players: sanitizedPlayers,
-    }
-}
-
-
-function gameToPlayerGames1_1to1_0(item: Item<state1_1_1.Game>): Iterable<Item<model1_0.PlayerGame>> {
-    return ix.from(gameToPlayerGames1_1(item)).pipe(
-        ixop.map(([key, pg]: Item<model1_1.PlayerGame>): Item<model1_0.PlayerGame> => {
-            return [key, {
-                ...pg,
-                players: pg.players.map(p => p.id)
-            }]
-        }),
-    );
-}
-
-// function downgradeError(error : model1_1.Error): model1_0.Error {
-//     switch (model.version) {
-//         case '1.0':
-//         case 'UNKNOWN':
-//         return error
+//     return {
+//         state: 'WAITING_FOR_PROMPT',
+//         players: sanitizedPlayers,
 //     }
 // }
 
-const FRAMEWORK = new Framework(db.runTransaction(fsDb), {
-    '1.1.1': async (action: AnyAction, inputs: SideInputs['1.1.1']): Promise<Outputs['1.1.1']> => {
-        const gamesResult = await integrate1_1_0(action, inputs.games);
-        if (gamesResult.status !== 'ok') {
-            return {
-                private: {
-                    games: [],
-                },
-                '1.0': {
-                    error: gamesResult.error,
-                    tables: {
-                    gamesByPlayer: [],
-                    }
-                },
-                '1.1': {
-                    error: gamesResult.error,
-tables:{                    gamesByPlayer: [],
-       }         }
-            }
-        }
 
-        const gamesByPlayer1_1 = collections.map(collections.fromDiffs(gamesResult.value), gameToPlayerGames1_1);
-        const gamesByPlayer1_0 = collections.map(collections.fromDiffs(gamesResult.value), gameToPlayerGames1_1to1_0);
+// function gameToPlayerGames1_1to1_0(item: Item<state1_1_1.Game>): Iterable<Item<model1_0.PlayerGame>> {
+//     return ix.from(gameToPlayerGames1_1(item)).pipe(
+//         ixop.map(([key, pg]: Item<model1_1.PlayerGame>): Item<model1_0.PlayerGame> => {
+//             return [key, {
+//                 ...pg,
+//                 players: pg.players.map(p => p.id)
+//             }]
+//         }),
+//     );
+// }
 
-        return {
-            private:{
-                games: gamesResult.value,
-            },
-            '1.0': {
-                error: null,
-tables:{                 gamesByPlayer: await collections.toDiffs(gamesByPlayer1_0),
-               }   },
-            '1.1': {
-                error: null,
-                tables:{ gamesByPlayer: await collections.toDiffs(gamesByPlayer1_1),
-                        }            }
-        }
-    },
-});
+
+// const FRAMEWORK = new Framework(db.runTransaction(fsDb), {
+//     '1.1.1': async (action: AnyAction, inputs: SideInputs['1.1.1']): Promise<Outputs['1.1.1']> => {
+//         const gamesResult = await integrate1_1_0(action, inputs.games);
+//         if (gamesResult.status !== 'ok') {
+//             return {
+//                 private: {
+//                     games: [],
+//                 },
+//                 '1.0': {
+//                     error: gamesResult.error,
+//                     tables: {
+//                     gamesByPlayer: [],
+//                     }
+//                 },
+//                 '1.1': {
+//                     error: gamesResult.error,
+// tables:{                    gamesByPlayer: [],
+//        }         }
+//             }
+//         }
+
+//         const gamesByPlayer1_1 = collections.map(collections.fromDiffs(gamesResult.value), gameToPlayerGames1_1);
+//         const gamesByPlayer1_0 = collections.map(collections.fromDiffs(gamesResult.value), gameToPlayerGames1_1to1_0);
+
+//         return {
+//             private:{
+//                 games: gamesResult.value,
+//             },
+//             '1.0': {
+//                 error: null,
+// tables:{                 gamesByPlayer: await collections.toDiffs(gamesByPlayer1_0),
+//                }   },
+//             '1.1': {
+//                 error: null,
+//                 tables:{ gamesByPlayer: await collections.toDiffs(gamesByPlayer1_1),
+//                         }            }
+//         }
+//     },
+// });
 
 app.options('/action', cors())
 app.post('/action', cors(), function(req: Request<Dictionary<string>>, res, next) {
-    FRAMEWORK.handleAction(validateSchema('AnyAction')(req.body)).then((resp) => {
+    doAction(validateSchema('AnyAction')(req.body)).then((resp) => {
         if (resp !== null) {
             res.status(resp.status_code)
             res.json(resp)
@@ -254,14 +285,6 @@ function defaultGame1_1(): state1_1_1.Game {
     }
 }
 
-// export const SUM_COMBINER: collections.Combiner<NumberValue> = {
-//     identity(): NumberValue { return { value: 0 } },
-//     opposite(n: NumberValue): NumberValue { return { value: -n.value } },
-//     combine(a: NumberValue, b: NumberValue): NumberValue {
-//         return { value: a.value + b.value }
-//     }
-// }
-
 function upgradeAction1_0(a: model1_0.Action): model1_1.Action {
     switch (a.kind) {
         case 'join_game':
@@ -280,14 +303,14 @@ function upgradeAction1_0(a: model1_0.Action): model1_1.Action {
             }
     }
 }
-function upgradeAction(a: AnyAction): model1_1.Action {
-    switch (a.version) {
-        case '1.0':
-            a = upgradeAction1_0(a)
-        case '1.1':
-            return a
-    }
-}
+// function upgradeAction(a: AnyAction): model1_1.Action {
+//     switch (a.version) {
+//         case '1.0':
+//             a = upgradeAction1_0(a)
+//         case '1.1':
+//             return a
+//     }
+// }
 
 
 function integrate1_1_0Helper(a: model1_1.Action, gameOrDefault: util.Defaultable<state1_1_1.Game>):
@@ -412,54 +435,38 @@ type DeleteCollectionRequest = {
 function batch(): Router {
     const res = Router()
 
-    // res.post('/check', function(_req: Request<{}>, res, next) {
-    //     const cursor = _req.body as BackwardsCheckCursor
-    //     check(db, cursor).then(result => {
+    // res.post('/replay', function(req: Request<{}>, res, next) {
+    //     FRAMEWORK.handleReplay().then(result => {
     //         res.status(200)
     //         res.json(result)
     //     }).catch(next)
     // })
 
-    res.post('/replay', function(req: Request<{}>, res, next) {
-        FRAMEWORK.handleReplay().then(result => {
-            res.status(200)
-            res.json(result)
-        }).catch(next)
-    })
-
-    res.post('/reexport', function(req: Request<{}>, res, next) {
-        FRAMEWORK.handleReexport().then(result => {
-            res.status(200)
-            res.json(result)
-        }).catch(next)
-    })
-    res.post('/check', function(req: Request<{}>, res, next) {
-        FRAMEWORK.handleCheck().then(result => {
-            res.status(200)
-            res.json(result)
-        }).catch(next)
-    })
-    res.post('/purge', function(req: Request<{}>, res, next) {
-        FRAMEWORK.handlePurge().then(result => {
-            res.status(200)
-            res.json(result)
-        }).catch(next)
-    })
-
-    // res.post('/backfill', function(_req: Request<{}>, res, next) {
-    //     const cursor = _req.body as BackwardsCheckCursor
-    //     backfill(db, cursor).then(result => {
+    // res.post('/reexport', function(req: Request<{}>, res, next) {
+    //     FRAMEWORK.handleReexport().then(result => {
+    //         res.status(200)
+    //         res.json(result)
+    //     }).catch(next)
+    // })
+    // res.post('/check', function(req: Request<{}>, res, next) {
+    //     FRAMEWORK.handleCheck().then(result => {
+    //         res.status(200)
+    //         res.json(result)
+    //     }).catch(next)
+    // })
+    // res.post('/purge', function(req: Request<{}>, res, next) {
+    //     FRAMEWORK.handlePurge().then(result => {
     //         res.status(200)
     //         res.json(result)
     //     }).catch(next)
     // })
 
-    res.post('/delete/:collectionId', function(req: Request<DeleteCollectionRequest>, res, next) {
-        deleteCollection(db.runTransaction(fsDb), req.params.collectionId as CollectionId).then(result => {
-            res.status(200)
-            res.json(result)
-        }).catch(next)
-    })
+    // res.post('/delete/:collectionId', function(req: Request<DeleteCollectionRequest>, res, next) {
+    //     deleteCollection(db.runTransaction(fsDb), req.params.collectionId as CollectionId).then(result => {
+    //         res.status(200)
+    //         res.json(result)
+    //     }).catch(next)
+    // })
 
     return res
 }

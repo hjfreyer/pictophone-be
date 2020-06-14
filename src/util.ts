@@ -5,7 +5,6 @@ import * as ix from "ix/iterable"
 import * as ixop from "ix/iterable/operators"
 import { OperatorFunction } from 'ix/interfaces';
 
-
 export type Comparator<T> = (a: T, b: T) => number
 
 export function mapValues<V1, V2>(obj: { [k: string]: V1 },
