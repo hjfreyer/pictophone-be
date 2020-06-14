@@ -313,11 +313,6 @@ import {
 // }
 
 
-// export async function deleteTable(table: db.Table<unknown>): Promise<void> {
-//     for await (const [k,] of readables.readAll(table)) {
-//         table.delete(k)
-//     }
-// }
 
 // export function sortedDiffs<T>(diffs: Iterable<Diff<T>>): Diff<T>[] {
 //     return util.sorted(diffs, (d1, d2) => util.lexCompare(d1.key, d2.key));

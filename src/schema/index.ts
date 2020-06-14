@@ -3,11 +3,11 @@ import deepEqual from 'deep-equal';
 // import * as ixa from "ix/asynciterable";
 // import * as ixaop from "ix/asynciterable/operators";
 // import { getActionId } from '../base';
-// import * as db from '../db';
+import * as db from '../db';
 // import { Diff, ItemIterable, Range, Readable, Live } from '../interfaces';
 // // import { validate as validateModel } from '../model/index.validator';
 // import * as ranges from '../ranges';
-// import * as readables from '../readables';
+import * as readables from '../readables';
 // import * as util from '../util';
 // import {
 //     openAll, readAll, replayAll, COLLECTION_IDS, PRIMARY_COLLECTION_ID, SECONDARY_COLLECTION_IDS, SPEC,
@@ -308,3 +308,9 @@ export * from './interfaces';
 // //         validator: validate('SavedAction')
 // //     })
 // // }
+
+export async function deleteTable(table: db.Table<unknown>): Promise<void> {
+    for await (const [k,] of readables.readAll(table)) {
+        table.delete(k)
+    }
+}

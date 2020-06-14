@@ -29,9 +29,10 @@ import { Readable, Diff, ItemIterable, Range, Key, Item, Live, Change } from './
 import { strict as assert } from 'assert';
 import { Option, option, Result, result, Defaultable, defaultable } from './util';
 import {
-    SavedAction, Reference, AnyAction, AnyError
-    //     SideInputs, CollectionId, Outputs,
+    SavedAction, Reference, AnyAction, AnyError, CollectionId,
+    //     SideInputs, , Outputs,
     //     Framework, deleteCollection, AnyAction,AnyError,
+    deleteTable
 } from './schema';
 import produce from 'immer';
 
@@ -58,12 +59,16 @@ interface Inputs2 {
     fetchByLabel(label: string[]): Promise<Option<[string, state1_1_1.Annotations]>>
 }
 
-interface IntegrationResult {
-    parents: string[]
-    labels: string[][]
-    annotations: state1_1_1.Annotations
-}
+import { validate as validate1_0 } from './model/1.0.validator';
+import { validate as validate1_1 } from './model/1.1.validator';
+import { validate as validate1_1_1 } from './model/1.1.1.validator';
+import { getActionId } from './base'
 
+export const VALIDATORS = {
+    '1.0': validate1_0,
+    '1.1': validate1_1,
+    '1.1.1': validate1_1_1,
+}
 
 export type Tables = {
     "ACTIONS": db.Table<SavedAction>
@@ -75,23 +80,148 @@ export type Tables = {
     // "EXP,1.1,gamesByPlayer": db.Table<import('../model/1.1').PlayerGame>
 }
 
+export function openAll(db: db.Database): Tables {
+    return {
+        "ACTIONS": db.open({
+            schema: ['actions'],
+            validator: validateSchema('SavedAction')
+        }),
+        "ANNOTATIONS,1.1.1": db.open({
+            schema: ['annotations-1.1.2'],
+            validator: VALIDATORS['1.1.1']('Annotations')
+        }),
+        "LABELS,1.1.1,games": db.open({
+            schema: ['games-games-1.1.2'],
+            validator: validateSchema('Reference')
+        }),
+    }
+}
 
+interface IntegrationResult {
+    parents: string[]
+    labels: string[][]
+    newState: Result<state1_1_1.State, state1_1_1.Error>
+}
 
 async function integrator(action: AnyAction, inputs: Inputs2): Promise<IntegrationResult> {
     const prev = option.from(await inputs.fetchByLabel([action.gameId]));
     const parents = prev.map(([actionId,]) => [actionId]).or_else(() => [])
     const gameOrDefault = prev
-        .map(([, prev]) => result.from(prev).unwrap().games[action.gameId]!)
+        .map(([, prev]) => result.fromData(prev).unwrap().games[action.gameId]!)
         .with_default(defaultGame1_1);
 
 
-    // const gameOrDefault = await readables.getOrDefault(games, [action.gameId], defaultGame1_1());
+    const defaultableGameOrError = integrate1_1_1Helper(convertAction(action), gameOrDefault);
+    if (defaultableGameOrError.data.status === 'err') {
+        return {
+            parents,
+            labels: [],
+            newState: result.fromData(defaultableGameOrError.data)
+        }
+    }
+    const maybeNewGame = option.from(result.from(defaultableGameOrError).unwrap());
+
+    return maybeNewGame.split({
+        onNone: () => ({
+            parents,
+            labels: [],
+            newState: result.ok({ games: {} })
+        }),
+        onSome: (newGame) => (
+            {
+                parents,
+                labels: [[action.gameId]],
+                newState: result.ok({ games: { [action.gameId]: maybeNewGame.unwrap() } })
+            })
+    })
 }
 
-async function doAction(action: AnyAction): Promise<AnyError | null> {
+function doAction(action: AnyAction): Promise<Result<{}, AnyError>> {
+    return db.runTransaction(fsDb)(async (db: db.Database): Promise<Result<{}, AnyError>> => {
+        const ts = openAll(db);
+        const inputs: Inputs2 = {
+            async fetchByLabel(label: string[]): Promise<Option<[string, state1_1_1.Annotations]>> {
+                const maybeRef = await readables.getOption(ts["LABELS,1.1.1,games"], label);
+                return await option.from(maybeRef).mapAsync(async ref => {
+                    const annos = await readables.getOption(ts["ANNOTATIONS,1.1.1"], [ref.actionId]);
+                    return [ref.actionId, option.from(annos).unwrap()]
+                })
+            }
+        }
 
+        const intResult = await integrator(action, inputs);
+        const savedAction: SavedAction = {
+            parents: intResult.parents,
+            action,
+        };
+        const actionId = getActionId(savedAction);
+        const ref: Reference = { actionId }
+
+        ts["ACTIONS"].set([actionId], savedAction)
+        ts["ANNOTATIONS,1.1.1"].set([actionId], intResult.newState.data)
+        for (const label of intResult.labels) {
+            ts["LABELS,1.1.1,games"].set(label, ref)
+        }
+
+        return result.from(intResult.newState).map(() => ({}));
+    })
 }
 
+function replayAction(actionId: string, action: SavedAction): Promise<void> {
+    return db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
+        const ts = openAll(db);
+        const inputs: Inputs2 = {
+            async fetchByLabel(label: string[]): Promise<Option<[string, state1_1_1.Annotations]>> {
+                const maybeRef = await readables.getOption(ts["LABELS,1.1.1,games"], label);
+                return await option.from(maybeRef).mapAsync(async ref => {
+                    if (action.parents.indexOf(ref.actionId) === -1) {
+                        throw new Error(`Illegal parent fetch`)
+                    }
+                    const annos = await readables.getOption(ts["ANNOTATIONS,1.1.1"], [ref.actionId]);
+                    return [ref.actionId, option.from(annos).unwrap()]
+                })
+            }
+        }
+
+        const intResult = await integrator(action.action, inputs);
+        const ref: Reference = { actionId }
+
+        ts["ANNOTATIONS,1.1.1"].set([actionId], intResult.newState.data)
+        for (const label of intResult.labels) {
+            ts["LABELS,1.1.1,games"].set(label, ref)
+        }
+    })
+}
+
+async function handleReplay(): Promise<void> {
+    let cursor: string = '';
+    console.log('REPLAY')
+    while (true) {
+        const nextActionOrNull = await getNextAction(db.runTransaction(fsDb), cursor);
+        if (nextActionOrNull === null) {
+            break;
+        }
+        const [actionId, savedAction] = nextActionOrNull;
+        console.log(`REPLAY ${actionId}`)
+
+        await replayAction(actionId, savedAction)
+        cursor = actionId;
+    }
+    console.log('DONE')
+}
+
+
+export function getNextAction(tx: db.TxRunner, startAfter: string): Promise<([string, SavedAction] | null)> {
+    return tx(async (db: db.Database): Promise<([string, SavedAction] | null)> => {
+        const actions = openAll(db)["ACTIONS"];
+        const first = await ixa.first(ixa.from(readables.readAllAfter(actions, [startAfter])));
+        if (first === undefined) {
+            return null;
+        }
+        const [[actionId], savedAction] = first;
+        return [actionId, savedAction];
+    });
+}
 
 export function newDiff<T>(key: Key, oldValue: util.Defaultable<T>, newValue: util.Defaultable<T>): Diff<T>[] {
     if (oldValue.is_default && newValue.is_default) {
@@ -267,8 +397,8 @@ export function newDiff<T>(key: Key, oldValue: util.Defaultable<T>, newValue: ut
 app.options('/action', cors())
 app.post('/action', cors(), function(req: Request<Dictionary<string>>, res, next) {
     doAction(validateSchema('AnyAction')(req.body)).then((resp) => {
-        if (resp !== null) {
-            res.status(resp.status_code)
+        if (resp.data.status === 'err') {
+            res.status(resp.data.error.status_code)
             res.json(resp)
         } else {
             res.status(200)
@@ -286,11 +416,10 @@ function defaultGame1_1(): state1_1_1.Game {
     }
 }
 
-function upgradeAction1_0(a: model1_0.Action): model1_1.Action {
+function convertAction1_0(a: model1_0.Action): state1_1_1.Action {
     switch (a.kind) {
         case 'join_game':
             return {
-                version: '1.1',
                 kind: 'join_game',
                 gameId: a.gameId,
                 playerId: a.playerId,
@@ -300,22 +429,40 @@ function upgradeAction1_0(a: model1_0.Action): model1_1.Action {
         case 'make_move':
             return {
                 ...a,
-                version: '1.1'
             }
     }
 }
-// function upgradeAction(a: AnyAction): model1_1.Action {
-//     switch (a.version) {
-//         case '1.0':
-//             a = upgradeAction1_0(a)
-//         case '1.1':
-//             return a
+
+// function upgradeAction1_0(a: model1_0.Action): state1_1_1.Action {
+//     switch (a.kind) {
+//         case 'join_game':
+//             return {
+//                 version: '1.1',
+//                 kind: 'join_game',
+//                 gameId: a.gameId,
+//                 playerId: a.playerId,
+//                 playerDisplayName: a.playerId,
+//             }
+//         case 'start_game':
+//         case 'make_move':
+//             return {
+//                 ...a,
+//                 version: '1.1'
+//             }
 //     }
 // }
+function convertAction(a: AnyAction): state1_1_1.Action {
+    switch (a.version) {
+        case '1.0':
+            return convertAction1_0(a)
+        case '1.1':
+            return a
+    }
+}
 
 
-function integrate1_1_0Helper(a: model1_1.Action, gameOrDefault: Defaultable<state1_1_1.Game>):
-    util.Result<util.Defaultable<state1_1_1.Game>, model1_1.Error> {
+function integrate1_1_1Helper(a: state1_1_1.Action, gameOrDefault: Defaultable<state1_1_1.Game>):
+    util.Result<Option<state1_1_1.Game>, state1_1_1.Error> {
     const game = gameOrDefault.value;
     switch (a.kind) {
         case 'join_game':
@@ -329,9 +476,9 @@ function integrate1_1_0Helper(a: model1_1.Action, gameOrDefault: Defaultable<sta
             }
 
             if (game.players.some(p => p.id === a.playerId)) {
-                return result.ok(gameOrDefault)
+                return result.ok(option.none())
             }
-            return result.ok(defaultable.some({
+            return result.ok(option.some({
                 ...game,
                 players: [...game.players, {
                     id: a.playerId,
@@ -341,9 +488,9 @@ function integrate1_1_0Helper(a: model1_1.Action, gameOrDefault: Defaultable<sta
 
         case 'start_game':
             if (game.state !== 'UNSTARTED') {
-                return result.ok(gameOrDefault)
+                return result.ok(option.none())
             }
-            return result.ok(defaultable.some({
+            return result.ok(option.some({
                 state: 'STARTED',
                 players: game.players.map(p => ({
                     ...p,
@@ -359,8 +506,8 @@ function findById<T extends { id: string }>(ts: T[], id: string): T | null {
     return ts.find(t => t.id === id) || null
 }
 
-function makeMove1_1(gameOrDefault: util.Defaultable<state1_1_1.Game>, action: model1_1.MakeMoveAction): util.Result<
-    util.Defaultable<state1_1_1.Game>, model1_1.Error> {
+function makeMove1_1(gameOrDefault: util.Defaultable<state1_1_1.Game>, action: state1_1_1.MakeMoveAction): util.Result<
+    Option<state1_1_1.Game>, state1_1_1.Error> {
     const game = gameOrDefault.value;
     const playerId = action.playerId
 
@@ -424,7 +571,7 @@ function makeMove1_1(gameOrDefault: util.Defaultable<state1_1_1.Game>, action: m
         })
     }
 
-    return result.ok(defaultable.some(produce(game, game => {
+    return result.ok(option.some(produce(game, game => {
         findById(game.players, playerId)!.submissions.push(action.submission)
     })))
 }
@@ -436,12 +583,12 @@ type DeleteCollectionRequest = {
 function batch(): Router {
     const res = Router()
 
-    // res.post('/replay', function(req: Request<{}>, res, next) {
-    //     FRAMEWORK.handleReplay().then(result => {
-    //         res.status(200)
-    //         res.json(result)
-    //     }).catch(next)
-    // })
+    res.post('/replay', function(req: Request<{}>, res, next) {
+        handleReplay().then(result => {
+            res.status(200)
+            res.json(result)
+        }).catch(next)
+    })
 
     // res.post('/reexport', function(req: Request<{}>, res, next) {
     //     FRAMEWORK.handleReexport().then(result => {
@@ -462,12 +609,22 @@ function batch(): Router {
     //     }).catch(next)
     // })
 
-    // res.post('/delete/:collectionId', function(req: Request<DeleteCollectionRequest>, res, next) {
-    //     deleteCollection(db.runTransaction(fsDb), req.params.collectionId as CollectionId).then(result => {
-    //         res.status(200)
-    //         res.json(result)
-    //     }).catch(next)
-    // })
+    res.post('/delete/:collectionId', function(req: Request<DeleteCollectionRequest>, res, next) {
+        deleteCollection(db.runTransaction(fsDb), req.params.collectionId as CollectionId).then(result => {
+            res.status(200)
+            res.json(result)
+        }).catch(next)
+    })
 
     return res
+}
+export async function deleteCollection(runner: db.TxRunner, collectionId: CollectionId): Promise<void> {
+    await runner(async (db: db.Database): Promise<void> => {
+        const ts = openAll(db);
+        switch (collectionId) {
+            case '1.1.1':
+                await deleteTable(ts['ANNOTATIONS,1.1.1'])
+                await deleteTable(ts["LABELS,1.1.1,games"]);
+        }
+    })
 }

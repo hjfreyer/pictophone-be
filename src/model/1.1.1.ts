@@ -1,4 +1,4 @@
-import { Result } from "../util"
+import { ResultData } from "../util/result"
 
 export interface JoinGameAction {
     kind: 'join_game'
@@ -128,6 +128,8 @@ export type Submission = {
 
 export type Game = UnstartedGame | StartedGame
 
-export type Annotations = Result<{
+export type State = {
     games: Record<string, Game>
-}, Error>
+}
+
+export type Annotations = ResultData<State, Error>

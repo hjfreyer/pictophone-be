@@ -33,8 +33,15 @@ export async function get<T, D>(source: Readable<T>, key: Key, def: D): Promise<
     return def
 }
 
+export async function getOption<T, D>(source: Readable<T>, key: Key): Promise<util.Option<T>> {
+    for await (const [, value] of source.read(ranges.singleValue(key))) {
+        return util.option.some(value)
+    }
+    return util.option.none()
+}
+
 export async function getOrDefault<T>(source: Readable<T>, key: Key, def: T): Promise<util.Defaultable<T>> {
-    return util.defaultable_from_nullable(await get(source, key, null), def);
+    return util.option.from(await getOption(source, key)).with_default(() => def);
 }
 
 export function readAll<T>(source: Readable<T>): ItemIterable<T> {

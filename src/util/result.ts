@@ -13,7 +13,7 @@ export type Result<R, E> = {
     data: ResultData<R, E>
 }
 
-export class ResultView<R, E> {
+export class ResultView<R, E> implements Result<R, E>{
     constructor(public data: ResultData<R, E>) { }
 
     or_else<D>(def: () => D): R | D {
@@ -37,6 +37,14 @@ export class ResultView<R, E> {
             throw this.data.error
         }
         return this.data.value
+    }
+
+    map<O>(fn: (r: R) => O): ResultView<O, E> {
+        if (this.data.status === 'err') {
+            return fromData(this.data)
+        } else {
+            return ok(fn(this.data.value))
+        }
     }
 }
 
