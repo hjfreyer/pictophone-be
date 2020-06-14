@@ -4,7 +4,6 @@ import cors from 'cors'
 import express, { Router } from 'express'
 import { Dictionary, Request } from 'express-serve-static-core'
 import admin from 'firebase-admin'
-import uuid from 'uuid/v1'
 import GetConfig from './config'
 // import { AnyAction, Action1_0, Game1_0, state1_1_1.Game, Error1_0, Error1_1, AnyError, NumberValue } from './model'
 import * as model from './model'
@@ -15,7 +14,6 @@ import * as state1_1_1 from './model/1.1.1'
 
 import * as util from './util'
 import deepEqual from 'deep-equal'
-import timestamp from 'timestamp-nano';
 
 import { sha256 } from 'js-sha256';
 import _ from 'lodash';
