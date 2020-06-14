@@ -1,22 +1,21 @@
 primary_id: "1.1.1"
-exports:
-- id: "gamesByPlayer-1.0"
-  primary_source:
-    collection_id: "1.1.1"
-    table_id: gamesByPlayer1_0
-- id: "gamesByPlayer-1.1"
-  primary_source:
-    collection_id: "1.1.1"
-    table_id: gamesByPlayer1_1
-collections:
-- id: "1.1.1"
-  tables:
-  - id: games
-    schema: [games]
-    type: Game1_1
-  - id: gamesByPlayer1_1
-    schema: [players, games]
-    type: PlayerGame1_1
-  - id: gamesByPlayer1_0
-    schema: [players, games]
-    type: PlayerGame1_0
+
+interfaces:
+  - id: "1.0"
+    exports:
+      - id: "gamesByPlayer"
+        schema: [players, games]
+        type: PlayerGame
+  - id: "1.1"
+    exports:
+      - id: "gamesByPlayer"
+        schema: [players, games]
+        type: PlayerGame
+
+implementations:
+  - id: "1.1.1"
+    implements: ["1.0", "1.1"]
+    private_tables:
+      - id: "games"
+        schema: [games]
+        type: Game

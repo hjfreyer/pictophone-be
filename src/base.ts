@@ -1,8 +1,8 @@
 
 import * as db from './db'
 import { Live, Diff, Change } from './interfaces'
-import { validate as validateModel } from './model/index.validator'
-import { AnyAction, AnyError, SavedAction } from './model';
+import { validate } from './schema/interfaces.validator'
+import { AnyAction, AnyError, SavedAction } from './schema/interfaces';
 import { sha256 } from 'js-sha256';
 import _ from 'lodash';
 import { Tables } from './schema';
@@ -14,7 +14,7 @@ import * as readables from './readables'
 
 export function validateLive<T>(validator: (u: unknown) => T): (u: unknown) => Live<T> {
     return (outerUnknown: unknown): Live<T> => {
-        const outer = validateModel('LiveUnknown')(outerUnknown)
+        const outer = validate('LiveUnknown')(outerUnknown)
         if (outer.value === null) {
             return { actionId: outer.actionId, value: null };
         }

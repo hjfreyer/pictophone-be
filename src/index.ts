@@ -6,11 +6,13 @@ import { Dictionary, Request } from 'express-serve-static-core'
 import admin from 'firebase-admin'
 import uuid from 'uuid/v1'
 import GetConfig from './config'
-import { AnyAction, Action1_0, Game1_0, Game1_1, Error1_0, Error1_1, AnyError, NumberValue } from './model'
+// import { AnyAction, Action1_0, Game1_0, state1_1_1.Game, Error1_0, Error1_1, AnyError, NumberValue } from './model'
 import * as model from './model'
-import { validate as validateModel } from './model/index.validator'
-import { Drawing, UploadResponse } from './model/rpc'
-import { validate as validateRpc } from './model/rpc.validator'
+
+import * as model1_0 from './model/1.0'
+import * as model1_1 from './model/1.1'
+import * as state1_1_1 from './model/1.1.1'
+
 import * as util from './util'
 import deepEqual from 'deep-equal'
 import timestamp from 'timestamp-nano';
@@ -29,9 +31,10 @@ import { Readable, Diff, ItemIterable, Range, Key, Item, Live, Change } from './
 import { strict as assert } from 'assert';
 import {
     SideInputs, CollectionId, Outputs,
-    Framework, deleteCollection
+    Framework, deleteCollection, AnyAction,AnyError,
 } from './schema';
 import produce from 'immer';
+import { validate as validateSchema} from './schema/interfaces.validator'
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -50,42 +53,6 @@ app.listen(port, function() {
     console.log(`Example app listening on port ${port}!`)
 })
 
-const MAX_POINTS = 50_000
-
-async function doUpload(body: unknown): Promise<UploadResponse> {
-    const upload = validateRpc('Upload')(body)
-
-    if (MAX_POINTS < numPoints(upload)) {
-        throw new Error('too many points in drawing')
-    }
-
-
-    const id = `uuid/${uuid()}`
-    await storage.bucket(GetConfig().gcsBucket).file(id).save(JSON.stringify(upload))
-
-    return { id }
-}
-
-function numPoints(drawing: Drawing): number {
-    let res = 0
-    for (const path of drawing.paths) {
-        res += path.length / 2
-    }
-    return res
-}
-
-function getHttpCode(error: AnyError): number {
-    switch (error.status) {
-        case 'GAME_NOT_STARTED':
-        case 'GAME_ALREADY_STARTED':
-        case 'MOVE_PLAYED_OUT_OF_TURN':
-        case 'GAME_IS_OVER':
-        case 'INCORRECT_SUBMISSION_KIND':
-            return 400;
-        case 'PLAYER_NOT_IN_GAME':
-            return 403
-    }
-}
 
 export function newDiff<T>(key: Key, oldValue: util.Defaultable<T>, newValue: util.Defaultable<T>): Diff<T>[] {
     if (oldValue.is_default && newValue.is_default) {
@@ -120,70 +87,7 @@ export function newDiff<T>(key: Key, oldValue: util.Defaultable<T>, newValue: ut
     throw new Error("unreachable")
 }
 
-function gameToPlayerGames([[gameId], game]: Item<Game1_0>): Iterable<Item<model.PlayerGame1_0>> {
-    return ix.from(game.players).pipe(
-        ixop.map((playerId: string): Item<model.PlayerGame1_0> =>
-            [[playerId, gameId], getPlayerGameExport(game, playerId)])
-    )
-}
-
-function getPlayerGameExport(game: Game1_0, playerId: string): model.PlayerGame1_0 {
-    if (game.state === 'UNSTARTED') {
-        return {
-            state: 'UNSTARTED',
-            players: game.players,
-        }
-    }
-
-    const numPlayers = game.players.length
-    const roundNum = Math.min(...Object.values(game.submissions).map(a => a.length))
-
-    // Game is over.
-    if (roundNum === numPlayers) {
-        const series: model.ExportedSeries1_0[] = game.players.map(() => ({ entries: [] }))
-        for (let rIdx = 0; rIdx < numPlayers; rIdx++) {
-            for (let pIdx = 0; pIdx < numPlayers; pIdx++) {
-                series[(pIdx + rIdx) % numPlayers].entries.push({
-                    playerId: game.players[pIdx],
-                    submission: game.submissions[game.players[pIdx]][rIdx]
-                })
-            }
-        }
-
-        return {
-            state: 'GAME_OVER',
-            players: game.players,
-            series,
-        }
-    }
-
-    if (game.submissions[playerId].length === 0) {
-        return {
-            state: 'FIRST_PROMPT',
-            players: game.players,
-        }
-    }
-
-    if (game.submissions[playerId].length === roundNum) {
-        const playerIdx = game.players.indexOf(playerId)
-        if (playerIdx === -1) {
-            throw new Error('baad')
-        }
-        const nextPlayerIdx = (playerIdx + 1) % game.players.length
-        return {
-            state: 'RESPOND_TO_PROMPT',
-            players: game.players,
-            prompt: game.submissions[game.players[nextPlayerIdx]][roundNum - 1]
-        }
-    }
-
-    return {
-        state: 'WAITING_FOR_PROMPT',
-        players: game.players,
-    }
-}
-
-async function integrate1_1_0(action: model.AnyAction, games: Readable<Game1_1>): Promise<util.Result<Diff<Game1_1>[], model.AnyError>> {
+async function integrate1_1_0(action: AnyAction, games: Readable<state1_1_1.Game>): Promise<util.Result<Diff<state1_1_1.Game>[], AnyError>> {
     const gameOrDefault = await readables.getOrDefault(games, [action.gameId], defaultGame1_1());
 
     const gameResult = integrate1_1_0Helper(upgradeAction(action), gameOrDefault);
@@ -193,16 +97,16 @@ async function integrate1_1_0(action: model.AnyAction, games: Readable<Game1_1>)
     return util.ok(newDiff([action.gameId], gameOrDefault, gameResult.value));
 }
 
-function gameToPlayerGames1_1([[gameId], game]: Item<Game1_1>): Iterable<Item<model.PlayerGame1_1>> {
+function gameToPlayerGames1_1([[gameId], game]: Item<state1_1_1.Game>): Iterable<Item<model1_1.PlayerGame>> {
     return ix.from(game.players).pipe(
-        ixop.map(({ id }): Item<model.PlayerGame1_1> =>
+        ixop.map(({ id }): Item<model1_1.PlayerGame> =>
             [[id, gameId], getPlayerGameExport1_1(game, id)])
     )
 }
 
-function getPlayerGameExport1_1(game: Game1_1, playerId: string): model.PlayerGame1_1 {
+function getPlayerGameExport1_1(game: state1_1_1.Game, playerId: string): model1_1.PlayerGame {
     if (game.state === 'UNSTARTED') {
-        const sanitizedPlayers: model.ExportedPlayer1_1[] = game.players.map(p => ({
+        const sanitizedPlayers: model1_1.ExportedPlayer[] = game.players.map(p => ({
             id: p.id,
             displayName: p.displayName,
         }))
@@ -214,7 +118,7 @@ function getPlayerGameExport1_1(game: Game1_1, playerId: string): model.PlayerGa
 
     // Repeated because TS isn't smart enough to understand this code works whether 
     // the game is started or not.
-    const sanitizedPlayers: model.ExportedPlayer1_1[] = game.players.map(p => ({
+    const sanitizedPlayers: model1_1.ExportedPlayer[] = game.players.map(p => ({
         id: p.id,
         displayName: p.displayName,
     }))
@@ -224,7 +128,7 @@ function getPlayerGameExport1_1(game: Game1_1, playerId: string): model.PlayerGa
 
     // Game is over.
     if (roundNum === numPlayers) {
-        const series: model.ExportedSeries1_0[] = game.players.map(() => ({ entries: [] }))
+        const series: model1_0.ExportedSeries[] = game.players.map(() => ({ entries: [] }))
         for (let rIdx = 0; rIdx < numPlayers; rIdx++) {
             for (let pIdx = 0; pIdx < numPlayers; pIdx++) {
                 series[(pIdx + rIdx) % numPlayers].entries.push({
@@ -269,9 +173,9 @@ function getPlayerGameExport1_1(game: Game1_1, playerId: string): model.PlayerGa
 }
 
 
-function gameToPlayerGames1_1to1_0(item: Item<Game1_1>): Iterable<Item<model.PlayerGame1_0>> {
+function gameToPlayerGames1_1to1_0(item: Item<state1_1_1.Game>): Iterable<Item<model1_0.PlayerGame>> {
     return ix.from(gameToPlayerGames1_1(item)).pipe(
-        ixop.map(([key, pg]: Item<model.PlayerGame1_1>): Item<model.PlayerGame1_0> => {
+        ixop.map(([key, pg]: Item<model1_1.PlayerGame>): Item<model1_0.PlayerGame> => {
             return [key, {
                 ...pg,
                 players: pg.players.map(p => p.id)
@@ -280,29 +184,59 @@ function gameToPlayerGames1_1to1_0(item: Item<Game1_1>): Iterable<Item<model.Pla
     );
 }
 
+// function downgradeError(error : model1_1.Error): model1_0.Error {
+//     switch (model.version) {
+//         case '1.0':
+//         case 'UNKNOWN':
+//         return error
+//     }
+// }
+
 const FRAMEWORK = new Framework(db.runTransaction(fsDb), {
-    '1.1.1': async (action: model.AnyAction, inputs: SideInputs['1.1.1']): Promise<util.Result<Outputs['1.1.1'], model.AnyError>> => {
+    '1.1.1': async (action: AnyAction, inputs: SideInputs['1.1.1']): Promise<Outputs['1.1.1']> => {
         const gamesResult = await integrate1_1_0(action, inputs.games);
         if (gamesResult.status !== 'ok') {
-            return gamesResult
+            return {
+                private: {
+                    games: [],
+                },
+                '1.0': {
+                    error: gamesResult.error,
+                    tables: {
+                    gamesByPlayer: [],
+                    }
+                },
+                '1.1': {
+                    error: gamesResult.error,
+tables:{                    gamesByPlayer: [],
+       }         }
+            }
         }
 
         const gamesByPlayer1_1 = collections.map(collections.fromDiffs(gamesResult.value), gameToPlayerGames1_1);
         const gamesByPlayer1_0 = collections.map(collections.fromDiffs(gamesResult.value), gameToPlayerGames1_1to1_0);
 
-        return util.ok({
-            games: gamesResult.value,
-            gamesByPlayer1_0: await collections.toDiffs(gamesByPlayer1_0),
-            gamesByPlayer1_1: await collections.toDiffs(gamesByPlayer1_1),
-        })
+        return {
+            private:{
+                games: gamesResult.value,
+            },
+            '1.0': {
+                error: null,
+tables:{                 gamesByPlayer: await collections.toDiffs(gamesByPlayer1_0),
+               }   },
+            '1.1': {
+                error: null,
+                tables:{ gamesByPlayer: await collections.toDiffs(gamesByPlayer1_1),
+                        }            }
+        }
     },
 });
 
 app.options('/action', cors())
 app.post('/action', cors(), function(req: Request<Dictionary<string>>, res, next) {
-    FRAMEWORK.handleAction(validateModel('AnyAction')(req.body)).then((resp) => {
+    FRAMEWORK.handleAction(validateSchema('AnyAction')(req.body)).then((resp) => {
         if (resp !== null) {
-            res.status(getHttpCode(resp))
+            res.status(resp.status_code)
             res.json(resp)
         } else {
             res.status(200)
@@ -311,41 +245,24 @@ app.post('/action', cors(), function(req: Request<Dictionary<string>>, res, next
     }).catch(next)
 })
 
-app.options('/upload', cors())
-app.post('/upload', cors(), function(req: Request<Dictionary<string>>, res, next) {
-    doUpload(req.body).then(resp => {
-        res.status(200)
-        res.json(resp)
-    }).catch(next)
-})
-
-
 app.use('/batch', batch())
 
-
-function defaultGame1_0(): Game1_0 {
+function defaultGame1_1(): state1_1_1.Game {
     return {
         state: 'UNSTARTED',
         players: [],
     }
 }
 
-function defaultGame1_1(): Game1_1 {
-    return {
-        state: 'UNSTARTED',
-        players: [],
-    }
-}
+// export const SUM_COMBINER: collections.Combiner<NumberValue> = {
+//     identity(): NumberValue { return { value: 0 } },
+//     opposite(n: NumberValue): NumberValue { return { value: -n.value } },
+//     combine(a: NumberValue, b: NumberValue): NumberValue {
+//         return { value: a.value + b.value }
+//     }
+// }
 
-export const SUM_COMBINER: collections.Combiner<NumberValue> = {
-    identity(): NumberValue { return { value: 0 } },
-    opposite(n: NumberValue): NumberValue { return { value: -n.value } },
-    combine(a: NumberValue, b: NumberValue): NumberValue {
-        return { value: a.value + b.value }
-    }
-}
-
-function upgradeAction1_0(a: model.Action1_0): model.Action1_1 {
+function upgradeAction1_0(a: model1_0.Action): model1_1.Action {
     switch (a.kind) {
         case 'join_game':
             return {
@@ -363,7 +280,7 @@ function upgradeAction1_0(a: model.Action1_0): model.Action1_1 {
             }
     }
 }
-function upgradeAction(a: model.AnyAction): model.Action1_1 {
+function upgradeAction(a: AnyAction): model1_1.Action {
     switch (a.version) {
         case '1.0':
             a = upgradeAction1_0(a)
@@ -373,8 +290,8 @@ function upgradeAction(a: model.AnyAction): model.Action1_1 {
 }
 
 
-function integrate1_1_0Helper(a: model.Action1_1, gameOrDefault: util.Defaultable<model.Game1_1>):
-    util.Result<util.Defaultable<model.Game1_1>, model.Error1_1> {
+function integrate1_1_0Helper(a: model1_1.Action, gameOrDefault: util.Defaultable<state1_1_1.Game>):
+    util.Result<util.Defaultable<state1_1_1.Game>, model1_1.Error> {
     const game = gameOrDefault.value;
     switch (a.kind) {
         case 'join_game':
@@ -382,6 +299,7 @@ function integrate1_1_0Helper(a: model.Action1_1, gameOrDefault: util.Defaultabl
                 return util.err({
                     version: '1.0',
                     status: 'GAME_ALREADY_STARTED',
+                               status_code: 400,
                     gameId: a.gameId,
                 })
             }
@@ -417,8 +335,8 @@ function findById<T extends { id: string }>(ts: T[], id: string): T | null {
     return ts.find(t => t.id === id) || null
 }
 
-function makeMove1_1(gameOrDefault: util.Defaultable<Game1_1>, action: model.MakeMoveAction1_1): util.Result<
-    util.Defaultable<Game1_1>, Error1_1> {
+function makeMove1_1(gameOrDefault: util.Defaultable<state1_1_1.Game>, action: model1_1.MakeMoveAction): util.Result<
+    util.Defaultable<state1_1_1.Game>, model1_1.Error> {
     const game = gameOrDefault.value;
     const playerId = action.playerId
 
@@ -426,7 +344,8 @@ function makeMove1_1(gameOrDefault: util.Defaultable<Game1_1>, action: model.Mak
         return util.err({
             version: '1.0',
             status: 'GAME_NOT_STARTED',
-            gameId: action.gameId,
+           status_code: 400,
+             gameId: action.gameId,
         })
     }
 
@@ -436,7 +355,8 @@ function makeMove1_1(gameOrDefault: util.Defaultable<Game1_1>, action: model.Mak
         return util.err({
             version: '1.0',
             status: 'PLAYER_NOT_IN_GAME',
-            gameId: action.gameId,
+           status_code: 403,
+             gameId: action.gameId,
             playerId: action.playerId,
         })
     }
@@ -446,7 +366,8 @@ function makeMove1_1(gameOrDefault: util.Defaultable<Game1_1>, action: model.Mak
         return util.err({
             version: '1.0',
             status: 'MOVE_PLAYED_OUT_OF_TURN',
-            gameId: action.gameId,
+               status_code: 400,
+         gameId: action.gameId,
             playerId: action.playerId,
         })
     }
@@ -455,7 +376,8 @@ function makeMove1_1(gameOrDefault: util.Defaultable<Game1_1>, action: model.Mak
         return util.err({
             version: '1.0',
             status: 'GAME_IS_OVER',
-            gameId: action.gameId,
+              status_code: 400,
+             gameId: action.gameId,
         })
     }
 
@@ -463,6 +385,7 @@ function makeMove1_1(gameOrDefault: util.Defaultable<Game1_1>, action: model.Mak
         return util.err({
             version: '1.0',
             status: 'INCORRECT_SUBMISSION_KIND',
+            status_code: 400,
             wanted: 'word',
             got: 'drawing',
         })
@@ -471,6 +394,7 @@ function makeMove1_1(gameOrDefault: util.Defaultable<Game1_1>, action: model.Mak
         return util.err({
             version: '1.0',
             status: 'INCORRECT_SUBMISSION_KIND',
+            status_code: 400,
             wanted: 'word',
             got: 'drawing',
         })
