@@ -46,6 +46,14 @@ export class ResultView<R, E> implements Result<R, E>{
             return ok(fn(this.data.value))
         }
     }
+
+    split<OkRes, ErrRes>({ onOk, onErr }: { onOk: (t: R) => OkRes, onErr: (e: E) => ErrRes }): OkRes | ErrRes {
+        if (this.data.status === 'ok') {
+            return onOk(this.data.value)
+        } else {
+            return onErr(this.data.error)
+        }
+    }
 }
 
 export function from<R, E>(r: Result<R, E>): ResultView<R, E> {

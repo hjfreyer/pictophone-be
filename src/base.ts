@@ -43,6 +43,18 @@ import * as readables from './readables'
 //     }
 // }
 
+export function applyChangesSimple<T>(t: db.Table<T>, changes: Change<T>[]): void {
+    for (const change of changes) {
+        switch (change.kind) {
+            case 'set':
+                t.set(change.key, change.value);
+                break;
+            case 'delete':
+                t.delete(change.key);
+                break;
+        }
+    }
+}
 export function applyChanges<T>(t: db.Table<Live<T>>, actionId: string, changes: Change<T>[]): void {
     for (const change of changes) {
         switch (change.kind) {

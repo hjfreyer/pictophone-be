@@ -24,6 +24,7 @@ import * as ixa from "ix/asynciterable"
 import * as ixaop from "ix/asynciterable/operators"
 import * as db from './db'
 import * as readables from './readables'
+import * as diffs from './diffs'
 import * as ranges from './ranges'
 import { Readable, Diff, ItemIterable, Range, Key, Item, Live, Change } from './interfaces'
 import { strict as assert } from 'assert';
@@ -62,7 +63,7 @@ interface Inputs2 {
 import { validate as validate1_0 } from './model/1.0.validator';
 import { validate as validate1_1 } from './model/1.1.validator';
 import { validate as validate1_1_1 } from './model/1.1.1.validator';
-import { getActionId } from './base'
+import { getActionId, diffToChange, applyChanges, applyChangesSimple } from './base'
 
 export const VALIDATORS = {
     '1.0': validate1_0,
@@ -76,8 +77,8 @@ export type Tables = {
     "LABELS,1.1.1,games": db.Table<Reference>
     // "IMPLEXP,1.1.1,1.0,gamesByPlayer": db.Table<import('../model/1.0').PlayerGame>
     // "IMPLEXP,1.1.1,1.1,gamesByPlayer": db.Table<import('../model/1.1').PlayerGame>
-    // "EXP,1.0,gamesByPlayer": db.Table<import('../model/1.0').PlayerGame>
-    // "EXP,1.1,gamesByPlayer": db.Table<import('../model/1.1').PlayerGame>
+    "EXP,1.0,gamesByPlayer": db.Table<import('./model/1.0').PlayerGame>
+    "EXP,1.1,gamesByPlayer": db.Table<import('./model/1.1').PlayerGame>
 }
 
 export function openAll(db: db.Database): Tables {
@@ -94,6 +95,15 @@ export function openAll(db: db.Database): Tables {
             schema: ['games-games-1.1.2'],
             validator: validateSchema('Reference')
         }),
+
+        "EXP,1.0,gamesByPlayer": db.open({
+            schema: ['players', 'games-gamesByPlayer-1.0-test'],
+            validator: VALIDATORS['1.0']('PlayerGame'),
+        }),
+        "EXP,1.1,gamesByPlayer": db.open({
+            schema: ['players', 'games-gamesByPlayer-1.1-test'],
+            validator: VALIDATORS['1.1']('PlayerGame'),
+        }),
     }
 }
 
@@ -101,40 +111,67 @@ interface IntegrationResult {
     parents: string[]
     labels: string[][]
     newState: Result<state1_1_1.State, state1_1_1.Error>
+    sideEffects: SideEffects
 }
+
+interface SideEffects {
+    gamesByPlayer1_0: Change<model1_0.PlayerGame>[]
+    gamesByPlayer1_1: Change<model1_1.PlayerGame>[]
+}
+
 
 async function integrator(action: AnyAction, inputs: Inputs2): Promise<IntegrationResult> {
     const prev = option.from(await inputs.fetchByLabel([action.gameId]));
     const parents = prev.map(([actionId,]) => [actionId]).or_else(() => [])
-    const gameOrDefault = prev
+    const oldGameOrDefault = prev
         .map(([, prev]) => result.fromData(prev).unwrap().games[action.gameId]!)
         .with_default(defaultGame1_1);
 
 
-    const defaultableGameOrError = integrate1_1_1Helper(convertAction(action), gameOrDefault);
-    if (defaultableGameOrError.data.status === 'err') {
-        return {
+    const maybeNewGameOrError = integrate1_1_1Helper(convertAction(action), oldGameOrDefault);
+    return result.from(maybeNewGameOrError).split({
+        onErr: (err) => ({
             parents,
             labels: [],
-            newState: result.fromData(defaultableGameOrError.data)
-        }
-    }
-    const maybeNewGame = option.from(result.from(defaultableGameOrError).unwrap());
-
-    return maybeNewGame.split({
-        onNone: () => ({
-            parents,
-            labels: [],
-            newState: result.ok({ games: {} })
+            newState: result.err(err),
+            sideEffects: {
+                gamesByPlayer1_0: [],
+                gamesByPlayer1_1: []
+            }
         }),
-        onSome: (newGame) => (
-            {
-                parents,
-                labels: [[action.gameId]],
-                newState: result.ok({ games: { [action.gameId]: maybeNewGame.unwrap() } })
+        onOk: (maybeNewGame) => {
+            return option.from(maybeNewGame).split({
+                onNone: () => ({
+                    parents,
+                    labels: [],
+                    newState: result.ok({ games: {} }),
+                    sideEffects: {
+                        gamesByPlayer1_0: [],
+                        gamesByPlayer1_1: []
+                    }
+                }),
+                onSome(newGame): IntegrationResult {
+                    const gameDiff = newDiff([action.gameId], oldGameOrDefault, defaultable.of(newGame, defaultGame1_1()));
+
+                    const gamesByPlayer1_0Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_1to1_0).diffs;
+                    const gamesByPlayer1_1Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_1).diffs;
+
+                    return {
+                        parents,
+                        labels: [[action.gameId]],
+                        newState: result.ok({ games: { [action.gameId]: newGame } }),
+                        sideEffects: {
+                            gamesByPlayer1_0: gamesByPlayer1_0Diffs.map(diffToChange),
+                            gamesByPlayer1_1: gamesByPlayer1_1Diffs.map(diffToChange),
+                        }
+                    }
+                }
             })
+        }
     })
 }
+
+// function sideEffects(label: string[], res: Result<state1_1_1.State, state1_1_1.Error>): 
 
 function doAction(action: AnyAction): Promise<Result<{}, AnyError>> {
     return db.runTransaction(fsDb)(async (db: db.Database): Promise<Result<{}, AnyError>> => {
@@ -162,6 +199,8 @@ function doAction(action: AnyAction): Promise<Result<{}, AnyError>> {
         for (const label of intResult.labels) {
             ts["LABELS,1.1.1,games"].set(label, ref)
         }
+        applyChangesSimple(ts["EXP,1.0,gamesByPlayer"], intResult.sideEffects.gamesByPlayer1_0)
+        applyChangesSimple(ts["EXP,1.1,gamesByPlayer"], intResult.sideEffects.gamesByPlayer1_1)
 
         return result.from(intResult.newState).map(() => ({}));
     })
@@ -190,6 +229,8 @@ function replayAction(actionId: string, action: SavedAction): Promise<void> {
         for (const label of intResult.labels) {
             ts["LABELS,1.1.1,games"].set(label, ref)
         }
+        applyChangesSimple(ts["EXP,1.0,gamesByPlayer"], intResult.sideEffects.gamesByPlayer1_0)
+        applyChangesSimple(ts["EXP,1.1,gamesByPlayer"], intResult.sideEffects.gamesByPlayer1_1)
     })
 }
 
@@ -266,92 +307,92 @@ export function newDiff<T>(key: Key, oldValue: util.Defaultable<T>, newValue: ut
 //     return result.ok(newDiff([action.gameId], gameOrDefault, gameResult.value));
 // }
 
-// function gameToPlayerGames1_1([[gameId], game]: Item<state1_1_1.Game>): Iterable<Item<model1_1.PlayerGame>> {
-//     return ix.from(game.players).pipe(
-//         ixop.map(({ id }): Item<model1_1.PlayerGame> =>
-//             [[id, gameId], getPlayerGameExport1_1(game, id)])
-//     )
-// }
+function gameToPlayerGames1_1([[gameId], game]: Item<state1_1_1.Game>): Iterable<Item<model1_1.PlayerGame>> {
+    return ix.from(game.players).pipe(
+        ixop.map(({ id }): Item<model1_1.PlayerGame> =>
+            [[id, gameId], getPlayerGameExport1_1(game, id)])
+    )
+}
 
-// function getPlayerGameExport1_1(game: state1_1_1.Game, playerId: string): model1_1.PlayerGame {
-//     if (game.state === 'UNSTARTED') {
-//         const sanitizedPlayers: model1_1.ExportedPlayer[] = game.players.map(p => ({
-//             id: p.id,
-//             displayName: p.displayName,
-//         }))
-//         return {
-//             state: 'UNSTARTED',
-//             players: sanitizedPlayers,
-//         }
-//     }
+function getPlayerGameExport1_1(game: state1_1_1.Game, playerId: string): model1_1.PlayerGame {
+    if (game.state === 'UNSTARTED') {
+        const sanitizedPlayers: model1_1.ExportedPlayer[] = game.players.map(p => ({
+            id: p.id,
+            displayName: p.displayName,
+        }))
+        return {
+            state: 'UNSTARTED',
+            players: sanitizedPlayers,
+        }
+    }
 
-//     // Repeated because TS isn't smart enough to understand this code works whether 
-//     // the game is started or not.
-//     const sanitizedPlayers: model1_1.ExportedPlayer[] = game.players.map(p => ({
-//         id: p.id,
-//         displayName: p.displayName,
-//     }))
+    // Repeated because TS isn't smart enough to understand this code works whether 
+    // the game is started or not.
+    const sanitizedPlayers: model1_1.ExportedPlayer[] = game.players.map(p => ({
+        id: p.id,
+        displayName: p.displayName,
+    }))
 
-//     const numPlayers = game.players.length
-//     const roundNum = Math.min(...game.players.map(p => p.submissions.length))
+    const numPlayers = game.players.length
+    const roundNum = Math.min(...game.players.map(p => p.submissions.length))
 
-//     // Game is over.
-//     if (roundNum === numPlayers) {
-//         const series: model1_0.ExportedSeries[] = game.players.map(() => ({ entries: [] }))
-//         for (let rIdx = 0; rIdx < numPlayers; rIdx++) {
-//             for (let pIdx = 0; pIdx < numPlayers; pIdx++) {
-//                 series[(pIdx + rIdx) % numPlayers].entries.push({
-//                     playerId: game.players[pIdx].id,
-//                     submission: game.players[pIdx].submissions[rIdx]
-//                 })
-//             }
-//         }
+    // Game is over.
+    if (roundNum === numPlayers) {
+        const series: model1_0.ExportedSeries[] = game.players.map(() => ({ entries: [] }))
+        for (let rIdx = 0; rIdx < numPlayers; rIdx++) {
+            for (let pIdx = 0; pIdx < numPlayers; pIdx++) {
+                series[(pIdx + rIdx) % numPlayers].entries.push({
+                    playerId: game.players[pIdx].id,
+                    submission: game.players[pIdx].submissions[rIdx]
+                })
+            }
+        }
 
-//         return {
-//             state: 'GAME_OVER',
-//             players: sanitizedPlayers,
-//             series,
-//         }
-//     }
+        return {
+            state: 'GAME_OVER',
+            players: sanitizedPlayers,
+            series,
+        }
+    }
 
-//     const player = findById(game.players, playerId)!;
-//     if (player.submissions.length === 0) {
-//         return {
-//             state: 'FIRST_PROMPT',
-//             players: sanitizedPlayers,
-//         }
-//     }
+    const player = findById(game.players, playerId)!;
+    if (player.submissions.length === 0) {
+        return {
+            state: 'FIRST_PROMPT',
+            players: sanitizedPlayers,
+        }
+    }
 
-//     if (player.submissions.length === roundNum) {
-//         const playerIdx = game.players.findIndex(p => p.id === playerId)
-//         if (playerIdx === -1) {
-//             throw new Error('baad')
-//         }
-//         const nextPlayerIdx = (playerIdx + 1) % game.players.length
-//         return {
-//             state: 'RESPOND_TO_PROMPT',
-//             players: sanitizedPlayers,
-//             prompt: game.players[nextPlayerIdx].submissions[roundNum - 1]
-//         }
-//     }
+    if (player.submissions.length === roundNum) {
+        const playerIdx = game.players.findIndex(p => p.id === playerId)
+        if (playerIdx === -1) {
+            throw new Error('baad')
+        }
+        const nextPlayerIdx = (playerIdx + 1) % game.players.length
+        return {
+            state: 'RESPOND_TO_PROMPT',
+            players: sanitizedPlayers,
+            prompt: game.players[nextPlayerIdx].submissions[roundNum - 1]
+        }
+    }
 
-//     return {
-//         state: 'WAITING_FOR_PROMPT',
-//         players: sanitizedPlayers,
-//     }
-// }
+    return {
+        state: 'WAITING_FOR_PROMPT',
+        players: sanitizedPlayers,
+    }
+}
 
 
-// function gameToPlayerGames1_1to1_0(item: Item<state1_1_1.Game>): Iterable<Item<model1_0.PlayerGame>> {
-//     return ix.from(gameToPlayerGames1_1(item)).pipe(
-//         ixop.map(([key, pg]: Item<model1_1.PlayerGame>): Item<model1_0.PlayerGame> => {
-//             return [key, {
-//                 ...pg,
-//                 players: pg.players.map(p => p.id)
-//             }]
-//         }),
-//     );
-// }
+function gameToPlayerGames1_1to1_0(item: Item<state1_1_1.Game>): Iterable<Item<model1_0.PlayerGame>> {
+    return ix.from(gameToPlayerGames1_1(item)).pipe(
+        ixop.map(([key, pg]: Item<model1_1.PlayerGame>): Item<model1_0.PlayerGame> => {
+            return [key, {
+                ...pg,
+                players: pg.players.map(p => p.id)
+            }]
+        }),
+    );
+}
 
 
 // const FRAMEWORK = new Framework(db.runTransaction(fsDb), {
