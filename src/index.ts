@@ -1,49 +1,36 @@
-import { DocumentData, Transaction } from '@google-cloud/firestore'
-import { Storage } from '@google-cloud/storage'
+
 import cors from 'cors'
+import deepEqual from 'deep-equal'
 import express, { Router } from 'express'
 import { Dictionary, Request } from 'express-serve-static-core'
 import admin from 'firebase-admin'
-import GetConfig from './config'
-// import { AnyAction, Action1_0, Game1_0, state1_1_1.Game, Error1_0, Error1_1, AnyError, NumberValue } from './model'
-import * as model from './model'
-
-import * as model1_0 from './model/1.0'
-import * as model1_1 from './model/1.1'
-import * as state1_1_1 from './model/1.1.1'
-
-import * as util from './util'
-import deepEqual from 'deep-equal'
-
-import { sha256 } from 'js-sha256';
-import _ from 'lodash';
-import * as collections from './collections';
+import produce from 'immer'
+import * as ixa from "ix/asynciterable"
 import * as ix from "ix/iterable"
 import * as ixop from "ix/iterable/operators"
-import * as ixa from "ix/asynciterable"
-import * as ixaop from "ix/asynciterable/operators"
+import { applyChangesSimple, diffToChange, getActionId } from './base'
 import * as db from './db'
-import * as readables from './readables'
 import * as diffs from './diffs'
-import * as ranges from './ranges'
-import { Readable, Diff, ItemIterable, Range, Key, Item, Live, Change, item } from './interfaces'
-import { strict as assert } from 'assert';
-import { Option, option, Result, result, Defaultable, defaultable } from './util';
+import { Change, Diff, Item, item, Key } from './interfaces'
+import * as model1_0 from './model/1.0'
+import { validate as validate1_0 } from './model/1.0.validator'
+import * as model1_1 from './model/1.1'
+import * as state1_1_1 from './model/1.1.1'
+import { validate as validate1_1_1 } from './model/1.1.1.validator'
+import { validate as validate1_1 } from './model/1.1.validator'
+import * as readables from './readables'
 import {
-    SavedAction, Reference, AnyAction, AnyError, CollectionId,
-    //     SideInputs, , Outputs,
-    //     Framework, deleteCollection, AnyAction,AnyError,
-    deleteTable
-} from './schema';
-import produce from 'immer';
-
+    AnyAction, AnyError, CollectionId,
+    deleteTable, Reference, SavedAction
+} from './schema'
 import { validate as validateSchema } from './schema/interfaces.validator'
+import * as util from './util'
+import { Defaultable, defaultable, Option, option, Result, result } from './util'
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
 })
 
-const storage = new Storage()
 const fsDb = admin.firestore()
 
 // Create a new express application instance
@@ -60,10 +47,6 @@ interface Inputs2 {
     fetchByLabel(label: string[]): Promise<Option<[string, state1_1_1.Game]>>
 }
 
-import { validate as validate1_0 } from './model/1.0.validator';
-import { validate as validate1_1 } from './model/1.1.validator';
-import { validate as validate1_1_1 } from './model/1.1.1.validator';
-import { getActionId, diffToChange, applyChanges, applyChangesSimple } from './base'
 
 export const VALIDATORS = {
     '1.0': validate1_0,
@@ -640,7 +623,7 @@ type DeleteCollectionRequest = {
 function batch(): Router {
     const res = Router()
 
-    res.post('/replay', function(req: Request<{}>, res, next) {
+    res.post('/replay', function(_req: Request<{}>, res, next) {
         handleReplay().then(result => {
             res.status(200)
             res.json(result)
