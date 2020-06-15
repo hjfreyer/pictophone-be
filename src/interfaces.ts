@@ -2,12 +2,12 @@
 export type Key = string[]
 
 export interface Item<T> {
-    key: Key, 
+    key: Key,
     value: T,
 }
 
 export function item<T>(key: Key, value: T): Item<T> {
-    return {key, value}
+    return { key, value }
 }
 
 export type ItemIterable<T> = AsyncIterable<Item<T>>

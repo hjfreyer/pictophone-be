@@ -70,7 +70,7 @@ class FSTable<T> {
         return ixa.from(this.tx.get(q)).pipe(
             ixaop.flatMap((snapshot): AsyncIterableX<QueryDocumentSnapshot> => ixa.from(snapshot.docs)),
             ixaop.map((doc: QueryDocumentSnapshot): Item<T> => item(this.getKey(doc.ref), this.validator(doc.data()))),
-            ixaop.takeWhile(({key}: Item<T>): boolean => ranges.contains(rng, key))
+            ixaop.takeWhile(({ key }: Item<T>): boolean => ranges.contains(rng, key))
         );
     }
 

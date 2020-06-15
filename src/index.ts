@@ -1,4 +1,5 @@
-
+import { CollectionReference } from '@google-cloud/firestore'
+import { strict as assert } from 'assert'
 import cors from 'cors'
 import deepEqual from 'deep-equal'
 import express, { Router } from 'express'
@@ -75,33 +76,28 @@ export function openAll(db: db.Database): Tables {
             validator: validateSchema('SavedAction')
         }),
         "ANNOTATIONS,1.1.1": db.open({
-            schema: ['annotations-1.1.4'],
+            schema: ['annotations-1.1.1'],
             validator: VALIDATORS['1.1.1']('Annotations')
         }),
         "LABELS,1.1.1,games": db.open({
-            schema: ['games-games-1.1.4'],
+            schema: ['games-games-1.1.1'],
             validator: validateSchema('Reference')
         }),
 
         "EXP,1.0,gamesByPlayer": db.open({
-            schema: ['players', 'games-gamesByPlayer-1.0-1.1.4'],
+            schema: ['players', 'games-gamesByPlayer-1.0'],
             validator: VALIDATORS['1.0']('PlayerGame'),
         }),
         "EXP,1.1,gamesByPlayer": db.open({
-            schema: ['players', 'games-gamesByPlayer-1.1-1.1.4'],
+            schema: ['players', 'games-gamesByPlayer-1.1'],
             validator: VALIDATORS['1.1']('PlayerGame'),
         }),
     }
 }
 
 interface IntegrationResult {
-    parents: Record<string, Parent>
     annotations: state1_1_1.Annotations
     result: Result<SideEffects, state1_1_1.Error>
-}
-
-interface Parent {
-    labels: string[][]
 }
 
 interface SideEffects {
@@ -112,9 +108,9 @@ interface SideEffects {
 
 async function integrator(action: AnyAction, inputs: Inputs2): Promise<IntegrationResult> {
     const maybePrevAnnotation = option.from(await inputs.fetchByLabel([action.gameId]));
-    const parents: Record<string, Parent> = maybePrevAnnotation.split({
-        onSome: ([actionId,]) => ({ [actionId]: { labels: [[action.gameId]] } }),
-        onNone: () => ({}),
+    const parents: Item<Reference>[] = maybePrevAnnotation.split({
+        onSome: ([actionId,]) => [item([action.gameId], { actionId })],
+        onNone: () => [],
     })
 
     const oldGameOrDefault = maybePrevAnnotation
@@ -124,15 +120,13 @@ async function integrator(action: AnyAction, inputs: Inputs2): Promise<Integrati
     const maybeNewGameOrError = integrate1_1_1Helper(convertAction(action), oldGameOrDefault);
     return result.from(maybeNewGameOrError).split({
         onErr: (err): IntegrationResult => ({
-            parents,
-            annotations: { games: [] },
+            annotations: { parents, games: [] },
             result: result.err(err)
         }),
         onOk: (maybeNewGame): IntegrationResult => {
             return option.from(maybeNewGame).split({
                 onNone: (): IntegrationResult => ({
-                    parents,
-                    annotations: { games: [] },
+                    annotations: { parents, games: [] },
                     result: result.ok({
                         gamesByPlayer1_0: [],
                         gamesByPlayer1_1: []
@@ -145,8 +139,8 @@ async function integrator(action: AnyAction, inputs: Inputs2): Promise<Integrati
                     const gamesByPlayer1_1Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_1).diffs;
 
                     return {
-                        parents,
                         annotations: {
+                            parents,
                             games: [{ key: [action.gameId], value: newGame }]
                         },
                         result: result.ok({
@@ -170,18 +164,19 @@ function doAction(action: AnyAction): Promise<Result<{}, AnyError>> {
                 const maybeRef = await readables.getOption(ts["LABELS,1.1.1,games"], label);
                 return await option.from(maybeRef).mapAsync(async ref => {
                     const annos = option.from(await readables.getOption(ts["ANNOTATIONS,1.1.1"], [ref.actionId])).unwrap();
-
-                    // TODO: generalize:
-                    return [ref.actionId, annos.games[0].value]
+                    const game = option.from(findByKey(annos.games, label)).unwrap();
+                    return [ref.actionId, game]
                 })
             }
         }
 
         const intResult = await integrator(action, inputs);
-        const savedAction: SavedAction = {
-            parents: Object.keys(intResult.parents),
-            action,
-        };
+        const parents = ix.toArray(ix.from(intResult.annotations.parents).pipe(
+            ixop.map(({ value }) => value.actionId),
+            ixop.distinct(),
+            ixop.orderBy(x => x),
+        ));
+        const savedAction: SavedAction = { parents, action };
         const actionId = getActionId(savedAction);
         const ref: Reference = { actionId }
 
@@ -212,8 +207,8 @@ function replayAction(actionId: string, action: SavedAction): Promise<void> {
                     }
                     const annos = option.from(await readables.getOption(ts["ANNOTATIONS,1.1.1"], [ref.actionId])).unwrap();
 
-                    // TODO: generalize:
-                    return [ref.actionId, annos.games[0].value]
+                    const game = option.from(findByKey(annos.games, label)).unwrap();
+                    return [ref.actionId, game]
                 })
             }
         }
@@ -233,6 +228,45 @@ function replayAction(actionId: string, action: SavedAction): Promise<void> {
     })
 }
 
+function findByKey<T>(items: Iterable<Item<T>>, target_key: Key): Option<T> {
+    const first = ix.first(ix.from(items).pipe(
+        ixop.filter(({ key }) => util.lexCompare(target_key, key) === 0),
+        ixop.map(({ value }) => value)
+    ))
+
+    if (first === undefined) {
+        return option.none();
+    } else {
+        return option.some(first)
+    }
+}
+
+function checkAction(actionId: string, action: SavedAction, annotations: state1_1_1.Annotations): Promise<void> {
+    return db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
+        const ts = openAll(db);
+        const inputs: Inputs2 = {
+            async fetchByLabel(label: string[]): Promise<Option<[string, state1_1_1.Game]>> {
+                const maybeParent = option.from(findByKey(annotations.parents, label));
+                return await maybeParent.mapAsync(async ref => {
+                    const annos = option.from(await readables.getOption(ts["ANNOTATIONS,1.1.1"], [ref.actionId])).unwrap();
+                    const game = option.from(findByKey(annos.games, label)).unwrap();
+                    return [ref.actionId, game]
+                })
+            }
+        }
+
+        const intResult = await integrator(action.action, inputs);
+        const parents = ix.toArray(ix.from(intResult.annotations.parents).pipe(
+            ixop.map(({ value }) => value.actionId),
+            ixop.distinct(),
+            ixop.orderBy(x => x),
+        ));
+
+        assert.deepEqual(parents, action.parents);
+        assert.deepEqual(intResult.annotations, annotations);
+    })
+}
+
 async function handleReplay(): Promise<void> {
     let cursor: string = '';
     console.log('REPLAY')
@@ -242,14 +276,24 @@ async function handleReplay(): Promise<void> {
             break;
         }
         const [actionId, savedAction] = nextActionOrNull;
-        console.log(`REPLAY ${actionId}`)
+        const annos = await db.runTransaction(fsDb)(db => readables.getOption(openAll(db)["ANNOTATIONS,1.1.1"], [actionId]));
+        await option.from(annos).split({
+            async onSome(annos): Promise<void> {
+                console.log(`CHECK ${actionId}`)
 
-        await replayAction(actionId, savedAction)
+                await checkAction(actionId, savedAction, annos)
+            },
+            async onNone(): Promise<void> {
+                console.log(`REPLAY ${actionId}`)
+
+                await replayAction(actionId, savedAction)
+            }
+        })
+
         cursor = actionId;
     }
     console.log('DONE')
 }
-
 
 export function getNextAction(tx: db.TxRunner, startAfter: string): Promise<([string, SavedAction] | null)> {
     return tx(async (db: db.Database): Promise<([string, SavedAction] | null)> => {
@@ -258,7 +302,7 @@ export function getNextAction(tx: db.TxRunner, startAfter: string): Promise<([st
         if (first === undefined) {
             return null;
         }
-        const {key: [actionId], value: savedAction} = first;
+        const { key: [actionId], value: savedAction } = first;
         return [actionId, savedAction];
     });
 }
@@ -306,7 +350,7 @@ export function newDiff<T>(key: Key, oldValue: util.Defaultable<T>, newValue: ut
 //     return result.ok(newDiff([action.gameId], gameOrDefault, gameResult.value));
 // }
 
-function gameToPlayerGames1_1([gameId] : Key, game: state1_1_1.Game): Iterable<Item<model1_1.PlayerGame>> {
+function gameToPlayerGames1_1([gameId]: Key, game: state1_1_1.Game): Iterable<Item<model1_1.PlayerGame>> {
     return ix.from(game.players).pipe(
         ixop.map(({ id }): Item<model1_1.PlayerGame> =>
             item([id, gameId], getPlayerGameExport1_1(game, id)))
@@ -384,7 +428,7 @@ function getPlayerGameExport1_1(game: state1_1_1.Game, playerId: string): model1
 
 function gameToPlayerGames1_1to1_0(key: Key, value: state1_1_1.Game): Iterable<Item<model1_0.PlayerGame>> {
     return ix.from(gameToPlayerGames1_1(key, value)).pipe(
-        ixop.map(({key, value: pg}: Item<model1_1.PlayerGame>): Item<model1_0.PlayerGame> => {
+        ixop.map(({ key, value: pg }: Item<model1_1.PlayerGame>): Item<model1_0.PlayerGame> => {
             return item(key, {
                 ...pg,
                 players: pg.players.map(p => p.id)
@@ -620,6 +664,29 @@ type DeleteCollectionRequest = {
     collectionId: string
 }
 
+async function handlePurge(): Promise<void> {
+    for (const collection of await fsDb.listCollections()) {
+        // Never purge the "actions" collection.
+        if (collection.id !== 'actions') {
+            await purgeCollection(collection)
+        }
+    }
+}
+
+async function purgeCollection(cref: CollectionReference): Promise<void> {
+    // Never purge the "actions" collection.
+    if (cref.id === 'actions') {
+        throw new Error("unexpected 'actions' collection.")
+    }
+    for (const doc of await cref.listDocuments()) {
+        console.log("Deleting:", doc.path)
+        doc.delete()
+        for (const subC of await doc.listCollections()) {
+            await purgeCollection(subC)
+        }
+    }
+}
+
 function batch(): Router {
     const res = Router()
 
@@ -642,12 +709,12 @@ function batch(): Router {
     //         res.json(result)
     //     }).catch(next)
     // })
-    // res.post('/purge', function(req: Request<{}>, res, next) {
-    //     FRAMEWORK.handlePurge().then(result => {
-    //         res.status(200)
-    //         res.json(result)
-    //     }).catch(next)
-    // })
+    res.post('/purge', function(req: Request<{}>, res, next) {
+        handlePurge().then(result => {
+            res.status(200)
+            res.json(result)
+        }).catch(next)
+    })
 
     res.post('/delete/:collectionId', function(req: Request<DeleteCollectionRequest>, res, next) {
         deleteCollection(db.runTransaction(fsDb), req.params.collectionId as CollectionId).then(result => {

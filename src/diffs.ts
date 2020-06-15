@@ -33,7 +33,7 @@ function singleMap<I, O>(mapper: Mapper<I, O>, diff: Diff<I>): Iterable<Diff<O>>
         }
     })()
     type AgedItem = { age: 'old' | 'new', key: Key, value: O };
-    const tagger = (age: 'old' | 'new') => ({key, value}: Item<O>): AgedItem => ({ age, key, value });
+    const tagger = (age: 'old' | 'new') => ({ key, value }: Item<O>): AgedItem => ({ age, key, value });
 
     const aged: ix.IterableX<AgedItem> = ix.concat(
         ix.from(oldMapped).pipe(ixop.map(tagger('old'))),

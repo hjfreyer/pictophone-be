@@ -1,6 +1,7 @@
 import { ResultData } from "../util/result"
 import { OptionData } from "../util/option"
 import { Item } from "../interfaces"
+import { Reference } from "../schema"
 
 export interface JoinGameAction {
     kind: 'join_game'
@@ -136,5 +137,6 @@ export type State = {
 }
 
 export interface Annotations {
+    parents: Item<Reference>[]
     games: Item<Game>[]
 }
