@@ -1,7 +1,7 @@
 import { DocumentData, QueryDocumentSnapshot, DocumentReference, FieldPath, Firestore, Transaction, Timestamp } from '@google-cloud/firestore'
 import { strict as assert } from "assert"
 import { basename, dirname, join } from "path"
-import { Key, Item, ItemIterable, Range } from './interfaces'
+import { Key, Item, ItemIterable, Range, item } from './interfaces'
 import * as ranges from './ranges';
 
 import * as ixaop from 'ix/asynciterable/operators';
@@ -69,8 +69,8 @@ class FSTable<T> {
         }
         return ixa.from(this.tx.get(q)).pipe(
             ixaop.flatMap((snapshot): AsyncIterableX<QueryDocumentSnapshot> => ixa.from(snapshot.docs)),
-            ixaop.map((doc: QueryDocumentSnapshot): Item<T> => [this.getKey(doc.ref), this.validator(doc.data())]),
-            ixaop.takeWhile(([key, _value]: Item<T>): boolean => ranges.contains(rng, key))
+            ixaop.map((doc: QueryDocumentSnapshot): Item<T> => item(this.getKey(doc.ref), this.validator(doc.data()))),
+            ixaop.takeWhile(({key}: Item<T>): boolean => ranges.contains(rng, key))
         );
     }
 

@@ -1,5 +1,5 @@
 
-import { Readable, ItemIterable, Range, Key, Item, Live } from './interfaces'
+import { Readable, ItemIterable, Range, Key, Item, Live, item } from './interfaces'
 import * as ranges from './ranges';
 import * as ixa from "ix/asynciterable"
 import * as ixaop from "ix/asynciterable/operators"
@@ -21,20 +21,20 @@ export function merge<T>(schema: string[], readables: Readable<T>[]): Readable<T
     return {
         schema,
         read(range: Range): ItemIterable<T> {
-            return util.sortedMerge(readables.map(r => r.read(range)), ([ka,], [kb,]) => util.lexCompare(ka, kb))
+            return util.sortedMerge(readables.map(r => r.read(range)), ({key: ka}, {key: kb}) => util.lexCompare(ka, kb))
         }
     }
 }
 
 export async function get<T, D>(source: Readable<T>, key: Key, def: D): Promise<T | D> {
-    for await (const [, value] of source.read(ranges.singleValue(key))) {
+    for await (const {value} of source.read(ranges.singleValue(key))) {
         return value
     }
     return def
 }
 
 export async function getOption<T, D>(source: Readable<T>, key: Key): Promise<util.Option<T>> {
-    for await (const [, value] of source.read(ranges.singleValue(key))) {
+    for await (const {value} of source.read(ranges.singleValue(key))) {
         return util.option.some(value)
     }
     return util.option.none()
@@ -58,9 +58,9 @@ export function tracked<T>(source: Readable<Live<T>>, cb: (actionId: string) => 
         read(range: Range): ItemIterable<T> {
             const links = ixa.from(source.read(range))
             return links.pipe(
-                ixaop.tap(([, { actionId }]) => cb(actionId)),
-                ixaop.flatMap(([key, { value }]: Item<Live<T>>): ItemIterable<T> =>
-                    value !== null ? ixa.of([key, value]) : ixa.empty())
+                ixaop.tap(({value: { actionId }}) => cb(actionId)),
+                ixaop.flatMap(({key, value: { value }}: Item<Live<T>>): ItemIterable<T> =>
+                    value !== null ? ixa.of(item(key, value)) : ixa.empty())
             )
         }
     }

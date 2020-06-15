@@ -1,7 +1,14 @@
 
 export type Key = string[]
 
-export type Item<T> = [Key, T]
+export interface Item<T> {
+    key: Key, 
+    value: T,
+}
+
+export function item<T>(key: Key, value: T): Item<T> {
+    return {key, value}
+}
 
 export type ItemIterable<T> = AsyncIterable<Item<T>>
 
@@ -19,10 +26,6 @@ export interface Readable<T> {
     read(range: Range): ItemIterable<T>
 }
 
-export interface KV<T> {
-    key: string[],
-    value: T
-}
 export type Diff<V> = {
     key: string[]
     kind: 'add'

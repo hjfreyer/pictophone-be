@@ -1,6 +1,6 @@
 import { ResultData } from "../util/result"
 import { OptionData } from "../util/option"
-import { Item, KV } from "../interfaces"
+import { Item } from "../interfaces"
 
 export interface JoinGameAction {
     kind: 'join_game'
@@ -136,5 +136,5 @@ export type State = {
 }
 
 export interface Annotations {
-    games: KV<Game>[]
+    games: Item<Game>[]
 }

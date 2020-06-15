@@ -156,7 +156,7 @@ export const Schema = {
             "properties": {
                 "games": {
                     "items": {
-                        "$ref": "#/definitions/KV<Game>"
+                        "$ref": "#/definitions/Item<Game>"
                     },
                     "type": "array"
                 }
@@ -548,6 +548,33 @@ export const Schema = {
                 "$ref": "#/definitions/UnstartedGame"
             }
         },
+        "Item<Game>": {
+            "defaultProperties": [
+            ],
+            "properties": {
+                "key": {
+                    "items": {
+                        "type": "string"
+                    },
+                    "type": "array"
+                },
+                "value": {
+                    "anyOf": [
+                        {
+                            "$ref": "#/definitions/UnstartedGame"
+                        },
+                        {
+                            "$ref": "#/definitions/StartedGame"
+                        }
+                    ]
+                }
+            },
+            "required": [
+                "key",
+                "value"
+            ],
+            "type": "object"
+        },
         "JoinGameAction": {
             "defaultProperties": [
             ],
@@ -581,33 +608,6 @@ export const Schema = {
                 "kind",
                 "playerDisplayName",
                 "playerId"
-            ],
-            "type": "object"
-        },
-        "KV<Game>": {
-            "defaultProperties": [
-            ],
-            "properties": {
-                "key": {
-                    "items": {
-                        "type": "string"
-                    },
-                    "type": "array"
-                },
-                "value": {
-                    "anyOf": [
-                        {
-                            "$ref": "#/definitions/UnstartedGame"
-                        },
-                        {
-                            "$ref": "#/definitions/StartedGame"
-                        }
-                    ]
-                }
-            },
-            "required": [
-                "key",
-                "value"
             ],
             "type": "object"
         },

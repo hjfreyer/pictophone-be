@@ -18,22 +18,22 @@ export function from<T>(diffs: Iterable<Diff<T>>): Diffs<T> {
 export interface Mapper<I, O> {
     // Must be injective: input items with different keys must never produce 
     // output items with the same key.
-    (item: Item<I>): Iterable<Item<O>>
+    (key: Key, value: I): Iterable<Item<O>>
 }
 
 function singleMap<I, O>(mapper: Mapper<I, O>, diff: Diff<I>): Iterable<Diff<O>> {
     const [oldMapped, newMapped] = (() => {
         switch (diff.kind) {
             case 'add':
-                return [[], mapper([diff.key, diff.value])]
+                return [[], mapper(diff.key, diff.value)]
             case 'delete':
-                return [mapper([diff.key, diff.value]), []]
+                return [mapper(diff.key, diff.value), []]
             case 'replace':
-                return [mapper([diff.key, diff.oldValue]), mapper([diff.key, diff.newValue])]
+                return [mapper(diff.key, diff.oldValue), mapper(diff.key, diff.newValue)]
         }
     })()
     type AgedItem = { age: 'old' | 'new', key: Key, value: O };
-    const tagger = (age: 'old' | 'new') => ([key, value]: Item<O>): AgedItem => ({ age, key, value });
+    const tagger = (age: 'old' | 'new') => ({key, value}: Item<O>): AgedItem => ({ age, key, value });
 
     const aged: ix.IterableX<AgedItem> = ix.concat(
         ix.from(oldMapped).pipe(ixop.map(tagger('old'))),

@@ -26,7 +26,7 @@ import * as db from './db'
 import * as readables from './readables'
 import * as diffs from './diffs'
 import * as ranges from './ranges'
-import { Readable, Diff, ItemIterable, Range, Key, Item, Live, Change } from './interfaces'
+import { Readable, Diff, ItemIterable, Range, Key, Item, Live, Change, item } from './interfaces'
 import { strict as assert } from 'assert';
 import { Option, option, Result, result, Defaultable, defaultable } from './util';
 import {
@@ -275,7 +275,7 @@ export function getNextAction(tx: db.TxRunner, startAfter: string): Promise<([st
         if (first === undefined) {
             return null;
         }
-        const [[actionId], savedAction] = first;
+        const {key: [actionId], value: savedAction} = first;
         return [actionId, savedAction];
     });
 }
@@ -323,10 +323,10 @@ export function newDiff<T>(key: Key, oldValue: util.Defaultable<T>, newValue: ut
 //     return result.ok(newDiff([action.gameId], gameOrDefault, gameResult.value));
 // }
 
-function gameToPlayerGames1_1([[gameId], game]: Item<state1_1_1.Game>): Iterable<Item<model1_1.PlayerGame>> {
+function gameToPlayerGames1_1([gameId] : Key, game: state1_1_1.Game): Iterable<Item<model1_1.PlayerGame>> {
     return ix.from(game.players).pipe(
         ixop.map(({ id }): Item<model1_1.PlayerGame> =>
-            [[id, gameId], getPlayerGameExport1_1(game, id)])
+            item([id, gameId], getPlayerGameExport1_1(game, id)))
     )
 }
 
@@ -399,13 +399,13 @@ function getPlayerGameExport1_1(game: state1_1_1.Game, playerId: string): model1
 }
 
 
-function gameToPlayerGames1_1to1_0(item: Item<state1_1_1.Game>): Iterable<Item<model1_0.PlayerGame>> {
-    return ix.from(gameToPlayerGames1_1(item)).pipe(
-        ixop.map(([key, pg]: Item<model1_1.PlayerGame>): Item<model1_0.PlayerGame> => {
-            return [key, {
+function gameToPlayerGames1_1to1_0(key: Key, value: state1_1_1.Game): Iterable<Item<model1_0.PlayerGame>> {
+    return ix.from(gameToPlayerGames1_1(key, value)).pipe(
+        ixop.map(({key, value: pg}: Item<model1_1.PlayerGame>): Item<model1_0.PlayerGame> => {
+            return item(key, {
                 ...pg,
                 players: pg.players.map(p => p.id)
-            }]
+            })
         }),
     );
 }
