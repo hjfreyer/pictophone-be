@@ -115,7 +115,7 @@ async function integrator(action: AnyAction, inputs: Inputs2): Promise<Integrati
 
     const oldGameOrDefault = maybePrevAnnotation
         .map(([, oldGame]) => oldGame)
-        .with_default(defaultGame1_1);
+        .withDefault(defaultGame1_1);
 
     const maybeNewGameOrError = integrate1_1_1Helper(convertAction(action), oldGameOrDefault);
     return result.from(maybeNewGameOrError).split({

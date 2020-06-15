@@ -41,7 +41,7 @@ export async function getOption<T, D>(source: Readable<T>, key: Key): Promise<ut
 }
 
 export async function getOrDefault<T>(source: Readable<T>, key: Key, def: T): Promise<util.Defaultable<T>> {
-    return util.option.from(await getOption(source, key)).with_default(() => def);
+    return util.option.from(await getOption(source, key)).withDefault(() => def);
 }
 
 export function readAll<T>(source: Readable<T>): ItemIterable<T> {
