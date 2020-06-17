@@ -28,7 +28,8 @@ import { validate as validateSchema } from './schema/interfaces.validator'
 import * as util from './util'
 import { Defaultable, defaultable, Option, option, Result, result } from './util'
 import { OptionData } from './util/option'
-import { REVISION } from './logic/1.1.1'
+import { REVISION as REVISION1_1_1 } from './logic/1.1.1'
+import { REVISION as REVISION1_2_0 } from './logic/1.2.0'
 import * as fw from './framework';
 
 admin.initializeApp({
@@ -268,26 +269,34 @@ function checkAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>,
     })
 }
 
-async function handleReplay(): Promise<void> {
+async function handleReplay<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>): Promise<void> {
     let cursor: string = '';
     console.log('REPLAY')
     while (true) {
+
         const nextActionOrNull = await getNextAction(db.runTransaction(fsDb), cursor);
         if (nextActionOrNull === null) {
             break;
         }
         const [actionId, savedAction] = nextActionOrNull;
-        const annos = await db.runTransaction(fsDb)(db => readables.getOption(openAll(db)["ANNOTATIONS,1.1.1"], [actionId]));
+        const annos = await db.runTransaction(fsDb)(db => {
+            const annotationsTable = db.open({
+                schema: [`annotations-${impl.id}`],
+                validator: impl.validateAnnotation,
+            })
+
+            return readables.getOption(annotationsTable, [actionId])
+        });
         await option.from(annos).split({
             async onSome(annos): Promise<void> {
                 console.log(`CHECK ${actionId}`)
 
-                await checkAction(REVISION, actionId, savedAction, annos)
+                await checkAction(impl, actionId, savedAction, annos)
             },
             async onNone(): Promise<void> {
                 console.log(`REPLAY ${actionId}`)
 
-                await replayAction(REVISION, actionId, savedAction)
+                await replayAction(impl, actionId, savedAction)
             }
         })
 
@@ -310,7 +319,7 @@ function getNextAction(tx: db.TxRunner, startAfter: string): Promise<([string, S
 
 app.options('/action', cors())
 app.post('/action', cors(), function(req: Request<Dictionary<string>>, res, next) {
-    doAction(REVISION, validateSchema('AnyAction')(req.body)).then((resp) => {
+    doAction(REVISION1_1_1, validateSchema('AnyAction')(req.body)).then((resp) => {
         if (resp.data.status === 'err') {
             res.status(resp.data.error.status_code)
             res.json(resp)
@@ -354,7 +363,7 @@ function batch(): Router {
     const res = Router()
 
     res.post('/replay', function(_req: Request<{}>, res, next) {
-        handleReplay().then(result => {
+        handleReplay(REVISION1_1_1).then(result => {
             res.status(200)
             res.json(result)
         }).catch(next)

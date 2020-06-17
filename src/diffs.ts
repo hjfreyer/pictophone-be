@@ -46,6 +46,39 @@ export function newDiff<T>(key: Key, oldValue: util.Defaultable<T>, newValue: ut
     throw new Error("unreachable")
 }
 
+export function newDiff2<T>(key: Key, oldValue: util.Option<T>, newValue: util.Option<T>): Diffs<T> {
+    if (!oldValue.data.some && !newValue.data.some) {
+        return from([]);
+    }
+    if (!oldValue.data.some && newValue.data.some) {
+        return from([{
+            key,
+            kind: 'add',
+            value: newValue.data.value,
+        }])
+    }
+    if (oldValue.data.some && !newValue.data.some) {
+        return from([{
+            key,
+            kind: 'delete',
+            value: oldValue.data.value,
+        }])
+    }
+    if (oldValue.data.some && newValue.data.some) {
+        if (deepEqual(oldValue, newValue, { strict: true })) {
+            return from([])
+        } else {
+            return from([{
+                key,
+                kind: 'replace',
+                oldValue: oldValue.data.value,
+                newValue: newValue.data.value,
+            }])
+        }
+    }
+    throw new Error("unreachable")
+}
+
 export function from<T>(diffs: Iterable<Diff<T>>): Diffs<T> {
     return new Diffs(Array.from(diffs))
 }

@@ -10,7 +10,7 @@ import { Item, item, Key } from '../interfaces';
 import * as model1_0 from '../model/1.0';
 import { validate as validate1_0 } from '../model/1.0.validator';
 import * as model1_1 from '../model/1.1';
-import {Error, Game, Action, MakeMoveAction} from '../model/1.1.1';
+import { Error, Game, Action, MakeMoveAction } from '../model/1.1.1';
 import { validate } from '../model/1.1.1.validator';
 import { validate as validate1_1 } from '../model/1.1.validator';
 import { AnyAction } from '../schema';
