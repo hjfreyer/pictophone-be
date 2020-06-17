@@ -164,13 +164,10 @@ export const Schema = {
             ],
             "properties": {
                 "facets": {
-                    "$ref": "#/definitions/Facets"
+                    "$ref": "#/definitions/Record<string,OptionData<Game>>"
                 },
                 "parents": {
-                    "items": {
-                        "$ref": "#/definitions/Item<Reference>"
-                    },
-                    "type": "array"
+                    "$ref": "#/definitions/Record<string,Reference>"
                 }
             },
             "required": [
@@ -528,26 +525,6 @@ export const Schema = {
             ],
             "type": "object"
         },
-        "Item<Reference>": {
-            "defaultProperties": [
-            ],
-            "properties": {
-                "key": {
-                    "items": {
-                        "type": "string"
-                    },
-                    "type": "array"
-                },
-                "value": {
-                    "$ref": "#/definitions/Reference"
-                }
-            },
-            "required": [
-                "key",
-                "value"
-            ],
-            "type": "object"
-        },
         "JoinGameAction": {
             "defaultProperties": [
             ],
@@ -669,17 +646,16 @@ export const Schema = {
             ],
             "type": "object"
         },
-        "Reference": {
+        "Record<string,OptionData<Game>>": {
             "defaultProperties": [
             ],
-            "properties": {
-                "actionId": {
-                    "type": "string"
-                }
-            },
-            "required": [
-                "actionId"
+            "description": "Construct a type with a set of properties K of type T",
+            "type": "object"
+        },
+        "Record<string,Reference>": {
+            "defaultProperties": [
             ],
+            "description": "Construct a type with a set of properties K of type T",
             "type": "object"
         },
         "StartGameAction": {

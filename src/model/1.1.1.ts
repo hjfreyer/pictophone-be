@@ -141,8 +141,8 @@ export interface Facets {
 }
 
 export interface Annotations {
-    parents: Item<Reference>[]
-    facets: Facets
+    parents: Record<string, Reference>
+    facets: Record<string, OptionData<Game>>
 }
 
 

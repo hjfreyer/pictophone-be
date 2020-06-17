@@ -2,6 +2,8 @@
 import * as ix from "ix/iterable";
 import * as ixop from "ix/iterable/operators";
 import { Diff, Item, Key } from './interfaces';
+import * as util from './util';
+import deepEqual from "deep-equal";
 
 export class Diffs<T> {
     constructor(public diffs: Diff<T>[]) { }
@@ -9,6 +11,39 @@ export class Diffs<T> {
     map<O>(mapper: Mapper<T, O>): Diffs<O> {
         return from(ix.from(this.diffs).pipe(ixop.flatMap(d => ix.from(singleMap(mapper, d)))))
     }
+}
+
+export function newDiff<T>(key: Key, oldValue: util.Defaultable<T>, newValue: util.Defaultable<T>): Diff<T>[] {
+    if (oldValue.is_default && newValue.is_default) {
+        return [];
+    }
+    if (oldValue.is_default && !newValue.is_default) {
+        return [{
+            key,
+            kind: 'add',
+            value: newValue.value,
+        }]
+    }
+    if (!oldValue.is_default && newValue.is_default) {
+        return [{
+            key,
+            kind: 'delete',
+            value: oldValue.value,
+        }]
+    }
+    if (!oldValue.is_default && !newValue.is_default) {
+        if (deepEqual(oldValue, newValue, { strict: true })) {
+            return []
+        } else {
+            return [{
+                key,
+                kind: 'replace',
+                oldValue: oldValue.value,
+                newValue: newValue.value,
+            }]
+        }
+    }
+    throw new Error("unreachable")
 }
 
 export function from<T>(diffs: Iterable<Diff<T>>): Diffs<T> {

@@ -12,3 +12,4 @@ genFile () {
 for f in $(find src/model/ -type f|grep -v "validator\|index"); do
     genFile $f &
 done
+wait

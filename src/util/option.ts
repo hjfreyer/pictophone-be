@@ -12,6 +12,14 @@ export interface Option<T> {
     data: OptionData<T>
 }
 
+export function of<T>(t: T | null | undefined): OptionView<T> {
+    if (t === null || t === undefined) {
+        return none()
+    } else {
+        return some(t)
+    }
+}
+
 export function from<T>(o: Option<T>): OptionView<T> {
     return new OptionView(o)
 }

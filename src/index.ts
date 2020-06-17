@@ -27,6 +27,9 @@ import {
 import { validate as validateSchema } from './schema/interfaces.validator'
 import * as util from './util'
 import { Defaultable, defaultable, Option, option, Result, result } from './util'
+import { OptionData } from './util/option'
+import { THING } from './logic/1.1.1'
+import * as fw from './framework';
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -44,18 +47,13 @@ app.listen(port, function() {
     console.log(`Example app listening on port ${port}!`)
 })
 
-interface Inputs2 {
-    getGame(label: string[]): Promise<Option<state1_1_1.Game>>
-}
-
-
-export const VALIDATORS = {
+const VALIDATORS = {
     '1.0': validate1_0,
     '1.1': validate1_1,
     '1.1.1': validate1_1_1,
 }
 
-export type Tables = {
+type Tables = {
     "ACTIONS": db.Table<SavedAction>
     "ANNOTATIONS,1.1.1": db.Table<state1_1_1.Annotations>
     "LABELS,1.1.1,games": db.Table<Reference>
@@ -65,11 +63,7 @@ export type Tables = {
     "EXP,1.1,gamesByPlayer": db.Table<import('./model/1.1').PlayerGame>
 }
 
-export interface CollectionImpl {
-
-}
-
-export function openAll(db: db.Database): Tables {
+function openAll(db: db.Database): Tables {
     return {
         "ACTIONS": db.open({
             schema: ['actions'],
@@ -80,7 +74,7 @@ export function openAll(db: db.Database): Tables {
             validator: VALIDATORS['1.1.1']('Annotations')
         }),
         "LABELS,1.1.1,games": db.open({
-            schema: ['games-games-1.1.1'],
+            schema: ['labels-1.1.1'],
             validator: validateSchema('Reference')
         }),
 
@@ -95,167 +89,126 @@ export function openAll(db: db.Database): Tables {
     }
 }
 
-interface IntegrationResult<TResult, TFacets> {
-    result: TResult
-    facets: TFacets
-}
-
-type IntegrationResult1_1_1 =
-    IntegrationResult<Result<null, state1_1_1.Error>, state1_1_1.Facets>;
-
-interface SideEffects {
-    gamesByPlayer1_0: Change<model1_0.PlayerGame>[]
-    gamesByPlayer1_1: Change<model1_1.PlayerGame>[]
-}
-
-async function integrator(action: AnyAction, inputs: Inputs2): Promise<IntegrationResult1_1_1> {
-    const oldGame = option.from(await inputs.getGame([action.gameId])).withDefault(defaultGame1_1);
-
-    const maybeNewGameOrError = integrate1_1_1Helper(convertAction(action), oldGame);
-    return result.from(maybeNewGameOrError).split({
-        onErr: (err): IntegrationResult1_1_1 => ({
-            facets: { games: [] },
-            result: result.err(err),
-        }),
-        onOk: (maybeNewGame) => {
-            return option.from(maybeNewGame).split({
-                onNone: (): IntegrationResult1_1_1 => ({
-                    facets: { games: [] },
-                    result: result.ok(null)
-                }),
-                onSome(newGame): IntegrationResult1_1_1 {
-                    return {
-                        facets: {
-                            games: [{ key: [action.gameId], value: newGame }]
-                        },
-                        result: result.ok(null)
-                    }
-                }
-            })
-        }
-    })
-}
-
-async function activateFacet(db: db.Database, key: Key, maybeOldGame: Option<state1_1_1.Game>, newGame: state1_1_1.Game): Promise<void> {
-    const oldGame = option.from(maybeOldGame).withDefault(defaultGame1_1);
-
-    const gameDiff = newDiff(key, oldGame, defaultable.of(newGame, defaultGame1_1()));
-
-    const gamesByPlayer1_0Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_1to1_0).diffs;
-    const gamesByPlayer1_1Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_1).diffs;
-
-    const ts = openAll(db);
-    applyChangesSimple(ts["EXP,1.0,gamesByPlayer"], gamesByPlayer1_0Diffs.map(diffToChange));
-    applyChangesSimple(ts["EXP,1.1,gamesByPlayer"], gamesByPlayer1_1Diffs.map(diffToChange))
-}
-
-type FetchedFacet = Item<{
+type FetchedFacet<TFacet> = {
+    label: string,
     actionId: string,
-    value: Option<state1_1_1.Game>
-}>
+    value: Option<TFacet>
+}
 
-function doAction(action: AnyAction): Promise<Result<null, AnyError>> {
-    return db.runTransaction(fsDb)(async (db: db.Database): Promise<Result<null, AnyError>> => {
-        const fetched: FetchedFacet[] = []
+function doAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>, action: AnyAction): Promise<TResult> {
+    return db.runTransaction(fsDb)(async (db: db.Database): Promise<TResult> => {
+        const fetched: FetchedFacet<TFacet>[] = []
 
-        const ts = openAll(db);
-        const inputs: Inputs2 = {
-            async getGame(label: string[]): Promise<Option<state1_1_1.Game>> {
-                const maybeRef = await readables.getOption(ts["LABELS,1.1.1,games"], label);
+        const annotationsTable = db.open({
+            schema: [`annotations-${impl.id}`],
+            validator: impl.validateAnnotation,
+        })
+
+        const labelsTable = db.open({
+            schema: [`labels-${impl.id}`],
+            validator: validateSchema('Reference')
+        })
+
+        const inputs: fw.Input<TFacet> = {
+            async getFacet(label: string): Promise<Option<TFacet>> {
+                const maybeRef = await readables.getOption(labelsTable, [label]);
                 return await option.from(maybeRef).andThenAsync(async ref => {
-                    const annos = option.from(await readables.getOption(ts["ANNOTATIONS,1.1.1"], [ref.actionId])).unwrap();
-                    const maybeGame = findByKey(annos.facets.games, label);
+                    const annos = option.from(await readables.getOption(annotationsTable, [ref.actionId])).unwrap();
+                    const value = option.fromData(option.of(annos.facets[label]).unwrap());
 
                     fetched.push({
-                        key: label,
-                        value: { actionId: ref.actionId, value: maybeGame },
+                        label,
+                        actionId: ref.actionId,
+                        value,
                     })
-                    return maybeGame
+                    return value
                 })
             }
         }
 
-        const intResult = await integrator(action, inputs);
+        const { result, facets } = await impl.integrate(action, inputs);
 
-        const keyToParent: Item<Reference>[] = ix.toArray(ix.from(fetched).pipe(
-            ixop.map(({ key, value: { actionId } }): Item<Reference> => ({ key, value: { actionId } })),
-            ixop.orderBy(({ key }) => key, util.lexCompare),
-        ))
+        const labelToParent: Record<string, Reference> = {};
+        for (const { label, actionId } of fetched) {
+            labelToParent[label] = { actionId };
+        }
         const parentList: string[] = ix.toArray(ix.from(fetched).pipe(
-            ixop.map(({ value: { actionId } }) => actionId),
+            ixop.map(({ actionId }) => actionId),
             ixop.orderBy(actionId => actionId),
             ixop.distinct(),
         ))
 
         const savedAction: SavedAction = { parents: parentList, action };
         const actionId = getActionId(savedAction);
-        const ref: Reference = { actionId }
 
-        ts["ACTIONS"].set([actionId], savedAction)
-        ts["ANNOTATIONS,1.1.1"].set([actionId], { parents: keyToParent, facets: intResult.facets })
-        for (const { key, value } of intResult.facets.games) {
-            ts["LABELS,1.1.1,games"].set(key, ref)
-            const maybeParentFacet = option.from(findByKey(fetched, key))
-            const maybeOldGame = maybeParentFacet.andThen(({ value }) => value);
-            await activateFacet(db, key, maybeOldGame, value)
+        openAll(db)["ACTIONS"].set([actionId], savedAction)
+        annotationsTable.set([actionId], { parents: labelToParent, facets })
+        for (const label in facets) {
+            labelsTable.set([label], { actionId });
+            const maybeParentFacet = option.from(find(fetched, ({ label: l }) => l === label))
+            const maybeOldValue = maybeParentFacet.andThen(({ value }) => value);
+            await impl.activateFacet(db, label, maybeOldValue.data, facets[label])
         }
 
-        return intResult.result;
+        return result;
     })
 }
 
-function replayAction(actionId: string, action: SavedAction): Promise<void> {
+function replayAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>, actionId: string, action: SavedAction): Promise<void> {
     return db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
-        const ts = openAll(db);
+        const fetched: FetchedFacet<TFacet>[] = []
 
-        const fetched: FetchedFacet[] = []
+        const annotationsTable = db.open({
+            schema: [`annotations-${impl.id}`],
+            validator: impl.validateAnnotation,
+        })
 
-        const inputs: Inputs2 = {
-            async getGame(label: string[]): Promise<Option<state1_1_1.Game>> {
-                const maybeRef = await readables.getOption(ts["LABELS,1.1.1,games"], label);
+        const labelsTable = db.open({
+            schema: [`labels-${impl.id}`],
+            validator: validateSchema('Reference')
+        })
+
+        const inputs: fw.Input<TFacet> = {
+            async getFacet(label: string): Promise<Option<TFacet>> {
+                const maybeRef = await readables.getOption(labelsTable, [label]);
                 return await option.from(maybeRef).andThenAsync(async ref => {
-                    const annos = option.from(await readables.getOption(ts["ANNOTATIONS,1.1.1"], [ref.actionId])).unwrap();
-
-                    const maybeGame = findByKey(annos.facets.games, label);
+                    const annos = option.from(await readables.getOption(annotationsTable, [ref.actionId])).unwrap();
+                    const value = option.fromData(option.of(annos.facets[label]).unwrap());
 
                     fetched.push({
-                        key: label,
-                        value: { actionId: ref.actionId, value: maybeGame },
+                        label,
+                        actionId: ref.actionId,
+                        value,
                     })
-                    return maybeGame;
+                    return value
                 })
             }
         }
 
-        const intResult = await integrator(action.action, inputs);
+        const { facets } = await impl.integrate(action.action, inputs);
 
-        const keyToParent: Item<Reference>[] = ix.toArray(ix.from(fetched).pipe(
-            ixop.map(({ key, value: { actionId } }): Item<Reference> => ({ key, value: { actionId } })),
-            ixop.orderBy(({ key }) => key, util.lexCompare),
-        ))
-        const parentList: string[] = ix.toArray(ix.from(fetched).pipe(
-            ixop.map(({ value: { actionId } }) => actionId),
-            ixop.orderBy(actionId => actionId),
-            ixop.distinct(),
-        ))
+        const labelToParent: Record<string, Reference> = {};
+        for (const { label, actionId } of fetched) {
+            labelToParent[label] = { actionId };
+        }
+        for (const f of fetched) {
+            if (action.parents.indexOf(f.actionId) === -1) {
+                throw new Error("Illegal parent fetch!");
+            }
+        }
 
-        const ref: Reference = { actionId }
-
-        ts["ANNOTATIONS,1.1.1"].set([actionId], { parents: keyToParent, facets: intResult.facets })
-        for (const { key, value } of intResult.facets.games) {
-            ts["LABELS,1.1.1,games"].set(key, ref)
-            const maybeParentFacet = option.from(findByKey(fetched, key))
-            const maybeOldGame = maybeParentFacet.andThen(({ value }) => value);
-            await activateFacet(db, key, maybeOldGame, value)
+        annotationsTable.set([actionId], { parents: labelToParent, facets })
+        for (const label in facets) {
+            labelsTable.set([label], { actionId });
+            const maybeParentFacet = option.from(find(fetched, ({ label: l }) => l === label))
+            const maybeOldValue = maybeParentFacet.andThen(({ value }) => value);
+            await impl.activateFacet(db, label, maybeOldValue.data, facets[label])
         }
     })
 }
 
-function findByKey<T>(items: Iterable<Item<T>>, target_key: Key): Option<T> {
-    const first = ix.first(ix.from(items).pipe(
-        ixop.filter(({ key }) => util.lexCompare(target_key, key) === 0),
-        ixop.map(({ value }) => value)
-    ))
+function find<T>(items: Iterable<T>, pred: (t: T) => boolean): Option<T> {
+    const first = ix.first(ix.from(items).pipe(ixop.filter(pred)));
 
     if (first === undefined) {
         return option.none();
@@ -264,44 +217,50 @@ function findByKey<T>(items: Iterable<Item<T>>, target_key: Key): Option<T> {
     }
 }
 
-function checkAction(actionId: string, action: SavedAction, annotations: state1_1_1.Annotations): Promise<void> {
+function checkAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>,
+    actionId: string, action: SavedAction, annotations: fw.Annotation<TFacet>): Promise<void> {
     return db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
-        const ts = openAll(db);
 
-        const fetched: FetchedFacet[] = []
+        const annotationsTable = db.open({
+            schema: [`annotations-${impl.id}`],
+            validator: impl.validateAnnotation,
+        })
 
-        const inputs: Inputs2 = {
-            async getGame(label: string[]): Promise<Option<state1_1_1.Game>> {
-                const maybeParent = option.from(findByKey(annotations.parents, label));
+
+        const fetched: FetchedFacet<TFacet>[] = []
+        const inputs: fw.Input<TFacet> = {
+            async getFacet(label: string): Promise<Option<TFacet>> {
+                const maybeParent = option.of(annotations.parents[label]);
 
                 return await maybeParent.andThenAsync(async ref => {
-                    const annos = option.from(await readables.getOption(ts["ANNOTATIONS,1.1.1"], [ref.actionId])).unwrap();
-                    const maybeGame = option.from(findByKey(annos.facets.games, label));
+                    const annos = option.from(await readables.getOption(annotationsTable, [ref.actionId])).unwrap();
+                    const value = option.fromData(option.of(annos.facets[label]).unwrap());
 
                     fetched.push({
-                        key: label,
-                        value: { actionId: ref.actionId, value: maybeGame },
+                        label,
+                        actionId: ref.actionId,
+                        value,
                     })
-
-                    return maybeGame
+                    return value
                 })
             }
         }
 
-        const intResult = await integrator(action.action, inputs);
+        const { facets } = await impl.integrate(action.action, inputs);
 
-        const keyToParent: Item<Reference>[] = ix.toArray(ix.from(fetched).pipe(
-            ixop.map(({ key, value: { actionId } }): Item<Reference> => ({ key, value: { actionId } })),
-            ixop.orderBy(({ key }) => key, util.lexCompare),
-        ))
+        const labelToParent: Record<string, Reference> = {};
+        for (const { label, actionId } of fetched) {
+            labelToParent[label] = { actionId };
+        }
         const parentList: string[] = ix.toArray(ix.from(fetched).pipe(
-            ixop.map(({ value: { actionId } }) => actionId),
+            ixop.map(({ actionId }) => actionId),
             ixop.orderBy(actionId => actionId),
             ixop.distinct(),
         ))
-        const actualAnnotations: state1_1_1.Annotations = {
-            parents: keyToParent,
-            facets: intResult.facets,
+
+        const actualAnnotations: fw.Annotation<TFacet> = {
+            parents: labelToParent,
+            facets,
         }
 
         assert.deepEqual(parentList, action.parents);
@@ -323,12 +282,12 @@ async function handleReplay(): Promise<void> {
             async onSome(annos): Promise<void> {
                 console.log(`CHECK ${actionId}`)
 
-                await checkAction(actionId, savedAction, annos)
+                await checkAction(THING, actionId, savedAction, annos)
             },
             async onNone(): Promise<void> {
                 console.log(`REPLAY ${actionId}`)
 
-                await replayAction(actionId, savedAction)
+                await replayAction(THING, actionId, savedAction)
             }
         })
 
@@ -337,7 +296,7 @@ async function handleReplay(): Promise<void> {
     console.log('DONE')
 }
 
-export function getNextAction(tx: db.TxRunner, startAfter: string): Promise<([string, SavedAction] | null)> {
+function getNextAction(tx: db.TxRunner, startAfter: string): Promise<([string, SavedAction] | null)> {
     return tx(async (db: db.Database): Promise<([string, SavedAction] | null)> => {
         const actions = openAll(db)["ACTIONS"];
         const first = await ixa.first(ixa.from(readables.readAllAfter(actions, [startAfter])));
@@ -349,180 +308,9 @@ export function getNextAction(tx: db.TxRunner, startAfter: string): Promise<([st
     });
 }
 
-export function newDiff<T>(key: Key, oldValue: util.Defaultable<T>, newValue: util.Defaultable<T>): Diff<T>[] {
-    if (oldValue.is_default && newValue.is_default) {
-        return [];
-    }
-    if (oldValue.is_default && !newValue.is_default) {
-        return [{
-            key,
-            kind: 'add',
-            value: newValue.value,
-        }]
-    }
-    if (!oldValue.is_default && newValue.is_default) {
-        return [{
-            key,
-            kind: 'delete',
-            value: oldValue.value,
-        }]
-    }
-    if (!oldValue.is_default && !newValue.is_default) {
-        if (deepEqual(oldValue, newValue, { strict: true })) {
-            return []
-        } else {
-            return [{
-                key,
-                kind: 'replace',
-                oldValue: oldValue.value,
-                newValue: newValue.value,
-            }]
-        }
-    }
-    throw new Error("unreachable")
-}
-
-// async function integrate1_1_0(action: AnyAction, games: Readable<state1_1_1.Game>): Promise<util.Result<Diff<state1_1_1.Game>[], AnyError>> {
-//     const gameOrDefault = await readables.getOrDefault(games, [action.gameId], defaultGame1_1());
-
-//     const gameResult = integrate1_1_0Helper(upgradeAction(action), gameOrDefault);
-//     if (gameResult.status !== 'ok') {
-//         return gameResult
-//     }
-//     return result.ok(newDiff([action.gameId], gameOrDefault, gameResult.value));
-// }
-
-function gameToPlayerGames1_1([gameId]: Key, game: state1_1_1.Game): Iterable<Item<model1_1.PlayerGame>> {
-    return ix.from(game.players).pipe(
-        ixop.map(({ id }): Item<model1_1.PlayerGame> =>
-            item([id, gameId], getPlayerGameExport1_1(game, id)))
-    )
-}
-
-function getPlayerGameExport1_1(game: state1_1_1.Game, playerId: string): model1_1.PlayerGame {
-    if (game.state === 'UNSTARTED') {
-        const sanitizedPlayers: model1_1.ExportedPlayer[] = game.players.map(p => ({
-            id: p.id,
-            displayName: p.displayName,
-        }))
-        return {
-            state: 'UNSTARTED',
-            players: sanitizedPlayers,
-        }
-    }
-
-    // Repeated because TS isn't smart enough to understand this code works whether 
-    // the game is started or not.
-    const sanitizedPlayers: model1_1.ExportedPlayer[] = game.players.map(p => ({
-        id: p.id,
-        displayName: p.displayName,
-    }))
-
-    const numPlayers = game.players.length
-    const roundNum = Math.min(...game.players.map(p => p.submissions.length))
-
-    // Game is over.
-    if (roundNum === numPlayers) {
-        const series: model1_0.ExportedSeries[] = game.players.map(() => ({ entries: [] }))
-        for (let rIdx = 0; rIdx < numPlayers; rIdx++) {
-            for (let pIdx = 0; pIdx < numPlayers; pIdx++) {
-                series[(pIdx + rIdx) % numPlayers].entries.push({
-                    playerId: game.players[pIdx].id,
-                    submission: game.players[pIdx].submissions[rIdx]
-                })
-            }
-        }
-
-        return {
-            state: 'GAME_OVER',
-            players: sanitizedPlayers,
-            series,
-        }
-    }
-
-    const player = findById(game.players, playerId)!;
-    if (player.submissions.length === 0) {
-        return {
-            state: 'FIRST_PROMPT',
-            players: sanitizedPlayers,
-        }
-    }
-
-    if (player.submissions.length === roundNum) {
-        const playerIdx = game.players.findIndex(p => p.id === playerId)
-        if (playerIdx === -1) {
-            throw new Error('baad')
-        }
-        const nextPlayerIdx = (playerIdx + 1) % game.players.length
-        return {
-            state: 'RESPOND_TO_PROMPT',
-            players: sanitizedPlayers,
-            prompt: game.players[nextPlayerIdx].submissions[roundNum - 1]
-        }
-    }
-
-    return {
-        state: 'WAITING_FOR_PROMPT',
-        players: sanitizedPlayers,
-    }
-}
-
-
-function gameToPlayerGames1_1to1_0(key: Key, value: state1_1_1.Game): Iterable<Item<model1_0.PlayerGame>> {
-    return ix.from(gameToPlayerGames1_1(key, value)).pipe(
-        ixop.map(({ key, value: pg }: Item<model1_1.PlayerGame>): Item<model1_0.PlayerGame> => {
-            return item(key, {
-                ...pg,
-                players: pg.players.map(p => p.id)
-            })
-        }),
-    );
-}
-
-
-// const FRAMEWORK = new Framework(db.runTransaction(fsDb), {
-//     '1.1.1': async (action: AnyAction, inputs: SideInputs['1.1.1']): Promise<Outputs['1.1.1']> => {
-//         const gamesResult = await integrate1_1_0(action, inputs.games);
-//         if (gamesResult.status !== 'ok') {
-//             return {
-//                 private: {
-//                     games: [],
-//                 },
-//                 '1.0': {
-//                     error: gamesResult.error,
-//                     tables: {
-//                     gamesByPlayer: [],
-//                     }
-//                 },
-//                 '1.1': {
-//                     error: gamesResult.error,
-// tables:{                    gamesByPlayer: [],
-//        }         }
-//             }
-//         }
-
-//         const gamesByPlayer1_1 = collections.map(collections.fromDiffs(gamesResult.value), gameToPlayerGames1_1);
-//         const gamesByPlayer1_0 = collections.map(collections.fromDiffs(gamesResult.value), gameToPlayerGames1_1to1_0);
-
-//         return {
-//             private:{
-//                 games: gamesResult.value,
-//             },
-//             '1.0': {
-//                 error: null,
-// tables:{                 gamesByPlayer: await collections.toDiffs(gamesByPlayer1_0),
-//                }   },
-//             '1.1': {
-//                 error: null,
-//                 tables:{ gamesByPlayer: await collections.toDiffs(gamesByPlayer1_1),
-//                         }            }
-//         }
-//     },
-// });
-
 app.options('/action', cors())
 app.post('/action', cors(), function(req: Request<Dictionary<string>>, res, next) {
-    doAction(validateSchema('AnyAction')(req.body)).then((resp) => {
+    doAction(THING, validateSchema('AnyAction')(req.body)).then((resp) => {
         if (resp.data.status === 'err') {
             res.status(resp.data.error.status_code)
             res.json(resp)
@@ -534,173 +322,6 @@ app.post('/action', cors(), function(req: Request<Dictionary<string>>, res, next
 })
 
 app.use('/batch', batch())
-
-function defaultGame1_1(): state1_1_1.Game {
-    return {
-        state: 'UNSTARTED',
-        players: [],
-    }
-}
-
-function convertAction1_0(a: model1_0.Action): state1_1_1.Action {
-    switch (a.kind) {
-        case 'join_game':
-            return {
-                kind: 'join_game',
-                gameId: a.gameId,
-                playerId: a.playerId,
-                playerDisplayName: a.playerId,
-            }
-        case 'start_game':
-        case 'make_move':
-            return {
-                ...a,
-            }
-    }
-}
-
-// function upgradeAction1_0(a: model1_0.Action): state1_1_1.Action {
-//     switch (a.kind) {
-//         case 'join_game':
-//             return {
-//                 version: '1.1',
-//                 kind: 'join_game',
-//                 gameId: a.gameId,
-//                 playerId: a.playerId,
-//                 playerDisplayName: a.playerId,
-//             }
-//         case 'start_game':
-//         case 'make_move':
-//             return {
-//                 ...a,
-//                 version: '1.1'
-//             }
-//     }
-// }
-function convertAction(a: AnyAction): state1_1_1.Action {
-    switch (a.version) {
-        case '1.0':
-            return convertAction1_0(a)
-        case '1.1':
-            return a
-    }
-}
-
-
-function integrate1_1_1Helper(a: state1_1_1.Action, gameOrDefault: Defaultable<state1_1_1.Game>):
-    util.Result<Option<state1_1_1.Game>, state1_1_1.Error> {
-    const game = gameOrDefault.value;
-    switch (a.kind) {
-        case 'join_game':
-            if (game.state !== 'UNSTARTED') {
-                return result.err({
-                    version: '1.0',
-                    status: 'GAME_ALREADY_STARTED',
-                    status_code: 400,
-                    gameId: a.gameId,
-                })
-            }
-
-            if (game.players.some(p => p.id === a.playerId)) {
-                return result.ok(option.none())
-            }
-            return result.ok(option.some({
-                ...game,
-                players: [...game.players, {
-                    id: a.playerId,
-                    displayName: a.playerDisplayName,
-                }]
-            }));
-
-        case 'start_game':
-            if (game.state !== 'UNSTARTED') {
-                return result.ok(option.none())
-            }
-            return result.ok(option.some({
-                state: 'STARTED',
-                players: game.players.map(p => ({
-                    ...p,
-                    submissions: [],
-                })),
-            }))
-        case 'make_move':
-            return makeMove1_1(gameOrDefault, a)
-    }
-}
-
-function findById<T extends { id: string }>(ts: T[], id: string): T | null {
-    return ts.find(t => t.id === id) || null
-}
-
-function makeMove1_1(gameOrDefault: util.Defaultable<state1_1_1.Game>, action: state1_1_1.MakeMoveAction): util.Result<
-    Option<state1_1_1.Game>, state1_1_1.Error> {
-    const game = gameOrDefault.value;
-    const playerId = action.playerId
-
-    if (game.state !== 'STARTED') {
-        return result.err({
-            version: '1.0',
-            status: 'GAME_NOT_STARTED',
-            status_code: 400,
-            gameId: action.gameId,
-        })
-    }
-
-    const player = findById(game.players, playerId)
-
-    if (player === null) {
-        return result.err({
-            version: '1.0',
-            status: 'PLAYER_NOT_IN_GAME',
-            status_code: 403,
-            gameId: action.gameId,
-            playerId: action.playerId,
-        })
-    }
-
-    const roundNum = Math.min(...game.players.map(p => p.submissions.length))
-    if (player.submissions.length !== roundNum) {
-        return result.err({
-            version: '1.0',
-            status: 'MOVE_PLAYED_OUT_OF_TURN',
-            status_code: 400,
-            gameId: action.gameId,
-            playerId: action.playerId,
-        })
-    }
-
-    if (roundNum === game.players.length) {
-        return result.err({
-            version: '1.0',
-            status: 'GAME_IS_OVER',
-            status_code: 400,
-            gameId: action.gameId,
-        })
-    }
-
-    if (roundNum % 2 === 0 && action.submission.kind === 'drawing') {
-        return result.err({
-            version: '1.0',
-            status: 'INCORRECT_SUBMISSION_KIND',
-            status_code: 400,
-            wanted: 'word',
-            got: 'drawing',
-        })
-    }
-    if (roundNum % 2 === 1 && action.submission.kind === 'word') {
-        return result.err({
-            version: '1.0',
-            status: 'INCORRECT_SUBMISSION_KIND',
-            status_code: 400,
-            wanted: 'word',
-            got: 'drawing',
-        })
-    }
-
-    return result.ok(option.some(produce(game, game => {
-        findById(game.players, playerId)!.submissions.push(action.submission)
-    })))
-}
 
 type DeleteCollectionRequest = {
     collectionId: string
@@ -751,7 +372,7 @@ function batch(): Router {
     //         res.json(result)
     //     }).catch(next)
     // })
-    res.post('/purge', function(req: Request<{}>, res, next) {
+    res.post('/purge', function(_req: Request<{}>, res, next) {
         handlePurge().then(result => {
             res.status(200)
             res.json(result)
@@ -767,7 +388,8 @@ function batch(): Router {
 
     return res
 }
-export async function deleteCollection(runner: db.TxRunner, collectionId: CollectionId): Promise<void> {
+
+async function deleteCollection(runner: db.TxRunner, collectionId: CollectionId): Promise<void> {
     await runner(async (db: db.Database): Promise<void> => {
         const ts = openAll(db);
         switch (collectionId) {
