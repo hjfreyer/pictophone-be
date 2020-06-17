@@ -136,7 +136,13 @@ export type State = {
     game: Game
 }
 
-export interface Annotations {
-    parents: Item<Reference>[]
+export interface Facets {
     games: Item<Game>[]
 }
+
+export interface Annotations {
+    parents: Item<Reference>[]
+    facets: Facets
+}
+
+

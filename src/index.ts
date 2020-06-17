@@ -45,7 +45,7 @@ app.listen(port, function() {
 })
 
 interface Inputs2 {
-    fetchByLabel(label: string[]): Promise<Option<[string, state1_1_1.Game]>>
+    getGame(label: string[]): Promise<Option<state1_1_1.Game>>
 }
 
 
@@ -95,58 +95,40 @@ export function openAll(db: db.Database): Tables {
     }
 }
 
-interface IntegrationResult {
-    annotations: state1_1_1.Annotations
-    result: Result<SideEffects, state1_1_1.Error>
+interface IntegrationResult<TResult, TFacets> {
+    result: TResult
+    facets: TFacets
 }
+
+type IntegrationResult1_1_1 =
+    IntegrationResult<Result<null, state1_1_1.Error>, state1_1_1.Facets>;
 
 interface SideEffects {
     gamesByPlayer1_0: Change<model1_0.PlayerGame>[]
     gamesByPlayer1_1: Change<model1_1.PlayerGame>[]
 }
 
+async function integrator(action: AnyAction, inputs: Inputs2): Promise<IntegrationResult1_1_1> {
+    const oldGame = option.from(await inputs.getGame([action.gameId])).withDefault(defaultGame1_1);
 
-async function integrator(action: AnyAction, inputs: Inputs2): Promise<IntegrationResult> {
-    const maybePrevAnnotation = option.from(await inputs.fetchByLabel([action.gameId]));
-    const parents: Item<Reference>[] = maybePrevAnnotation.split({
-        onSome: ([actionId,]) => [item([action.gameId], { actionId })],
-        onNone: () => [],
-    })
-
-    const oldGameOrDefault = maybePrevAnnotation
-        .map(([, oldGame]) => oldGame)
-        .withDefault(defaultGame1_1);
-
-    const maybeNewGameOrError = integrate1_1_1Helper(convertAction(action), oldGameOrDefault);
+    const maybeNewGameOrError = integrate1_1_1Helper(convertAction(action), oldGame);
     return result.from(maybeNewGameOrError).split({
-        onErr: (err): IntegrationResult => ({
-            annotations: { parents, games: [] },
-            result: result.err(err)
+        onErr: (err): IntegrationResult1_1_1 => ({
+            facets: { games: [] },
+            result: result.err(err),
         }),
-        onOk: (maybeNewGame): IntegrationResult => {
+        onOk: (maybeNewGame) => {
             return option.from(maybeNewGame).split({
-                onNone: (): IntegrationResult => ({
-                    annotations: { parents, games: [] },
-                    result: result.ok({
-                        gamesByPlayer1_0: [],
-                        gamesByPlayer1_1: []
-                    })
+                onNone: (): IntegrationResult1_1_1 => ({
+                    facets: { games: [] },
+                    result: result.ok(null)
                 }),
-                onSome(newGame): IntegrationResult {
-                    const gameDiff = newDiff([action.gameId], oldGameOrDefault, defaultable.of(newGame, defaultGame1_1()));
-
-                    const gamesByPlayer1_0Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_1to1_0).diffs;
-                    const gamesByPlayer1_1Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_1).diffs;
-
+                onSome(newGame): IntegrationResult1_1_1 {
                     return {
-                        annotations: {
-                            parents,
+                        facets: {
                             games: [{ key: [action.gameId], value: newGame }]
                         },
-                        result: result.ok({
-                            gamesByPlayer1_0: gamesByPlayer1_0Diffs.map(diffToChange),
-                            gamesByPlayer1_1: gamesByPlayer1_1Diffs.map(diffToChange),
-                        })
+                        result: result.ok(null)
                     }
                 }
             })
@@ -154,77 +136,118 @@ async function integrator(action: AnyAction, inputs: Inputs2): Promise<Integrati
     })
 }
 
-// function sideEffects(label: string[], res: Result<state1_1_1.State, state1_1_1.Error>): 
+async function activateFacet(db: db.Database, key: Key, maybeOldGame: Option<state1_1_1.Game>, newGame: state1_1_1.Game): Promise<void> {
+    const oldGame = option.from(maybeOldGame).withDefault(defaultGame1_1);
 
-function doAction(action: AnyAction): Promise<Result<{}, AnyError>> {
-    return db.runTransaction(fsDb)(async (db: db.Database): Promise<Result<{}, AnyError>> => {
+    const gameDiff = newDiff(key, oldGame, defaultable.of(newGame, defaultGame1_1()));
+
+    const gamesByPlayer1_0Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_1to1_0).diffs;
+    const gamesByPlayer1_1Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_1).diffs;
+
+    const ts = openAll(db);
+    applyChangesSimple(ts["EXP,1.0,gamesByPlayer"], gamesByPlayer1_0Diffs.map(diffToChange));
+    applyChangesSimple(ts["EXP,1.1,gamesByPlayer"], gamesByPlayer1_1Diffs.map(diffToChange))
+}
+
+type FetchedFacet = Item<{
+    actionId: string,
+    value: Option<state1_1_1.Game>
+}>
+
+function doAction(action: AnyAction): Promise<Result<null, AnyError>> {
+    return db.runTransaction(fsDb)(async (db: db.Database): Promise<Result<null, AnyError>> => {
+        const fetched: FetchedFacet[] = []
+
         const ts = openAll(db);
         const inputs: Inputs2 = {
-            async fetchByLabel(label: string[]): Promise<Option<[string, state1_1_1.Game]>> {
+            async getGame(label: string[]): Promise<Option<state1_1_1.Game>> {
                 const maybeRef = await readables.getOption(ts["LABELS,1.1.1,games"], label);
-                return await option.from(maybeRef).mapAsync(async ref => {
+                return await option.from(maybeRef).andThenAsync(async ref => {
                     const annos = option.from(await readables.getOption(ts["ANNOTATIONS,1.1.1"], [ref.actionId])).unwrap();
-                    const game = option.from(findByKey(annos.games, label)).unwrap();
-                    return [ref.actionId, game]
+                    const maybeGame = findByKey(annos.facets.games, label);
+
+                    fetched.push({
+                        key: label,
+                        value: { actionId: ref.actionId, value: maybeGame },
+                    })
+                    return maybeGame
                 })
             }
         }
 
         const intResult = await integrator(action, inputs);
-        const parents = ix.toArray(ix.from(intResult.annotations.parents).pipe(
-            ixop.map(({ value }) => value.actionId),
+
+        const keyToParent: Item<Reference>[] = ix.toArray(ix.from(fetched).pipe(
+            ixop.map(({ key, value: { actionId } }): Item<Reference> => ({ key, value: { actionId } })),
+            ixop.orderBy(({ key }) => key, util.lexCompare),
+        ))
+        const parentList: string[] = ix.toArray(ix.from(fetched).pipe(
+            ixop.map(({ value: { actionId } }) => actionId),
+            ixop.orderBy(actionId => actionId),
             ixop.distinct(),
-            ixop.orderBy(x => x),
-        ));
-        const savedAction: SavedAction = { parents, action };
+        ))
+
+        const savedAction: SavedAction = { parents: parentList, action };
         const actionId = getActionId(savedAction);
         const ref: Reference = { actionId }
 
         ts["ACTIONS"].set([actionId], savedAction)
-        ts["ANNOTATIONS,1.1.1"].set([actionId], intResult.annotations)
-        for (const { key } of intResult.annotations.games) {
+        ts["ANNOTATIONS,1.1.1"].set([actionId], { parents: keyToParent, facets: intResult.facets })
+        for (const { key, value } of intResult.facets.games) {
             ts["LABELS,1.1.1,games"].set(key, ref)
+            const maybeParentFacet = option.from(findByKey(fetched, key))
+            const maybeOldGame = maybeParentFacet.andThen(({ value }) => value);
+            await activateFacet(db, key, maybeOldGame, value)
         }
 
-        return result.from(intResult.result).map((sideEffects) => {
-            applyChangesSimple(ts["EXP,1.0,gamesByPlayer"], sideEffects.gamesByPlayer1_0)
-            applyChangesSimple(ts["EXP,1.1,gamesByPlayer"], sideEffects.gamesByPlayer1_1)
-
-            return {}
-        })
+        return intResult.result;
     })
 }
 
 function replayAction(actionId: string, action: SavedAction): Promise<void> {
     return db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
         const ts = openAll(db);
+
+        const fetched: FetchedFacet[] = []
+
         const inputs: Inputs2 = {
-            async fetchByLabel(label: string[]): Promise<Option<[string, state1_1_1.Game]>> {
+            async getGame(label: string[]): Promise<Option<state1_1_1.Game>> {
                 const maybeRef = await readables.getOption(ts["LABELS,1.1.1,games"], label);
-                return await option.from(maybeRef).mapAsync(async ref => {
-                    if (action.parents.indexOf(ref.actionId) === -1) {
-                        throw new Error(`Illegal parent fetch`)
-                    }
+                return await option.from(maybeRef).andThenAsync(async ref => {
                     const annos = option.from(await readables.getOption(ts["ANNOTATIONS,1.1.1"], [ref.actionId])).unwrap();
 
-                    const game = option.from(findByKey(annos.games, label)).unwrap();
-                    return [ref.actionId, game]
+                    const maybeGame = findByKey(annos.facets.games, label);
+
+                    fetched.push({
+                        key: label,
+                        value: { actionId: ref.actionId, value: maybeGame },
+                    })
+                    return maybeGame;
                 })
             }
         }
 
         const intResult = await integrator(action.action, inputs);
+
+        const keyToParent: Item<Reference>[] = ix.toArray(ix.from(fetched).pipe(
+            ixop.map(({ key, value: { actionId } }): Item<Reference> => ({ key, value: { actionId } })),
+            ixop.orderBy(({ key }) => key, util.lexCompare),
+        ))
+        const parentList: string[] = ix.toArray(ix.from(fetched).pipe(
+            ixop.map(({ value: { actionId } }) => actionId),
+            ixop.orderBy(actionId => actionId),
+            ixop.distinct(),
+        ))
+
         const ref: Reference = { actionId }
 
-        ts["ANNOTATIONS,1.1.1"].set([actionId], intResult.annotations)
-        for (const { key } of intResult.annotations.games) {
+        ts["ANNOTATIONS,1.1.1"].set([actionId], { parents: keyToParent, facets: intResult.facets })
+        for (const { key, value } of intResult.facets.games) {
             ts["LABELS,1.1.1,games"].set(key, ref)
+            const maybeParentFacet = option.from(findByKey(fetched, key))
+            const maybeOldGame = maybeParentFacet.andThen(({ value }) => value);
+            await activateFacet(db, key, maybeOldGame, value)
         }
-
-        result.from(intResult.result).map((sideEffects) => {
-            applyChangesSimple(ts["EXP,1.0,gamesByPlayer"], sideEffects.gamesByPlayer1_0)
-            applyChangesSimple(ts["EXP,1.1,gamesByPlayer"], sideEffects.gamesByPlayer1_1)
-        })
     })
 }
 
@@ -244,26 +267,45 @@ function findByKey<T>(items: Iterable<Item<T>>, target_key: Key): Option<T> {
 function checkAction(actionId: string, action: SavedAction, annotations: state1_1_1.Annotations): Promise<void> {
     return db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
         const ts = openAll(db);
+
+        const fetched: FetchedFacet[] = []
+
         const inputs: Inputs2 = {
-            async fetchByLabel(label: string[]): Promise<Option<[string, state1_1_1.Game]>> {
+            async getGame(label: string[]): Promise<Option<state1_1_1.Game>> {
                 const maybeParent = option.from(findByKey(annotations.parents, label));
-                return await maybeParent.mapAsync(async ref => {
+
+                return await maybeParent.andThenAsync(async ref => {
                     const annos = option.from(await readables.getOption(ts["ANNOTATIONS,1.1.1"], [ref.actionId])).unwrap();
-                    const game = option.from(findByKey(annos.games, label)).unwrap();
-                    return [ref.actionId, game]
+                    const maybeGame = option.from(findByKey(annos.facets.games, label));
+
+                    fetched.push({
+                        key: label,
+                        value: { actionId: ref.actionId, value: maybeGame },
+                    })
+
+                    return maybeGame
                 })
             }
         }
 
         const intResult = await integrator(action.action, inputs);
-        const parents = ix.toArray(ix.from(intResult.annotations.parents).pipe(
-            ixop.map(({ value }) => value.actionId),
-            ixop.distinct(),
-            ixop.orderBy(x => x),
-        ));
 
-        assert.deepEqual(parents, action.parents);
-        assert.deepEqual(intResult.annotations, annotations);
+        const keyToParent: Item<Reference>[] = ix.toArray(ix.from(fetched).pipe(
+            ixop.map(({ key, value: { actionId } }): Item<Reference> => ({ key, value: { actionId } })),
+            ixop.orderBy(({ key }) => key, util.lexCompare),
+        ))
+        const parentList: string[] = ix.toArray(ix.from(fetched).pipe(
+            ixop.map(({ value: { actionId } }) => actionId),
+            ixop.orderBy(actionId => actionId),
+            ixop.distinct(),
+        ))
+        const actualAnnotations: state1_1_1.Annotations = {
+            parents: keyToParent,
+            facets: intResult.facets,
+        }
+
+        assert.deepEqual(parentList, action.parents);
+        assert.deepEqual(actualAnnotations, annotations);
     })
 }
 

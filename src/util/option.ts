@@ -41,7 +41,7 @@ export class OptionView<T> implements Option<T> {
         }
     }
 
-    or_else<D>(def: () => D): T | D {
+    orElse<D>(def: () => D): T | D {
         if (this.data.some) {
             return this.data.value
         } else {
@@ -49,7 +49,7 @@ export class OptionView<T> implements Option<T> {
         }
     }
 
-    with_default<D>(def: () => T): defaultable.DefaultableView<T> {
+    withDefault<D>(def: () => T): defaultable.DefaultableView<T> {
         if (this.data.some) {
             return defaultable.some(this.data.value)
         } else {
@@ -68,6 +68,22 @@ export class OptionView<T> implements Option<T> {
     async mapAsync<O>(fn: (a: T) => Promise<O>): Promise<OptionView<O>> {
         if (this.data.some) {
             return some(await fn(this.data.value))
+        } else {
+            return fromData(this.data)
+        }
+    }
+
+    andThen<O>(fn: (a: T) => Option<O>): OptionView<O> {
+        if (this.data.some) {
+            return from(fn(this.data.value))
+        } else {
+            return fromData(this.data)
+        }
+    }
+
+    async andThenAsync<O>(fn: (a: T) => Promise<Option<O>>): Promise<OptionView<O>> {
+        if (this.data.some) {
+            return from(await fn(this.data.value))
         } else {
             return fromData(this.data)
         }

@@ -1,3 +1,5 @@
+import { Option } from "./option"
+import * as option from "./option";
 
 export type AsyncResult<R, E> = Promise<Result<R, E>>
 
@@ -47,18 +49,33 @@ export class ResultView<R, E> implements Result<R, E>{
         }
     }
 
-    split<OkRes, ErrRes>({ onOk, onErr }: { onOk: (t: R) => OkRes, onErr: (e: E) => ErrRes }): OkRes | ErrRes {
+    split<TResult>({ onOk, onErr }: { onOk: (t: R) => TResult, onErr: (e: E) => TResult }): TResult {
         if (this.data.status === 'ok') {
             return onOk(this.data.value)
         } else {
             return onErr(this.data.error)
         }
     }
+
+    get err(): Option<E> {
+        return this.split({
+            onErr: e => option.some(e),
+            onOk: () => option.none(),
+        })
+    }
+
+    get value(): Option<R> {
+        return this.split({
+            onErr: () => option.none(),
+            onOk: (v) => option.some(v),
+        })
+    }
 }
 
 export function from<R, E>(r: Result<R, E>): ResultView<R, E> {
     return new ResultView(r.data)
 }
+
 export function fromData<R, E>(r: ResultData<R, E>): ResultView<R, E> {
     return new ResultView(r)
 }
