@@ -28,7 +28,7 @@ import { validate as validateSchema } from './schema/interfaces.validator'
 import * as util from './util'
 import { Defaultable, defaultable, Option, option, Result, result } from './util'
 import { OptionData } from './util/option'
-import { THING } from './logic/1.1.1'
+import { REVISION } from './logic/1.1.1'
 import * as fw from './framework';
 
 admin.initializeApp({
@@ -218,7 +218,7 @@ function find<T>(items: Iterable<T>, pred: (t: T) => boolean): Option<T> {
 }
 
 function checkAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>,
-    actionId: string, action: SavedAction, annotations: fw.Annotation<TFacet>): Promise<void> {
+    actionId: string, action: SavedAction, annotations: fw.Annotations<TFacet>): Promise<void> {
     return db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
 
         const annotationsTable = db.open({
@@ -258,7 +258,7 @@ function checkAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>,
             ixop.distinct(),
         ))
 
-        const actualAnnotations: fw.Annotation<TFacet> = {
+        const actualAnnotations: fw.Annotations<TFacet> = {
             parents: labelToParent,
             facets,
         }
@@ -282,12 +282,12 @@ async function handleReplay(): Promise<void> {
             async onSome(annos): Promise<void> {
                 console.log(`CHECK ${actionId}`)
 
-                await checkAction(THING, actionId, savedAction, annos)
+                await checkAction(REVISION, actionId, savedAction, annos)
             },
             async onNone(): Promise<void> {
                 console.log(`REPLAY ${actionId}`)
 
-                await replayAction(THING, actionId, savedAction)
+                await replayAction(REVISION, actionId, savedAction)
             }
         })
 
@@ -310,7 +310,7 @@ function getNextAction(tx: db.TxRunner, startAfter: string): Promise<([string, S
 
 app.options('/action', cors())
 app.post('/action', cors(), function(req: Request<Dictionary<string>>, res, next) {
-    doAction(THING, validateSchema('AnyAction')(req.body)).then((resp) => {
+    doAction(REVISION, validateSchema('AnyAction')(req.body)).then((resp) => {
         if (resp.data.status === 'err') {
             res.status(resp.data.error.status_code)
             res.json(resp)

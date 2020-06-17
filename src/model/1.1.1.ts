@@ -1,6 +1,4 @@
-import { ResultData } from "../util/result"
 import { OptionData } from "../util/option"
-import { Item } from "../interfaces"
 import { Reference } from "../schema"
 
 export interface JoinGameAction {
@@ -131,18 +129,7 @@ export type Submission = {
 
 export type Game = UnstartedGame | StartedGame
 
-export type State = {
-    gameId: string
-    game: Game
-}
-
-export interface Facets {
-    games: Item<Game>[]
-}
-
 export interface Annotations {
     parents: Record<string, Reference>
     facets: Record<string, OptionData<Game>>
 }
-
-
