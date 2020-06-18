@@ -43,7 +43,7 @@ import * as readables from './readables'
 //     }
 // }
 
-export function applyChangesSimple<T>(t: db.Table<T>, changes: Change<T>[]): void {
+export function applyChangesSimple<T>(t: db.Writer<T>, changes: Change<T>[]): void {
     for (const change of changes) {
         switch (change.kind) {
             case 'set':
@@ -55,7 +55,7 @@ export function applyChangesSimple<T>(t: db.Table<T>, changes: Change<T>[]): voi
         }
     }
 }
-export function applyChanges<T>(t: db.Table<Live<T>>, actionId: string, changes: Change<T>[]): void {
+export function applyChanges<T>(t: db.Writer<Live<T>>, actionId: string, changes: Change<T>[]): void {
     for (const change of changes) {
         switch (change.kind) {
             case 'set':

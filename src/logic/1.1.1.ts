@@ -51,7 +51,7 @@ export const REVISION: fw.Revision<Result<null, Error>, Game> = {
         })
     },
 
-    async activateFacet(db: db.Database, label: string, maybeOldGame: OptionData<Game>, newGame: OptionData<Game>): Promise<void> {
+    async activateFacet(d: db.Database, label: string, maybeOldGame: OptionData<Game>, newGame: OptionData<Game>): Promise<void> {
         const oldGame = option.fromData(maybeOldGame).withDefault(defaultGame1_1);
 
         const gameDiff = diffs.newDiff([label], oldGame, option.fromData(newGame).withDefault(defaultGame1_1));
@@ -59,14 +59,14 @@ export const REVISION: fw.Revision<Result<null, Error>, Game> = {
         const gamesByPlayer1_0Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_0).diffs;
         const gamesByPlayer1_1Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_1).diffs
 
-        const gamesByPlayer1_0 = db.open({
+        const gamesByPlayer1_0 = d.open({
             schema: ['players', 'games-gamesByPlayer-1.0'],
             validator: validate1_0('PlayerGame'),
-        })
-        const gamesByPlayer1_1 = db.open({
+        }).openWriter("activate-1.1.1", db.WriterRole.PRIMARY)
+        const gamesByPlayer1_1 = d.open({
             schema: ['players', 'games-gamesByPlayer-1.1'],
             validator: validate1_1('PlayerGame'),
-        })
+        }).openWriter("activate-1.1.1", db.WriterRole.PRIMARY)
 
         applyChangesSimple(gamesByPlayer1_0, gamesByPlayer1_0Diffs.map(diffToChange));
         applyChangesSimple(gamesByPlayer1_1, gamesByPlayer1_1Diffs.map(diffToChange))

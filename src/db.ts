@@ -6,7 +6,11 @@ import * as ranges from './ranges';
 
 import * as ixaop from 'ix/asynciterable/operators';
 import * as ixa from "ix/asynciterable";
+import * as ixop from 'ix/iterable/operators';
+import * as ix from "ix/iterable";
 import { AsyncIterableX } from 'ix/asynciterable';
+import { Option, option } from './util';
+import deepEqual from 'deep-equal';
 
 export interface TxRunner {
     <R>(cb: (db: Database) => Promise<R>): Promise<R>
@@ -28,35 +32,62 @@ export function runTransaction(fsDb: Firestore): TxRunner {
     }
 }
 
+interface Mutation<T> {
+    docRef: DocumentReference
+    value: Option<T>
+    writerId: string
+}
+
 export class Database {
-    private committers: (() => void)[] = []
+    private committers: (() => Iterable<Difference<unknown>>)[] = []
 
     constructor(private db: Firestore, private tx: Transaction) { }
 
-    open<T>(spec: TableSpec<T>): Table<T> {
-        const res = new FSTable(this.db, this.tx, spec.schema, spec.validator);
+    open<T>(
+        spec: TableSpec<T>): Table<T> {
+        const res = new FSTable(
+            this.db, this.tx, spec.schema, spec.validator);
         this.committers.push(() => res.commit());
         return res;
     }
 
-    commit(): void {
-        for (const c of this.committers) {
-            c();
-        }
+    commit(): Difference<unknown>[] {
+        return Array.from(ix.from(this.committers).pipe(
+            ixop.flatMap(c => c())
+        ))
     }
+}
+
+export enum WriterRole {
+    PRIMARY,
+    SECONDARY
 }
 
 export interface Table<T> {
     schema: string[]
     read(range: Range): ItemIterable<T>
+    openWriter(id: string, role: WriterRole): Writer<T>
+}
+
+export interface Writer<T> {
     set(key: Key, value: T): void
     delete(key: Key): void
 }
 
-class FSTable<T> {
-    private committers: (() => void)[] = []
+export interface Difference<T> {
+    primaryWriterId: string,
+    secondaryWriterId: string,
+    primaryHad: Option<Option<T>>
+    secondaryHad: Option<Option<T>>
+}
 
-    constructor(private db: Firestore, private tx: Transaction,
+class FSTable<T> implements Table<T>{
+    private primaryWriter: option.OptionView<string> = option.none();
+    private secondaryWriters: string[] = [];
+    private mutations: Mutation<T>[] = [];
+
+    constructor(
+        private db: Firestore, private tx: Transaction,
         public schema: string[], private validator: (u: unknown) => T) { }
 
     read(rng: Range): ItemIterable<T> {
@@ -74,14 +105,99 @@ class FSTable<T> {
         );
     }
 
-    set(key: Key, value: T): void {
-        this.validateKey(key)
-        this.committers.push(() => { this.tx.set(this.getDocReference(key), value) })
+    openWriter(writerId: string, writerRole: WriterRole): Writer<T> {
+        if (writerRole === WriterRole.PRIMARY) {
+            this.primaryWriter.split({
+                onSome: () => { throw new Error("there can be only one primary writer") },
+                onNone: () => {
+                    this.primaryWriter = option.some(writerId)
+                }
+            })
+        } else {
+            this.secondaryWriters.push(writerId)
+        }
+        return {
+            set: (key: Key, value: T): void => {
+                this.validateKey(key)
+                this.mutations.push({
+                    docRef: this.getDocReference(key),
+                    value: option.some(value),
+                    writerId,
+                })
+            },
+
+            delete: (key: Key): void => {
+                this.validateKey(key)
+                this.mutations.push({
+                    docRef: this.getDocReference(key),
+                    value: option.none(),
+                    writerId,
+                })
+            }
+        }
     }
 
-    delete(key: Key): void {
-        this.validateKey(key)
-        this.committers.push(() => { this.tx.delete(this.getDocReference(key)) })
+    commit(): Iterable<Difference<T>> {
+        return ix.from(this.mutations).pipe(
+            ixop.groupBy(
+                ({ docRef }) => docRef.path,
+                x => x,
+                (_key, values) => {
+                    const [primaries, secondaries] = ix.partition(values,
+                        (({ writerId }) => writerId === this.primaryWriter.unwrap(
+                        )));
+
+                    const primaryMutation: option.OptionView<Mutation<T>> =
+                        atMostOne(primaries);
+                    const secondaryMutations = ix.from(this.secondaryWriters).pipe(
+                        ixop.groupJoin(secondaries,
+                            secondaryId => secondaryId,
+                            ({ writerId }) => writerId,
+                            (writerId: string, mutation: Iterable<Mutation<T>>) =>
+                                ({ writerId, mutation: atMostOne(mutation) })
+                        )
+                    )
+
+                    primaryMutation.map(mut => {
+                        option.from(mut.value).split({
+                            onNone: () => {
+                                this.tx.delete(mut.docRef)
+                            },
+                            onSome: (val) => {
+                                this.tx.set(mut.docRef, val)
+                            }
+                        })
+                    })
+
+                    return this.computeDifference(this.primaryWriter.unwrap(),
+                        primaryMutation, secondaryMutations)
+                }),
+            ixop.flatMap(x => x)
+        )
+    }
+
+    private computeDifference(
+        primaryWriterId: string,
+        primary: option.OptionView<Mutation<T>>,
+        secondaries: Iterable<{ writerId: string, mutation: option.OptionView<Mutation<T>> }>):
+        Iterable<Difference<T>> {
+        return ix.from(secondaries).pipe(
+            ixop.flatMap(({ writerId: secondaryWriterId, mutation: secondary }): Difference<T>[] => {
+                const primaryValue = primary.map(({ value }) => value)
+                const secondaryValue = secondary.map(({ value }) => value)
+
+                if (deepEqual(primaryValue.data, secondaryValue.data)) {
+                    return []
+                } else {
+                    return [{
+                        primaryWriterId,
+                        secondaryWriterId,
+                        primaryHad: primaryValue,
+                        secondaryHad: secondaryValue,
+                    }]
+                }
+            })
+        )
     }
 
     private validateKey(key: Key): void {
@@ -89,12 +205,6 @@ class FSTable<T> {
             `Invalid key ${JSON.stringify(key)} has length ${key.length}; want ${this.schema.length}`)
         if (key.some(segment => segment === "")) {
             throw new Error(`Key ${JSON.stringify(key)} has an empty segment, which is not allowed`)
-        }
-    }
-
-    commit(): void {
-        for (const c of this.committers) {
-            c();
         }
     }
 
@@ -132,4 +242,15 @@ class FSTable<T> {
         assert.deepEqual(this.schema, extractedSchema)
         return res
     }
+}
+
+function atMostOne<T>(i: Iterable<T>): option.OptionView<T> {
+    let res: option.OptionView<T> = option.none();
+    for (const t of i) {
+        if (res.data.some) {
+            throw new Error("got more than one")
+        }
+        res = option.some(t)
+    }
+    return res
 }

@@ -97,15 +97,15 @@ type FetchedFacet<TFacet> = {
 }
 
 function doAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>, action: AnyAction): Promise<TResult> {
-    return db.runTransaction(fsDb)(async (db: db.Database): Promise<TResult> => {
+    return db.runTransaction(fsDb)(async (d: db.Database): Promise<TResult> => {
         const fetched: FetchedFacet<TFacet>[] = []
 
-        const annotationsTable = db.open({
+        const annotationsTable = d.open({
             schema: [`annotations-${impl.id}`],
             validator: impl.validateAnnotation,
         })
 
-        const labelsTable = db.open({
+        const labelsTable = d.open({
             schema: [`labels-${impl.id}`],
             validator: validateSchema('Reference')
         })
@@ -142,13 +142,18 @@ function doAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>, action: A
         const savedAction: SavedAction = { parents: parentList, action };
         const actionId = getActionId(savedAction);
 
-        openAll(db)["ACTIONS"].set([actionId], savedAction)
-        annotationsTable.set([actionId], { parents: labelToParent, facets })
+        const actionsWriter = openAll(d)["ACTIONS"].openWriter("action", db.WriterRole.PRIMARY);
+        actionsWriter.set([actionId], savedAction)
+
+        const annotationsWriter = annotationsTable.openWriter("action", db.WriterRole.PRIMARY);
+        const labelsWriter = labelsTable.openWriter("action", db.WriterRole.PRIMARY);
+
+        annotationsWriter.set([actionId], { parents: labelToParent, facets })
         for (const label in facets) {
-            labelsTable.set([label], { actionId });
+            labelsWriter.set([label], { actionId });
             const maybeParentFacet = option.from(find(fetched, ({ label: l }) => l === label))
             const maybeOldValue = maybeParentFacet.andThen(({ value }) => value);
-            await impl.activateFacet(db, label, maybeOldValue.data, facets[label])
+            await impl.activateFacet(d, label, maybeOldValue.data, facets[label])
         }
 
         return result;
@@ -156,15 +161,15 @@ function doAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>, action: A
 }
 
 function replayAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>, actionId: string, action: SavedAction): Promise<void> {
-    return db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
+    return db.runTransaction(fsDb)(async (d: db.Database): Promise<void> => {
         const fetched: FetchedFacet<TFacet>[] = []
 
-        const annotationsTable = db.open({
+        const annotationsTable = d.open({
             schema: [`annotations-${impl.id}`],
             validator: impl.validateAnnotation,
         })
 
-        const labelsTable = db.open({
+        const labelsTable = d.open({
             schema: [`labels-${impl.id}`],
             validator: validateSchema('Reference')
         })
@@ -198,12 +203,15 @@ function replayAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>, actio
             }
         }
 
-        annotationsTable.set([actionId], { parents: labelToParent, facets })
+        const annotationsWriter = annotationsTable.openWriter("replay", db.WriterRole.PRIMARY);
+        const labelsWriter = labelsTable.openWriter("replay", db.WriterRole.PRIMARY);
+
+        annotationsWriter.set([actionId], { parents: labelToParent, facets })
         for (const label in facets) {
-            labelsTable.set([label], { actionId });
+            labelsWriter.set([label], { actionId });
             const maybeParentFacet = option.from(find(fetched, ({ label: l }) => l === label))
             const maybeOldValue = maybeParentFacet.andThen(({ value }) => value);
-            await impl.activateFacet(db, label, maybeOldValue.data, facets[label])
+            await impl.activateFacet(d, label, maybeOldValue.data, facets[label])
         }
     })
 }
