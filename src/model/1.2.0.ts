@@ -1,6 +1,8 @@
 import { Item } from "../interfaces"
 import { Reference } from "../schema"
 import { OptionData } from "../util/option"
+import { ResultData } from "../util/result"
+import * as fw from '../framework'
 
 export interface CreateGameAction {
     kind: 'create_game'
@@ -115,9 +117,8 @@ export type Game = UnstartedGame | StartedGame
 
 export type ShortCode = {}
 
-export type Facet = Game | ShortCode
-
-export interface Annotations {
-    parents: Record<string, Reference>
-    facets: Record<string, OptionData<Facet>>
+export interface State {
+    game: ResultData<Game, Error>
 }
+
+export type Annotation2 = fw.Annotation2<State>

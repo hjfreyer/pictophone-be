@@ -4,7 +4,8 @@ import { strict as assert } from 'assert';
 import * as ix from "ix/iterable"
 import * as ixop from "ix/iterable/operators"
 import { OperatorFunction } from 'ix/interfaces';
-
+import * as option from './option';
+import { Option } from './option';
 
 export { Option } from './option';
 export * as option from './option';
@@ -174,4 +175,8 @@ export function narrow<TSource, TResult extends TSource>(
     return function narrowOperatorFunction(source: Iterable<TSource>): ix.IterableX<TResult> {
         return new NarrowIterable<TSource, TResult>(source, selector);
     };
+}
+
+export function filterNone<T>(): OperatorFunction<Option<T>, T> {
+    return ixop.flatMap((opt: Option<T>): Iterable<T> => option.from(opt).map(v => ix.of(v)).orElse(ix.empty))
 }

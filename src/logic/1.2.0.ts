@@ -2,6 +2,8 @@
 import produce from 'immer';
 import * as ix from "ix/iterable";
 import * as ixop from "ix/iterable/operators";
+import * as ixa from "ix/asynciterable";
+import * as ixaop from "ix/asynciterable/operators";
 import { applyChangesSimple, diffToChange } from '../base';
 import * as db from '../db';
 import * as diffs from '../diffs';
@@ -10,7 +12,7 @@ import { Item, item, Key } from '../interfaces';
 import * as model1_0 from '../model/1.0';
 import { validate as validate1_0 } from '../model/1.0.validator';
 import * as model1_1 from '../model/1.1';
-import { Facet, Error, Game, Action, MakeMoveAction, ShortCode, StartedGame } from '../model/1.2.0';
+import { Error, Game, Action, MakeMoveAction, ShortCode, StartedGame, State } from '../model/1.2.0';
 import { validate } from '../model/1.2.0.validator';
 import { validate as validate1_1 } from '../model/1.1.validator';
 import { AnyAction } from '../schema';
@@ -21,88 +23,76 @@ import { ResultView } from '../util/result';
 import deepEqual from 'deep-equal';
 
 type IntegrationResult =
-    fw.IntegrationResult<Result<null, Error>, Facet>;
+    fw.IntegrationResult2<State>;
 
 
-async function getGame(inputs: fw.Input<Facet>, gameId: string): Promise<OptionView<Game>> {
-    const facet = option.from(await inputs.getFacet(`game:${gameId}`));
-    return facet.map(validate('Game'))
+async function getGame(inputs: fw.Input2<State>, gameId: string): Promise<OptionView<Game>> {
+    return option.from(await inputs.getParent(`game:${gameId}`))
+        .map(state => result.fromData(state.game).unwrap())
 }
 
-function setGame(facets: Record<string, OptionData<Facet>>, gameId: string, game: Option<Game>): void {
-    facets[`game:${gameId}`] = game.data;
+// function setGame(States: Record<string, OptionData<State>>, gameId: string, game: Option<Game>): void {
+//     States[`game:${gameId}`] = game.data;
+// }
+
+async function isShortCodeUsed(inputs: fw.Input2<State>, shortCodeId: string): Promise<boolean> {
+    return option.from(await inputs.getParent(`shortCode:${shortCodeId}`))
+        .map(state => {
+            const game = result.fromData(state.game).unwrap();
+            return game.state === 'UNSTARTED' && game.shortCode === shortCodeId;
+        }).orElse(() => false)
 }
 
-async function getShortCode(inputs: fw.Input<Facet>, shortCodeId: string): Promise<OptionView<ShortCode>> {
-    const facet = option.from(await inputs.getFacet(`shortCode:${shortCodeId}`));
-    return facet.map(validate('ShortCode'))
-}
+// function setShortCode(States: Record<string, OptionData<State>>, shortCodeId: string, sc: Option<ShortCode>): void {
+//     States[`shortCode:${shortCodeId}`] = sc.data;
+// }
 
-function setShortCode(facets: Record<string, OptionData<Facet>>, shortCodeId: string, sc: Option<ShortCode>): void {
-    facets[`shortCode:${shortCodeId}`] = sc.data;
-}
-
-export const REVISION: fw.Revision<Result<null, Error>, Facet> = {
+export const REVISION: fw.Revision2<State> = {
     id: '1.2.0',
-    validateAnnotation: validate('Annotations'),
+    validateAnnotation: validate('Annotation2'),
 
-    async integrate(anyAction: AnyAction, inputs: fw.Input<Facet>): Promise<IntegrationResult> {
+    async integrate(anyAction: AnyAction, inputs: fw.Input2<State>): Promise<IntegrationResult> {
         const maybeOldGame = await getGame(inputs, anyAction.gameId);
 
         const res = await helper(convertAction(anyAction), maybeOldGame, inputs);
         if (res.data.status === 'err') {
-            return { result: result.err(res.data.error), facets: {} }
+            return { labels: [], state: { game: res.data } }
         }
         const newGame = res.data.value;
 
-        const gameDiffs = diffs.newDiff2([anyAction.gameId], maybeOldGame, option.some(newGame));
-        const shortCodeDiffs = gameDiffs.map(gameToShortCodes);
+        const oldShortCode = maybeOldGame.andThen(oldGame => {
+            return oldGame.state === 'UNSTARTED' && oldGame.shortCode !== ""
+                ? option.some(oldGame.shortCode)
+                : option.none<string>()
+        })
+        const newShortCode = newGame.state === 'UNSTARTED' && newGame.shortCode !== ""
+            ? option.some(newGame.shortCode)
+            : option.none<string>()
 
-        const facets: Record<string, OptionData<Facet>> = {};
-        for (const diff of gameDiffs.diffs) {
-            switch (diff.kind) {
-                case 'add':
-                    setGame(facets, diff.key[0], option.some(diff.value))
-                    break
-                case 'delete':
-                    setGame(facets, diff.key[0], option.none())
-                    break
-                case 'replace':
-                    setGame(facets, diff.key[0], option.some(diff.newValue))
-                    break
-            }
-        }
-        for (const diff of shortCodeDiffs.diffs) {
-            switch (diff.kind) {
-                case 'add':
-                    setShortCode(facets, diff.key[0], option.some(diff.value))
-                    break
-                case 'delete':
-                    setShortCode(facets, diff.key[0], option.none())
-                    break
-                case 'replace':
-                    setShortCode(facets, diff.key[0], option.some(diff.newValue))
-                    break
-            }
+        const labels: string[] = [`game:${anyAction.gameId}`];
+
+        if (!deepEqual(oldShortCode.data, newShortCode.data)) {
+            const changedShortCodes = ix.toArray(ix.of(oldShortCode, newShortCode).pipe(util.filterNone()))
+            await Promise.all(changedShortCodes.map(sc => isShortCodeUsed(inputs, sc)))
+            labels.push(...changedShortCodes.map(sc => `shortCode:${sc}`));
         }
 
-
-        return { result: result.ok(null), facets }
+        return { labels, state: { game: result.ok<Game, Error>(newGame).data } }
         //     const maybeNewGameOrError = integrateHelper(convertAction(action), oldGame);
         //     return result.from(maybeNewGameOrError).split({
         //         onErr: (err): IntegrationResult => ({
-        //             facets: {},
+        //             States: {},
         //             result: result.err(err),
         //         }),
         //         onOk: (maybeNewGame) => {
         //             return option.from(maybeNewGame).split({
         //                 onNone: (): IntegrationResult => ({
-        //                     facets: {},
+        //                     States: {},
         //                     result: result.ok(null)
         //                 }),
         //                 onSome(newGame): IntegrationResult {
         //                     return {
-        //                         facets: { [action.gameId]: option.some(newGame).data },
+        //                         States: { [action.gameId]: option.some(newGame).data },
         //                         result: result.ok(null)
         //                     }
         //                 }
@@ -111,26 +101,26 @@ export const REVISION: fw.Revision<Result<null, Error>, Facet> = {
         //     })
     },
 
-    async activateFacet(db: db.Database, label: string, maybeOldGame: OptionData<Facet>, newGame: OptionData<Facet>): Promise<void> {
-        // const oldGame = option.fromData(maybeOldGame).withDefault(defaultGame1_1);
+    // async activateState(db: db.Database, label: string, maybeOldGame: OptionData<State>, newGame: OptionData<State>): Promise<void> {
+    //     // const oldGame = option.fromData(maybeOldGame).withDefault(defaultGame1_1);
 
-        // const gameDiff = diffs.newDiff([label], oldGame, option.fromData(newGame).withDefault(defaultGame1_1));
+    //     // const gameDiff = diffs.newDiff([label], oldGame, option.fromData(newGame).withDefault(defaultGame1_1));
 
-        // const gamesByPlayer1_0Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_0).diffs;
-        // const gamesByPlayer1_1Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_1).diffs
+    //     // const gamesByPlayer1_0Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_0).diffs;
+    //     // const gamesByPlayer1_1Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_1).diffs
 
-        // const gamesByPlayer1_0 = db.open({
-        //     schema: ['players', 'games-gamesByPlayer-1.0'],
-        //     validator: validate1_0('PlayerGame'),
-        // })
-        // const gamesByPlayer1_1 = db.open({
-        //     schema: ['players', 'games-gamesByPlayer-1.1'],
-        //     validator: validate1_1('PlayerGame'),
-        // })
+    //     // const gamesByPlayer1_0 = db.open({
+    //     //     schema: ['players', 'games-gamesByPlayer-1.0'],
+    //     //     validator: validate1_0('PlayerGame'),
+    //     // })
+    //     // const gamesByPlayer1_1 = db.open({
+    //     //     schema: ['players', 'games-gamesByPlayer-1.1'],
+    //     //     validator: validate1_1('PlayerGame'),
+    //     // })
 
-        // applyChangesSimple(gamesByPlayer1_0, gamesByPlayer1_0Diffs.map(diffToChange));
-        // applyChangesSimple(gamesByPlayer1_1, gamesByPlayer1_1Diffs.map(diffToChange))
-    }
+    //     // applyChangesSimple(gamesByPlayer1_0, gamesByPlayer1_0Diffs.map(diffToChange));
+    //     // applyChangesSimple(gamesByPlayer1_1, gamesByPlayer1_1Diffs.map(diffToChange))
+    // }
 }
 
 function gameToShortCodes(gameId: Key, game: Game): Item<ShortCode>[] {
@@ -140,7 +130,7 @@ function gameToShortCodes(gameId: Key, game: Game): Item<ShortCode>[] {
     return [{ key: [game.shortCode], value: {} }]
 }
 
-async function helper(a: Action, maybeOldGame: Option<Game>, inputs: fw.Input<Facet>): Promise<ResultView<Game, Error>> {
+async function helper(a: Action, maybeOldGame: Option<Game>, inputs: fw.Input2<State>): Promise<ResultView<Game, Error>> {
 
     switch (a.kind) {
         case 'create_game': {
@@ -152,8 +142,7 @@ async function helper(a: Action, maybeOldGame: Option<Game>, inputs: fw.Input<Fa
                     gameId: a.gameId,
                 })
             }
-            const maybeShortCode = await getShortCode(inputs, a.shortCode);
-            if (maybeShortCode.data.some) {
+            if (await isShortCodeUsed(inputs, a.shortCode)) {
                 return result.err({
                     version: '1.2',
                     status: 'SHORT_CODE_IN_USE',

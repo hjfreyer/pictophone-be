@@ -58,8 +58,8 @@ const VALIDATORS = {
 
 type Tables = {
     "ACTIONS": db.Table<SavedAction>
-    "ANNOTATIONS,1.1.1": db.Table<state1_1_1.Annotations>
-    "LABELS,1.1.1,games": db.Table<Reference>
+    // "ANNOTATIONS,1.1.1": db.Table<state1_1_1.Annotation2>
+    // "LABELS,1.1.1,games": db.Table<Reference>
     // "IMPLEXP,1.1.1,1.0,gamesByPlayer": db.Table<import('../model/1.0').PlayerGame>
     // "IMPLEXP,1.1.1,1.1,gamesByPlayer": db.Table<import('../model/1.1').PlayerGame>
     "EXP,1.0,gamesByPlayer": db.Table<import('./model/1.0').PlayerGame>
@@ -72,14 +72,14 @@ function openAll(db: db.Database): Tables {
             schema: ['actions'],
             validator: validateSchema('SavedAction')
         }),
-        "ANNOTATIONS,1.1.1": db.open({
-            schema: ['annotations-1.1.1'],
-            validator: VALIDATORS['1.1.1']('Annotations')
-        }),
-        "LABELS,1.1.1,games": db.open({
-            schema: ['labels-1.1.1'],
-            validator: validateSchema('Reference')
-        }),
+        // "ANNOTATIONS,1.1.1": db.open({
+        //     schema: ['annotations-1.1.1'],
+        //     validator: VALIDATORS['1.1.1']('Annotations')
+        // }),
+        // "LABELS,1.1.1,games": db.open({
+        //     schema: ['labels-1.1.1'],
+        //     validator: validateSchema('Reference')
+        // }),
 
         "EXP,1.0,gamesByPlayer": db.open({
             schema: ['players', 'games-gamesByPlayer-1.0'],
@@ -148,7 +148,7 @@ function doAction<TState>(impl: fw.Revision2<TState>, action: AnyAction): Promis
         }
         const parentList: string[] = ix.toArray(ix.from(fetched).pipe(
             ixop.map(({ actionId }) => actionId),
-            filterNone(),
+            util.filterNone(),
             ixop.orderBy(actionId => actionId),
             ixop.distinct(),
         ))
@@ -159,6 +159,7 @@ function doAction<TState>(impl: fw.Revision2<TState>, action: AnyAction): Promis
         openAll(db)["ACTIONS"].set([actionId], savedAction)
         annotationsTable.set([actionId], { labels, parents: labelToParent, state })
         const oldStates: Record<string, Option<TState>> = {};
+
         for (const label of labels) {
             const oldFetched = option.of(ix.find(fetched, f => f.label === label)).expect("No blind writes");
             oldStates[label] = oldFetched.state;
@@ -170,10 +171,6 @@ function doAction<TState>(impl: fw.Revision2<TState>, action: AnyAction): Promis
             oldStates,
         };
     })
-}
-
-function filterNone<T>(): OperatorFunction<Option<T>, T> {
-    return ixop.flatMap((opt: Option<T>): Iterable<T> => option.from(opt).map(v => ix.of(v)).orElse(ix.empty))
 }
 
 function replayAction<TState>(impl: fw.Revision2<TState>, actionId: string, action: SavedAction): Promise<void> {
@@ -380,7 +377,7 @@ function batch(): Router {
     const res = Router()
 
     res.post('/replay', function(_req: Request<{}>, res, next) {
-        handleReplay(REVISION1_1_1).then(result => {
+        handleReplay(REVISION1_2_0).then(result => {
             res.status(200)
             res.json(result)
         }).catch(next)
@@ -405,23 +402,23 @@ function batch(): Router {
         }).catch(next)
     })
 
-    res.post('/delete/:collectionId', function(req: Request<DeleteCollectionRequest>, res, next) {
-        deleteCollection(db.runTransaction(fsDb), req.params.collectionId as CollectionId).then(result => {
-            res.status(200)
-            res.json(result)
-        }).catch(next)
-    })
+    // res.post('/delete/:collectionId', function(req: Request<DeleteCollectionRequest>, res, next) {
+    //     deleteCollection(db.runTransaction(fsDb), req.params.collectionId as CollectionId).then(result => {
+    //         res.status(200)
+    //         res.json(result)
+    //     }).catch(next)
+    // })
 
     return res
 }
 
-async function deleteCollection(runner: db.TxRunner, collectionId: CollectionId): Promise<void> {
-    await runner(async (db: db.Database): Promise<void> => {
-        const ts = openAll(db);
-        switch (collectionId) {
-            case '1.1.1':
-                await deleteTable(ts['ANNOTATIONS,1.1.1'])
-                await deleteTable(ts["LABELS,1.1.1,games"]);
-        }
-    })
-}
+// async function deleteCollection(runner: db.TxRunner, collectionId: CollectionId): Promise<void> {
+//     await runner(async (db: db.Database): Promise<void> => {
+//         const ts = openAll(db);
+//         switch (collectionId) {
+//             case '1.1.1':
+//                 await deleteTable(ts['ANNOTATIONS,1.1.1'])
+//                 await deleteTable(ts["LABELS,1.1.1,games"]);
+//         }
+//     })
+// }
