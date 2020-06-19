@@ -9,6 +9,7 @@ import produce from 'immer'
 import * as ixa from "ix/asynciterable"
 import * as ix from "ix/iterable"
 import * as ixop from "ix/iterable/operators"
+import * as ixaop from "ix/asynciterable/operators"
 import { applyChangesSimple, diffToChange, getActionId } from './base'
 import * as db from './db'
 import * as diffs from './diffs'
@@ -56,37 +57,29 @@ const VALIDATORS = {
 
 type Tables = {
     "ACTIONS": db.Table<SavedAction>
-    "ANNOTATIONS,1.1.1": db.Table<state1_1_1.Annotations>
-    "LABELS,1.1.1,games": db.Table<Reference>
-    // "IMPLEXP,1.1.1,1.0,gamesByPlayer": db.Table<import('../model/1.0').PlayerGame>
-    // "IMPLEXP,1.1.1,1.1,gamesByPlayer": db.Table<import('../model/1.1').PlayerGame>
-    "EXP,1.0,gamesByPlayer": db.Table<import('./model/1.0').PlayerGame>
-    "EXP,1.1,gamesByPlayer": db.Table<import('./model/1.1').PlayerGame>
+    // "ANNOTATIONS,1.1.1": db.Table<state1_1_1.Annotations>
+    // "LABELS,1.1.1,games": db.Table<Reference>
+    // // "IMPLEXP,1.1.1,1.0,gamesByPlayer": db.Table<import('../model/1.0').PlayerGame>
+    // // "IMPLEXP,1.1.1,1.1,gamesByPlayer": db.Table<import('../model/1.1').PlayerGame>
+    // "EXP,1.0,gamesByPlayer": db.Table<import('./model/1.0').PlayerGame>
+    // "EXP,1.1,gamesByPlayer": db.Table<import('./model/1.1').PlayerGame>
 }
 
 function openAll(db: db.Database): Tables {
     return {
-        "ACTIONS": db.open({
+        "ACTIONS": db.open(`actions`, {
             schema: ['actions'],
             validator: validateSchema('SavedAction')
         }),
-        "ANNOTATIONS,1.1.1": db.open({
-            schema: ['annotations-1.1.1'],
-            validator: VALIDATORS['1.1.1']('Annotations')
-        }),
-        "LABELS,1.1.1,games": db.open({
-            schema: ['labels-1.1.1'],
-            validator: validateSchema('Reference')
-        }),
 
-        "EXP,1.0,gamesByPlayer": db.open({
-            schema: ['players', 'games-gamesByPlayer-1.0'],
-            validator: VALIDATORS['1.0']('PlayerGame'),
-        }),
-        "EXP,1.1,gamesByPlayer": db.open({
-            schema: ['players', 'games-gamesByPlayer-1.1'],
-            validator: VALIDATORS['1.1']('PlayerGame'),
-        }),
+        // "EXP,1.0,gamesByPlayer": db.open({
+        //     schema: ['players', 'games-gamesByPlayer-1.0'],
+        //     validator: VALIDATORS['1.0']('PlayerGame'),
+        // }),
+        // "EXP,1.1,gamesByPlayer": db.open({
+        //     schema: ['players', 'games-gamesByPlayer-1.1'],
+        //     validator: VALIDATORS['1.1']('PlayerGame'),
+        // }),
     }
 }
 
@@ -96,124 +89,284 @@ type FetchedFacet<TFacet> = {
     value: Option<TFacet>
 }
 
-function doAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>, action: AnyAction): Promise<TResult> {
-    return db.runTransaction(fsDb)(async (d: db.Database): Promise<TResult> => {
-        const fetched: FetchedFacet<TFacet>[] = []
+function doAction(action: AnyAction): Promise<Result<null, AnyError>> {
+    return db.runTransaction(fsDb)(async (d: db.Database): Promise<Result<null, AnyError>> => {
+        const { actionId, savedAction, result } = await doActionForLiveRevision(d, REVISION1_1_1, action)
 
-        const annotationsTable = d.open({
-            schema: [`annotations-${impl.id}`],
-            validator: impl.validateAnnotation,
-        })
-
-        const labelsTable = d.open({
-            schema: [`labels-${impl.id}`],
-            validator: validateSchema('Reference')
-        })
-
-        const inputs: fw.Input<TFacet> = {
-            async getFacet(label: string): Promise<Option<TFacet>> {
-                const maybeRef = await readables.getOption(labelsTable, [label]);
-                return await option.from(maybeRef).andThenAsync(async ref => {
-                    const annos = option.from(await readables.getOption(annotationsTable, [ref.actionId])).unwrap();
-                    const value = option.fromData(option.of(annos.facets[label]).unwrap());
-
-                    fetched.push({
-                        label,
-                        actionId: ref.actionId,
-                        value,
-                    })
-                    return value
-                })
-            }
-        }
-
-        const { result, facets } = await impl.integrate(action, inputs);
-
-        const labelToParent: Record<string, Reference> = {};
-        for (const { label, actionId } of fetched) {
-            labelToParent[label] = { actionId };
-        }
-        const parentList: string[] = ix.toArray(ix.from(fetched).pipe(
-            ixop.map(({ actionId }) => actionId),
-            ixop.orderBy(actionId => actionId),
-            ixop.distinct(),
-        ))
-
-        const savedAction: SavedAction = { parents: parentList, action };
-        const actionId = getActionId(savedAction);
-
-        const actionsWriter = openAll(d)["ACTIONS"].openWriter("action", db.WriterRole.PRIMARY);
-        actionsWriter.set([actionId], savedAction)
-
-        const annotationsWriter = annotationsTable.openWriter("action", db.WriterRole.PRIMARY);
-        const labelsWriter = labelsTable.openWriter("action", db.WriterRole.PRIMARY);
-
-        annotationsWriter.set([actionId], { parents: labelToParent, facets })
-        for (const label in facets) {
-            labelsWriter.set([label], { actionId });
-            const maybeParentFacet = option.from(find(fetched, ({ label: l }) => l === label))
-            const maybeOldValue = maybeParentFacet.andThen(({ value }) => value);
-            await impl.activateFacet(d, label, maybeOldValue.data, facets[label])
-        }
-
+        await doActionForSecondaryRevision(d, REVISION1_2_0, actionId, savedAction)
         return result;
+        // const fetched: FetchedFacet<TFacet>[] = []
+
+        // const annotationsTable = d.open({
+        //     schema: [`annotations-${impl.id}`],
+        //     validator: impl.validateAnnotation,
+        // })
+
+        // const labelsTable = d.open({
+        //     schema: [`labels-${impl.id}`],
+        //     validator: validateSchema('Reference')
+        // })
+
+        // const inputs: fw.Input<TFacet> = {
+        //     async getFacet(label: string): Promise<Option<TFacet>> {
+        //         const maybeRef = await readables.getOption(labelsTable, [label]);
+        //         return await option.from(maybeRef).andThenAsync(async ref => {
+        //             const annos = option.from(await readables.getOption(annotationsTable, [ref.actionId])).unwrap();
+        //             const value = option.fromData(option.of(annos.facets[label]).unwrap());
+
+        //             fetched.push({
+        //                 label,
+        //                 actionId: ref.actionId,
+        //                 value,
+        //             })
+        //             return value
+        //         })
+        //     }
+        // }
+
+        // const { result, facets } = await impl.integrate(action, inputs);
+
+        // const labelToParent: Record<string, Reference> = {};
+        // for (const { label, actionId } of fetched) {
+        //     labelToParent[label] = { actionId };
+        // }
+        // const parentList: string[] = ix.toArray(ix.from(fetched).pipe(
+        //     ixop.map(({ actionId }) => actionId),
+        //     ixop.orderBy(actionId => actionId),
+        //     ixop.distinct(),
+        // ))
+
+        // const savedAction: SavedAction = { parents: parentList, action };
+        // const actionId = getActionId(savedAction);
+
+        // const actionsWriter = openAll(d)["ACTIONS"].openWriter("action", db.WriterRole.PRIMARY);
+        // actionsWriter.set([actionId], savedAction)
+
+        // const annotationsWriter = annotationsTable.openWriter("action", db.WriterRole.PRIMARY);
+        // const labelsWriter = labelsTable.openWriter("action", db.WriterRole.PRIMARY);
+
+        // annotationsWriter.set([actionId], { parents: labelToParent, facets })
+        // for (const label in facets) {
+        //     labelsWriter.set([label], { actionId });
+        //     const maybeParentFacet = option.from(find(fetched, ({ label: l }) => l === label))
+        //     const maybeOldValue = maybeParentFacet.andThen(({ value }) => value);
+        //     await impl.activateFacet(d, label, maybeOldValue.data, facets[label])
+        // }
+
+        // return result;
     })
 }
 
-function replayAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>, actionId: string, action: SavedAction): Promise<void> {
-    return db.runTransaction(fsDb)(async (d: db.Database): Promise<void> => {
-        const fetched: FetchedFacet<TFacet>[] = []
+interface LiveResult<TResult> {
+    actionId: string
+    savedAction: SavedAction
+    result: TResult
+}
 
-        const annotationsTable = d.open({
-            schema: [`annotations-${impl.id}`],
-            validator: impl.validateAnnotation,
-        })
 
-        const labelsTable = d.open({
-            schema: [`labels-${impl.id}`],
-            validator: validateSchema('Reference')
-        })
+async function doActionForLiveRevision<TResult, TFacet>(d: db.Database, impl: fw.Revision<TResult, TFacet>, action: AnyAction):
+    Promise<LiveResult<TResult>> {
+    const fetched: FetchedFacet<TFacet>[] = []
 
-        const inputs: fw.Input<TFacet> = {
-            async getFacet(label: string): Promise<Option<TFacet>> {
-                const maybeRef = await readables.getOption(labelsTable, [label]);
-                return await option.from(maybeRef).andThenAsync(async ref => {
-                    const annos = option.from(await readables.getOption(annotationsTable, [ref.actionId])).unwrap();
-                    const value = option.fromData(option.of(annos.facets[label]).unwrap());
+    const annotationsTable = d.open(`annotations-${impl.id}`, {
+        schema: [`annotations-${impl.id}`],
+        validator: impl.validateAnnotation,
+    })
 
-                    fetched.push({
-                        label,
-                        actionId: ref.actionId,
-                        value,
-                    })
-                    return value
+    const labelsTable = d.open(`labels-${impl.id}`, {
+        schema: [`labels-${impl.id}`],
+        validator: validateSchema('Reference')
+    })
+
+    const inputs: fw.Input<TFacet> = {
+        async getFacet(label: string): Promise<Option<TFacet>> {
+            const maybeRef = await readables.getOption(labelsTable, [label]);
+            return await option.from(maybeRef).andThenAsync(async ref => {
+                const annos = option.from(await readables.getOption(annotationsTable, [ref.actionId])).unwrap();
+                const value = option.fromData(option.of(annos.facets[label]).unwrap());
+
+                fetched.push({
+                    label,
+                    actionId: ref.actionId,
+                    value,
                 })
-            }
+                return value
+            })
         }
+    }
 
-        const { facets } = await impl.integrate(action.action, inputs);
+    const { result, facets } = await impl.integrate(action, inputs);
 
-        const labelToParent: Record<string, Reference> = {};
-        for (const { label, actionId } of fetched) {
-            labelToParent[label] = { actionId };
-        }
-        for (const f of fetched) {
-            if (action.parents.indexOf(f.actionId) === -1) {
-                throw new Error("Illegal parent fetch!");
-            }
-        }
+    const labelToParent: Record<string, Reference> = {};
+    for (const { label, actionId } of fetched) {
+        labelToParent[label] = { actionId };
+    }
+    const parentList: string[] = ix.toArray(ix.from(fetched).pipe(
+        ixop.map(({ actionId }) => actionId),
+        ixop.orderBy(actionId => actionId),
+        ixop.distinct(),
+    ))
 
-        const annotationsWriter = annotationsTable.openWriter("replay", db.WriterRole.PRIMARY);
-        const labelsWriter = labelsTable.openWriter("replay", db.WriterRole.PRIMARY);
+    const savedAction: SavedAction = { parents: parentList, action };
+    const actionId = getActionId(savedAction);
 
-        annotationsWriter.set([actionId], { parents: labelToParent, facets })
-        for (const label in facets) {
+    const actionsWriter = openAll(d)["ACTIONS"].openWriter(`primary-${impl.id}`, db.WriterRole.PRIMARY);
+    actionsWriter.set([actionId], savedAction)
+
+    const annotationsWriter = annotationsTable.openWriter(`primary-${impl.id}`, db.WriterRole.PRIMARY);
+    const labelsWriter = labelsTable.openWriter(`primary-${impl.id}`, db.WriterRole.PRIMARY);
+
+    annotationsWriter.set([actionId], { parents: labelToParent, facets })
+    const facetDiffs: Diff<TFacet>[] = Array.from(ix.from(Object.entries(facets)).pipe(
+        ixop.flatMap(([label, facet]): Diff<TFacet>[] => {
             labelsWriter.set([label], { actionId });
             const maybeParentFacet = option.from(find(fetched, ({ label: l }) => l === label))
             const maybeOldValue = maybeParentFacet.andThen(({ value }) => value);
-            await impl.activateFacet(d, label, maybeOldValue.data, facets[label])
-        }
+            return diffs.newDiff2([label], maybeOldValue, option.fromData(facet)).diffs
+        })
+    ))
+
+    await impl.activateFacets(d, db.WriterRole.PRIMARY, facetDiffs)
+
+    return { actionId, savedAction, result };
+}
+
+
+async function doActionForSecondaryRevision<TResult, TFacet>(
+    d: db.Database, impl: fw.Revision<TResult, TFacet>,
+    actionId: string, savedAction: SavedAction): Promise<void> {
+    const fetched: FetchedFacet<TFacet>[] = []
+
+    const annotationsTable = d.open(`annotations-${impl.id}`, {
+        schema: [`annotations-${impl.id}`],
+        validator: impl.validateAnnotation,
     })
+
+    const labelsTable = d.open(`labels-${impl.id}`, {
+        schema: [`labels-${impl.id}`],
+        validator: validateSchema('Reference')
+    })
+
+    const parentsAnnotations = ixa.from(savedAction.parents).pipe(
+        ixaop.map(actionId => readables.getOption(annotationsTable, [actionId])),
+    )
+
+    if (!await ixa.every(parentsAnnotations, maybeAnno => maybeAnno.data.some)) {
+        return;
+    }
+
+    const inputs: fw.Input<TFacet> = {
+        async getFacet(label: string): Promise<Option<TFacet>> {
+            const maybeRef = await readables.getOption(labelsTable, [label]);
+            return await option.from(maybeRef).andThenAsync(async ref => {
+                const annos = option.from(await readables.getOption(annotationsTable, [ref.actionId])).unwrap();
+                const value = option.fromData(option.of(annos.facets[label]).unwrap());
+
+                if (savedAction.parents.indexOf(ref.actionId) === -1) {
+                    throw new Error("illegal parent fetch")
+                }
+
+                fetched.push({
+                    label,
+                    actionId: ref.actionId,
+                    value,
+                })
+                return value
+            })
+        }
+    }
+
+    const { facets } = await impl.integrate(savedAction.action, inputs);
+
+    const labelToParent: Record<string, Reference> = {};
+    for (const { label, actionId } of fetched) {
+        labelToParent[label] = { actionId };
+    }
+
+    const annotationsWriter = annotationsTable.openWriter(`secondary-${impl.id}`, db.WriterRole.PRIMARY);
+    const labelsWriter = labelsTable.openWriter(`secondary-${impl.id}`, db.WriterRole.PRIMARY);
+
+    annotationsWriter.set([actionId], { parents: labelToParent, facets })
+    const facetDiffs: Diff<TFacet>[] = Array.from(ix.from(Object.entries(facets)).pipe(
+        ixop.flatMap(([label, facet]): Diff<TFacet>[] => {
+            labelsWriter.set([label], { actionId });
+            const maybeParentFacet = option.from(find(fetched, ({ label: l }) => l === label))
+            const maybeOldValue = maybeParentFacet.andThen(({ value }) => value);
+            return diffs.newDiff2([label], maybeOldValue, option.fromData(facet)).diffs
+        })
+    ))
+
+    await impl.activateFacets(d, db.WriterRole.SECONDARY, facetDiffs)
+}
+
+
+async function replayAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>, d: db.Database, actionId: string, savedAction: SavedAction,
+    role: db.WriterRole): Promise<void> {
+    const fetched: FetchedFacet<TFacet>[] = []
+
+    const annotationsTable = d.open(`annotations-${impl.id}`, {
+        schema: [`annotations-${impl.id}`],
+        validator: impl.validateAnnotation,
+    })
+
+    const labelsTable = d.open(`labels-${impl.id}`, {
+        schema: [`labels-${impl.id}`],
+        validator: validateSchema('Reference')
+    })
+
+
+    const parentsAnnotations = ixa.from(savedAction.parents).pipe(
+        ixaop.map(actionId => readables.getOption(annotationsTable, [actionId])),
+    )
+
+    if (!await ixa.every(parentsAnnotations, maybeAnno => maybeAnno.data.some)) {
+        throw new Error("action not ready for replay")
+    }
+
+
+    const inputs: fw.Input<TFacet> = {
+        async getFacet(label: string): Promise<Option<TFacet>> {
+            const maybeRef = await readables.getOption(labelsTable, [label]);
+            return await option.from(maybeRef).andThenAsync(async ref => {
+                const annos = option.from(await readables.getOption(annotationsTable, [ref.actionId])).unwrap();
+                const value = option.fromData(option.of(annos.facets[label]).unwrap());
+
+                fetched.push({
+                    label,
+                    actionId: ref.actionId,
+                    value,
+                })
+                return value
+            })
+        }
+    }
+
+    const { facets } = await impl.integrate(savedAction.action, inputs);
+
+    const labelToParent: Record<string, Reference> = {};
+    for (const { label, actionId } of fetched) {
+        labelToParent[label] = { actionId };
+    }
+    for (const f of fetched) {
+        if (savedAction.parents.indexOf(f.actionId) === -1) {
+            throw new Error("Illegal parent fetch!");
+        }
+    }
+
+    const annotationsWriter = annotationsTable.openWriter(`secondary-${impl.id}`, db.WriterRole.PRIMARY);
+    const labelsWriter = labelsTable.openWriter(`secondary-${impl.id}`, db.WriterRole.PRIMARY);
+
+    annotationsWriter.set([actionId], { parents: labelToParent, facets })
+    const facetDiffs: Diff<TFacet>[] = Array.from(ix.from(Object.entries(facets)).pipe(
+        ixop.flatMap(([label, facet]): Diff<TFacet>[] => {
+            labelsWriter.set([label], { actionId });
+            const maybeParentFacet = option.from(find(fetched, ({ label: l }) => l === label))
+            const maybeOldValue = maybeParentFacet.andThen(({ value }) => value);
+            return diffs.newDiff2([label], maybeOldValue, option.fromData(facet)).diffs
+        })
+    ))
+
+    await impl.activateFacets(d, role, facetDiffs)
 }
 
 function find<T>(items: Iterable<T>, pred: (t: T) => boolean): Option<T> {
@@ -226,58 +379,78 @@ function find<T>(items: Iterable<T>, pred: (t: T) => boolean): Option<T> {
     }
 }
 
-function checkAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>,
+async function checkAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>, db: db.Database,
     actionId: string, action: SavedAction, annotations: fw.Annotations<TFacet>): Promise<void> {
-    return db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
-
-        const annotationsTable = db.open({
-            schema: [`annotations-${impl.id}`],
-            validator: impl.validateAnnotation,
-        })
+    const annotationsTable = db.open(`annotations-${impl.id}`, {
+        schema: [`annotations-${impl.id}`],
+        validator: impl.validateAnnotation,
+    })
 
 
-        const fetched: FetchedFacet<TFacet>[] = []
-        const inputs: fw.Input<TFacet> = {
-            async getFacet(label: string): Promise<Option<TFacet>> {
-                const maybeParent = option.of(annotations.parents[label]);
+    const fetched: FetchedFacet<TFacet>[] = []
+    const inputs: fw.Input<TFacet> = {
+        async getFacet(label: string): Promise<Option<TFacet>> {
+            const maybeParent = option.of(annotations.parents[label]);
 
-                return await maybeParent.andThenAsync(async ref => {
-                    const annos = option.from(await readables.getOption(annotationsTable, [ref.actionId])).unwrap();
-                    const value = option.fromData(option.of(annos.facets[label]).unwrap());
+            return await maybeParent.andThenAsync(async ref => {
+                const annos = option.from(await readables.getOption(annotationsTable, [ref.actionId])).unwrap();
+                const value = option.fromData(option.of(annos.facets[label]).unwrap());
 
-                    fetched.push({
-                        label,
-                        actionId: ref.actionId,
-                        value,
-                    })
-                    return value
+                fetched.push({
+                    label,
+                    actionId: ref.actionId,
+                    value,
                 })
-            }
+                return value
+            })
         }
+    }
 
-        const { facets } = await impl.integrate(action.action, inputs);
+    const { facets } = await impl.integrate(action.action, inputs);
 
-        const labelToParent: Record<string, Reference> = {};
-        for (const { label, actionId } of fetched) {
-            labelToParent[label] = { actionId };
+    const labelToParent: Record<string, Reference> = {};
+    for (const { label, actionId } of fetched) {
+        labelToParent[label] = { actionId };
+    }
+    const parentList: string[] = ix.toArray(ix.from(fetched).pipe(
+        ixop.map(({ actionId }) => actionId),
+        ixop.orderBy(actionId => actionId),
+        ixop.distinct(),
+    ))
+
+    const actualAnnotations: fw.Annotations<TFacet> = {
+        parents: labelToParent,
+        facets,
+    }
+
+    assert.deepEqual(parentList, action.parents);
+    assert.deepEqual(actualAnnotations, annotations);
+}
+
+async function replayOrCheck<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>, role: db.WriterRole, d: db.Database, actionId: string,
+    savedAction: SavedAction): Promise<void> {
+    const annotationsTable = d.open(`annotations-${impl.id}`, {
+        schema: [`annotations-${impl.id}`],
+        validator: impl.validateAnnotation,
+    })
+
+    const maybeAnnotations = await readables.getOption(annotationsTable, [actionId]);
+    await option.from(maybeAnnotations).split({
+        async onSome(annos): Promise<void> {
+            console.log(`CHECK ${impl.id} ${actionId}`)
+
+            await checkAction(impl, d, actionId, savedAction, annos)
+        },
+        async onNone(): Promise<void> {
+            console.log(`REPLAY ${impl.id} ${actionId}`)
+
+            await replayAction(impl, d, actionId, savedAction, role)
         }
-        const parentList: string[] = ix.toArray(ix.from(fetched).pipe(
-            ixop.map(({ actionId }) => actionId),
-            ixop.orderBy(actionId => actionId),
-            ixop.distinct(),
-        ))
-
-        const actualAnnotations: fw.Annotations<TFacet> = {
-            parents: labelToParent,
-            facets,
-        }
-
-        assert.deepEqual(parentList, action.parents);
-        assert.deepEqual(actualAnnotations, annotations);
     })
 }
 
-async function handleReplay<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>): Promise<void> {
+
+async function handleReplay(): Promise<void> {
     let cursor: string = '';
     console.log('REPLAY')
     while (true) {
@@ -287,26 +460,10 @@ async function handleReplay<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>)
             break;
         }
         const [actionId, savedAction] = nextActionOrNull;
-        const annos = await db.runTransaction(fsDb)(db => {
-            const annotationsTable = db.open({
-                schema: [`annotations-${impl.id}`],
-                validator: impl.validateAnnotation,
-            })
-
-            return readables.getOption(annotationsTable, [actionId])
+        await db.runTransaction(fsDb)(async d => {
+            await replayOrCheck(REVISION1_1_1, db.WriterRole.PRIMARY, d, actionId, savedAction)
+            await replayOrCheck(REVISION1_2_0, db.WriterRole.SECONDARY, d, actionId, savedAction)
         });
-        await option.from(annos).split({
-            async onSome(annos): Promise<void> {
-                console.log(`CHECK ${actionId}`)
-
-                await checkAction(impl, actionId, savedAction, annos)
-            },
-            async onNone(): Promise<void> {
-                console.log(`REPLAY ${actionId}`)
-
-                await replayAction(impl, actionId, savedAction)
-            }
-        })
 
         cursor = actionId;
     }
@@ -327,7 +484,7 @@ function getNextAction(tx: db.TxRunner, startAfter: string): Promise<([string, S
 
 app.options('/action', cors())
 app.post('/action', cors(), function(req: Request<Dictionary<string>>, res, next) {
-    doAction(REVISION1_1_1, validateSchema('AnyAction')(req.body)).then((resp) => {
+    doAction(validateSchema('AnyAction')(req.body)).then((resp) => {
         if (resp.data.status === 'err') {
             res.status(resp.data.error.status_code)
             res.json(resp)
@@ -371,7 +528,7 @@ function batch(): Router {
     const res = Router()
 
     res.post('/replay', function(_req: Request<{}>, res, next) {
-        handleReplay(REVISION1_1_1).then(result => {
+        handleReplay().then(result => {
             res.status(200)
             res.json(result)
         }).catch(next)
@@ -396,23 +553,23 @@ function batch(): Router {
         }).catch(next)
     })
 
-    res.post('/delete/:collectionId', function(req: Request<DeleteCollectionRequest>, res, next) {
-        deleteCollection(db.runTransaction(fsDb), req.params.collectionId as CollectionId).then(result => {
-            res.status(200)
-            res.json(result)
-        }).catch(next)
-    })
+    // res.post('/delete/:collectionId', function(req: Request<DeleteCollectionRequest>, res, next) {
+    //     deleteCollection(db.runTransaction(fsDb), req.params.collectionId as CollectionId).then(result => {
+    //         res.status(200)
+    //         res.json(result)
+    //     }).catch(next)
+    // })
 
     return res
 }
 
-async function deleteCollection(runner: db.TxRunner, collectionId: CollectionId): Promise<void> {
-    await runner(async (db: db.Database): Promise<void> => {
-        const ts = openAll(db);
-        switch (collectionId) {
-            case '1.1.1':
-                await deleteTable(ts['ANNOTATIONS,1.1.1'])
-                await deleteTable(ts["LABELS,1.1.1,games"]);
-        }
-    })
-}
+// async function deleteCollection(runner: db.TxRunner, collectionId: CollectionId): Promise<void> {
+//     await runner(async (db: db.Database): Promise<void> => {
+//         const ts = openAll(db);
+//         switch (collectionId) {
+//             case '1.1.1':
+//                 await deleteTable(ts['ANNOTATIONS,1.1.1'])
+//                 await deleteTable(ts["LABELS,1.1.1,games"]);
+//         }
+//     })
+// }

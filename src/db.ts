@@ -11,6 +11,7 @@ import * as ix from "ix/iterable";
 import { AsyncIterableX } from 'ix/asynciterable';
 import { Option, option } from './util';
 import deepEqual from 'deep-equal';
+import { OptionView } from './util/option';
 
 export interface TxRunner {
     <R>(cb: (db: Database) => Promise<R>): Promise<R>
@@ -22,11 +23,14 @@ export interface TableSpec<T> {
 }
 
 export function runTransaction(fsDb: Firestore): TxRunner {
-    return <R>(cb: (db: Database) => Promise<R>): Promise<R> => {
-        return fsDb.runTransaction(async (tx) => {
+    return async <R>(cb: (db: Database) => Promise<R>): Promise<R> => {
+        return await fsDb.runTransaction(async (tx) => {
             const db = new Database(fsDb, tx);
             const res = await cb(db);
-            db.commit();
+            const diffs = db.commit();
+            if (diffs.length !== 0) {
+                console.log("Differences: ", JSON.stringify(diffs, undefined, 2))
+            }
             return res
         });
     }
@@ -39,21 +43,25 @@ interface Mutation<T> {
 }
 
 export class Database {
-    private committers: (() => Iterable<Difference<unknown>>)[] = []
+    private opened: Record<string, FSTable<unknown>> = {};
+    // private committers: (() => Iterable<Difference<unknown>>)[] = []
 
     constructor(private db: Firestore, private tx: Transaction) { }
 
-    open<T>(
+    open<T>(id: string,
         spec: TableSpec<T>): Table<T> {
-        const res = new FSTable(
-            this.db, this.tx, spec.schema, spec.validator);
-        this.committers.push(() => res.commit());
-        return res;
+        console.log("OPEN", id)
+        if (!(id in this.opened)) {
+            this.opened[id] = new FSTable(
+                this.db, this.tx, spec.schema, spec.validator);
+        }
+        return this.opened[id] as Table<T>
     }
 
     commit(): Difference<unknown>[] {
-        return Array.from(ix.from(this.committers).pipe(
-            ixop.flatMap(c => c())
+        return Array.from(ix.from(Object.values(this.opened)).pipe(
+            ixop.flatMap(t => t.commit()),
+            ixop.tap({ next: t => console.log("tapped", t) })
         ))
     }
 }
@@ -75,15 +83,15 @@ export interface Writer<T> {
 }
 
 export interface Difference<T> {
-    primaryWriterId: string,
-    secondaryWriterId: string,
-    primaryHad: Option<Option<T>>
-    secondaryHad: Option<Option<T>>
+    aId: string,
+    bId: string,
+    aHad: Option<Option<T>>
+    bHad: Option<Option<T>>
 }
 
 class FSTable<T> implements Table<T>{
     private primaryWriter: option.OptionView<string> = option.none();
-    private secondaryWriters: string[] = [];
+    private allWriters: string[] = [];
     private mutations: Mutation<T>[] = [];
 
     constructor(
@@ -113,9 +121,9 @@ class FSTable<T> implements Table<T>{
                     this.primaryWriter = option.some(writerId)
                 }
             })
-        } else {
-            this.secondaryWriters.push(writerId)
         }
+        this.allWriters.push(writerId)
+
         return {
             set: (key: Key, value: T): void => {
                 this.validateKey(key)
@@ -142,23 +150,13 @@ class FSTable<T> implements Table<T>{
             ixop.groupBy(
                 ({ docRef }) => docRef.path,
                 x => x,
-                (_key, values) => {
-                    const [primaries, secondaries] = ix.partition(values,
-                        (({ writerId }) => writerId === this.primaryWriter.unwrap(
-                        )));
+                (_key, mutations) => {
+                    const primary = this.primaryWriter.andThen(primaryWriter =>
+                        atMostOne(ix.from(mutations).pipe(
+                            ixop.filter(({ writerId }) => writerId === this.primaryWriter.unwrap()))));
 
-                    const primaryMutation: option.OptionView<Mutation<T>> =
-                        atMostOne(primaries);
-                    const secondaryMutations = ix.from(this.secondaryWriters).pipe(
-                        ixop.groupJoin(secondaries,
-                            secondaryId => secondaryId,
-                            ({ writerId }) => writerId,
-                            (writerId: string, mutation: Iterable<Mutation<T>>) =>
-                                ({ writerId, mutation: atMostOne(mutation) })
-                        )
-                    )
 
-                    primaryMutation.map(mut => {
+                    primary.map(mut => {
                         option.from(mut.value).split({
                             onNone: () => {
                                 this.tx.delete(mut.docRef)
@@ -168,36 +166,46 @@ class FSTable<T> implements Table<T>{
                             }
                         })
                     })
+                    console.log("ALL WRITERS", this.allWriters)
 
-                    return this.computeDifference(this.primaryWriter.unwrap(),
-                        primaryMutation, secondaryMutations)
+                    const maybeMutations = ix.from(this.allWriters).pipe(
+                        ixop.groupJoin(mutations,
+                            id => id,
+                            ({ writerId }) => writerId,
+                            (writerId: string, mutation: Iterable<Mutation<T>>) =>
+                                ({ writerId, mutation: atMostOne(mutation) })
+                        )
+                    )
+
+                    return this.computeDifference(_key, Array.from(maybeMutations))
                 }),
             ixop.flatMap(x => x)
         )
     }
 
-    private computeDifference(
-        primaryWriterId: string,
-        primary: option.OptionView<Mutation<T>>,
-        secondaries: Iterable<{ writerId: string, mutation: option.OptionView<Mutation<T>> }>):
+    private *computeDifference(
+        path: string,
+        maybeMutations: { writerId: string, mutation: option.OptionView<Mutation<T>> }[]):
         Iterable<Difference<T>> {
-        return ix.from(secondaries).pipe(
-            ixop.flatMap(({ writerId: secondaryWriterId, mutation: secondary }): Difference<T>[] => {
-                const primaryValue = primary.map(({ value }) => value)
-                const secondaryValue = secondary.map(({ value }) => value)
+        if (maybeMutations.length < 2) {
+            return
+        }
 
-                if (deepEqual(primaryValue.data, secondaryValue.data)) {
-                    return []
-                } else {
-                    return [{
-                        primaryWriterId,
-                        secondaryWriterId,
-                        primaryHad: primaryValue,
-                        secondaryHad: secondaryValue,
-                    }]
+        const { writerId: firstId, mutation: firstMutation } = maybeMutations[0];
+        for (const { writerId: otherId, mutation: otherMutation } of maybeMutations.slice(1)) {
+            const firstValue = firstMutation.map(({ value }) => value)
+            const otherValue = otherMutation.map(({ value }) => value)
+
+            if (!deepEqual(firstValue.data, otherValue.data)) {
+                yield {
+                    aId: firstId,
+                    bId: otherId,
+                    aHad: firstValue,
+                    bHad: otherValue,
                 }
-            })
-        )
+            }
+
+        }
     }
 
     private validateKey(key: Key): void {

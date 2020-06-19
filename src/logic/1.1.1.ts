@@ -6,7 +6,7 @@ import { applyChangesSimple, diffToChange } from '../base';
 import * as db from '../db';
 import * as diffs from '../diffs';
 import * as fw from '../framework';
-import { Item, item, Key } from '../interfaces';
+import { Item, item, Key, Diff } from '../interfaces';
 import * as model1_0 from '../model/1.0';
 import { validate as validate1_0 } from '../model/1.0.validator';
 import * as model1_1 from '../model/1.1';
@@ -51,22 +51,18 @@ export const REVISION: fw.Revision<Result<null, Error>, Game> = {
         })
     },
 
-    async activateFacet(d: db.Database, label: string, maybeOldGame: OptionData<Game>, newGame: OptionData<Game>): Promise<void> {
-        const oldGame = option.fromData(maybeOldGame).withDefault(defaultGame1_1);
-
-        const gameDiff = diffs.newDiff([label], oldGame, option.fromData(newGame).withDefault(defaultGame1_1));
-
-        const gamesByPlayer1_0Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_0).diffs;
-        const gamesByPlayer1_1Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_1).diffs
-
-        const gamesByPlayer1_0 = d.open({
+    async activateFacets(d: db.Database, role: db.WriterRole, gameDiffs: Diff<Game>[]): Promise<void> {
+        const gamesByPlayer1_0 = d.open('gamesByPlayer-1.0', {
             schema: ['players', 'games-gamesByPlayer-1.0'],
             validator: validate1_0('PlayerGame'),
-        }).openWriter("activate-1.1.1", db.WriterRole.PRIMARY)
-        const gamesByPlayer1_1 = d.open({
+        }).openWriter("activate-1.1.1", role)
+        const gamesByPlayer1_1 = d.open('gamesByPlayer-1.1', {
             schema: ['players', 'games-gamesByPlayer-1.1'],
             validator: validate1_1('PlayerGame'),
-        }).openWriter("activate-1.1.1", db.WriterRole.PRIMARY)
+        }).openWriter("activate-1.1.1", role)
+
+        const gamesByPlayer1_0Diffs = diffs.from(gameDiffs).map(gameToPlayerGames1_0).diffs;
+        const gamesByPlayer1_1Diffs = diffs.from(gameDiffs).map(gameToPlayerGames1_1).diffs
 
         applyChangesSimple(gamesByPlayer1_0, gamesByPlayer1_0Diffs.map(diffToChange));
         applyChangesSimple(gamesByPlayer1_1, gamesByPlayer1_1Diffs.map(diffToChange))
