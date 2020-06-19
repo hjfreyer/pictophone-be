@@ -310,7 +310,7 @@ export * from './interfaces';
 // // }
 
 export async function deleteTable(table: db.Table<unknown>): Promise<void> {
-    // for await (const { key } of readables.readAll(table)) {
-    //     table.delete(key)
-    // }
+    for await (const { key } of readables.readAll(table)) {
+        table.delete(key)
+    }
 }

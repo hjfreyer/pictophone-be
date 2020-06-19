@@ -6,7 +6,7 @@ import { applyChangesSimple, diffToChange } from '../base';
 import * as db from '../db';
 import * as diffs from '../diffs';
 import * as fw from '../framework';
-import { Item, item, Key, Diff } from '../interfaces';
+import { Item, item, Key } from '../interfaces';
 import * as model1_0 from '../model/1.0';
 import { validate as validate1_0 } from '../model/1.0.validator';
 import * as model1_1 from '../model/1.1';
@@ -111,24 +111,25 @@ export const REVISION: fw.Revision<Result<null, Error>, Facet> = {
         //     })
     },
 
-    async activateFacets(d: db.Database, role: db.WriterRole, facetDiffs: Diff<Facet>[]): Promise<void> {
-        const gamesByPlayer1_0 = d.open('gamesByPlayer-1.0', {
-            schema: ['players', 'games-gamesByPlayer-1.0'],
-            validator: validate1_0('PlayerGame'),
-        }).openWriter("activate-1.2.0", role)
-        const gamesByPlayer1_1 = d.open('gamesByPlayer-1.1', {
-            schema: ['players', 'games-gamesByPlayer-1.1'],
-            validator: validate1_1('PlayerGame'),
-        }).openWriter("activate-1.2.0", role)
+    async activateFacet(db: db.Database, label: string, maybeOldGame: OptionData<Facet>, newGame: OptionData<Facet>): Promise<void> {
+        // const oldGame = option.fromData(maybeOldGame).withDefault(defaultGame1_1);
 
-        const gameDiffs = facetDiffs.filter(({ key: [label] }) => label.startsWith("game:"))
-            .map(diff => ({ ...diff, key: [diff.key[0].replace("game:", "")] })) as Diff<Game>[];
+        // const gameDiff = diffs.newDiff([label], oldGame, option.fromData(newGame).withDefault(defaultGame1_1));
 
-        const gamesByPlayer1_1Diffs = diffs.from(gameDiffs).map(gameToPlayerGames).diffs;
-        const gamesByPlayer1_0Diffs = diffs.from(gameDiffs).map(gameToPlayerGames1_0).diffs
+        // const gamesByPlayer1_0Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_0).diffs;
+        // const gamesByPlayer1_1Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_1).diffs
 
-        applyChangesSimple(gamesByPlayer1_0, gamesByPlayer1_0Diffs.map(diffToChange));
-        applyChangesSimple(gamesByPlayer1_1, gamesByPlayer1_1Diffs.map(diffToChange))
+        // const gamesByPlayer1_0 = db.open({
+        //     schema: ['players', 'games-gamesByPlayer-1.0'],
+        //     validator: validate1_0('PlayerGame'),
+        // })
+        // const gamesByPlayer1_1 = db.open({
+        //     schema: ['players', 'games-gamesByPlayer-1.1'],
+        //     validator: validate1_1('PlayerGame'),
+        // })
+
+        // applyChangesSimple(gamesByPlayer1_0, gamesByPlayer1_0Diffs.map(diffToChange));
+        // applyChangesSimple(gamesByPlayer1_1, gamesByPlayer1_1Diffs.map(diffToChange))
     }
 }
 
@@ -372,7 +373,7 @@ function findById<T extends { id: string }>(ts: T[], id: string): T | null {
     return ts.find(t => t.id === id) || null
 }
 
-function gameToPlayerGames([gameId]: Key, game: Game): Iterable<Item<model1_1.PlayerGame>> {
+function gameToPlayerGames1_1([gameId]: Key, game: Game): Iterable<Item<model1_1.PlayerGame>> {
     return ix.from(game.players).pipe(
         ixop.map(({ id }): Item<model1_1.PlayerGame> =>
             item([id, gameId], getPlayerGameExport1_1(game, id)))
@@ -448,7 +449,7 @@ function getPlayerGameExport1_1(game: Game, playerId: string): model1_1.PlayerGa
 }
 
 function gameToPlayerGames1_0(key: Key, value: Game): Iterable<Item<model1_0.PlayerGame>> {
-    return ix.from(gameToPlayerGames(key, value)).pipe(
+    return ix.from(gameToPlayerGames1_1(key, value)).pipe(
         ixop.map(({ key, value: pg }: Item<model1_1.PlayerGame>): Item<model1_0.PlayerGame> => {
             return item(key, {
                 ...pg,
