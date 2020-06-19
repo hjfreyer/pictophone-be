@@ -1,5 +1,9 @@
 import { OptionData } from "../util/option"
 import { Reference } from "../schema"
+import { Item } from "../interfaces"
+import * as fw from "../framework"
+import { ResultData } from "../util/result"
+import { PlayerGame } from "./1.1"
 
 export interface JoinGameAction {
     kind: 'join_game'
@@ -130,6 +134,13 @@ export type Submission = {
 export type Game = UnstartedGame | StartedGame
 
 export interface Annotations {
+    labels: string[]
     parents: Record<string, Reference>
     facets: Record<string, OptionData<Game>>
 }
+
+export interface State {
+    game: ResultData<Game, Error>
+}
+
+export type Annotation2 = fw.Annotation2<State>

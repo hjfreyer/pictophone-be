@@ -32,6 +32,7 @@ import { OptionData } from './util/option'
 import { REVISION as REVISION1_1_1 } from './logic/1.1.1'
 import { REVISION as REVISION1_2_0 } from './logic/1.2.0'
 import * as fw from './framework';
+import { OperatorAsyncFunction, OperatorFunction } from 'ix/interfaces'
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -91,15 +92,24 @@ function openAll(db: db.Database): Tables {
     }
 }
 
-type FetchedFacet<TFacet> = {
+type FetchedState<TState> = {
     label: string,
-    actionId: string,
-    value: Option<TFacet>
+    actionId: Option<string>,
+    state: Option<TState>
 }
 
-function doAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>, action: AnyAction): Promise<TResult> {
-    return db.runTransaction(fsDb)(async (db: db.Database): Promise<TResult> => {
-        const fetched: FetchedFacet<TFacet>[] = []
+type RevisionResult<TState> = {
+    newState: TState
+    oldStates: Record<string, Option<TState>>
+}
+
+// type AllResults = {
+//     '1.1.1': 
+// }
+
+function doAction<TState>(impl: fw.Revision2<TState>, action: AnyAction): Promise<RevisionResult<TState>> {
+    return db.runTransaction(fsDb)(async (db: db.Database): Promise<RevisionResult<TState>> => {
+        const fetched: FetchedState<TState>[] = []
 
         const annotationsTable = db.open({
             schema: [`annotations-${impl.id}`],
@@ -111,31 +121,34 @@ function doAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>, action: A
             validator: validateSchema('Reference')
         })
 
-        const inputs: fw.Input<TFacet> = {
-            async getFacet(label: string): Promise<Option<TFacet>> {
+        const inputs: fw.Input2<TState> = {
+            async getParent(label: string): Promise<Option<TState>> {
                 const maybeRef = await readables.getOption(labelsTable, [label]);
-                return await option.from(maybeRef).andThenAsync(async ref => {
-                    const annos = option.from(await readables.getOption(annotationsTable, [ref.actionId])).unwrap();
-                    const value = option.fromData(option.of(annos.facets[label]).unwrap());
+                const f: FetchedState<TState> = {
+                    label,
+                    actionId: option.from(maybeRef).map(({ actionId }) => actionId),
+                    state: await option.from(maybeRef).mapAsync(async ref => {
+                        const annos = option.from(await readables.getOption(annotationsTable, [ref.actionId])).unwrap();
 
-                    fetched.push({
-                        label,
-                        actionId: ref.actionId,
-                        value,
+                        return annos.state
                     })
-                    return value
-                })
+                }
+                fetched.push(f)
+                return f.state
             }
         }
 
-        const { result, facets } = await impl.integrate(action, inputs);
+        const { labels, state } = await impl.integrate(action, inputs);
 
-        const labelToParent: Record<string, Reference> = {};
+        const labelToParent: Record<string, fw.ParentLink> = {};
         for (const { label, actionId } of fetched) {
-            labelToParent[label] = { actionId };
+            labelToParent[label] = {
+                actionId: actionId.data
+            };
         }
         const parentList: string[] = ix.toArray(ix.from(fetched).pipe(
             ixop.map(({ actionId }) => actionId),
+            filterNone(),
             ixop.orderBy(actionId => actionId),
             ixop.distinct(),
         ))
@@ -144,21 +157,28 @@ function doAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>, action: A
         const actionId = getActionId(savedAction);
 
         openAll(db)["ACTIONS"].set([actionId], savedAction)
-        annotationsTable.set([actionId], { parents: labelToParent, facets })
-        for (const label in facets) {
+        annotationsTable.set([actionId], { labels, parents: labelToParent, state })
+        const oldStates: Record<string, Option<TState>> = {};
+        for (const label of labels) {
+            const oldFetched = option.of(ix.find(fetched, f => f.label === label)).expect("No blind writes");
+            oldStates[label] = oldFetched.state;
             labelsTable.set([label], { actionId });
-            const maybeParentFacet = option.from(find(fetched, ({ label: l }) => l === label))
-            const maybeOldValue = maybeParentFacet.andThen(({ value }) => value);
-            await impl.activateFacet(db, label, maybeOldValue.data, facets[label])
         }
 
-        return result;
+        return {
+            newState: state,
+            oldStates,
+        };
     })
 }
 
-function replayAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>, actionId: string, action: SavedAction): Promise<void> {
+function filterNone<T>(): OperatorFunction<Option<T>, T> {
+    return ixop.flatMap((opt: Option<T>): Iterable<T> => option.from(opt).map(v => ix.of(v)).orElse(ix.empty))
+}
+
+function replayAction<TState>(impl: fw.Revision2<TState>, actionId: string, action: SavedAction): Promise<void> {
     return db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
-        const fetched: FetchedFacet<TFacet>[] = []
+        const fetched: FetchedState<TState>[] = []
 
         const annotationsTable = db.open({
             schema: [`annotations-${impl.id}`],
@@ -170,41 +190,37 @@ function replayAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>, actio
             validator: validateSchema('Reference')
         })
 
-        const inputs: fw.Input<TFacet> = {
-            async getFacet(label: string): Promise<Option<TFacet>> {
+        const inputs: fw.Input2<TState> = {
+            async getParent(label: string): Promise<Option<TState>> {
                 const maybeRef = await readables.getOption(labelsTable, [label]);
-                return await option.from(maybeRef).andThenAsync(async ref => {
-                    const annos = option.from(await readables.getOption(annotationsTable, [ref.actionId])).unwrap();
-                    const value = option.fromData(option.of(annos.facets[label]).unwrap());
+                const f: FetchedState<TState> = {
+                    label,
+                    actionId: option.from(maybeRef).map(({ actionId }) => actionId),
+                    state: await option.from(maybeRef).mapAsync(async ref => {
+                        const annos = option.from(await readables.getOption(annotationsTable, [ref.actionId])).unwrap();
 
-                    fetched.push({
-                        label,
-                        actionId: ref.actionId,
-                        value,
+                        return annos.state
                     })
-                    return value
-                })
+                }
+                fetched.push(f)
+                return f.state
             }
         }
 
-        const { facets } = await impl.integrate(action.action, inputs);
+        const { labels, state } = await impl.integrate(action.action, inputs);
 
-        const labelToParent: Record<string, Reference> = {};
+        const labelToParent: Record<string, fw.ParentLink> = {};
         for (const { label, actionId } of fetched) {
-            labelToParent[label] = { actionId };
-        }
-        for (const f of fetched) {
-            if (action.parents.indexOf(f.actionId) === -1) {
-                throw new Error("Illegal parent fetch!");
+            labelToParent[label] = { actionId: actionId.data };
+            if (actionId.data.some && action.parents.indexOf(actionId.data.value) === -1) {
+                throw new Error(`Requested actionId ${JSON.stringify(actionId.data.value)} for label ${JSON.stringify(label)} 
+not on allowed list: ${JSON.stringify(action.parents)}`);
             }
         }
 
-        annotationsTable.set([actionId], { parents: labelToParent, facets })
-        for (const label in facets) {
+        annotationsTable.set([actionId], { parents: labelToParent, labels, state })
+        for (const label of labels) {
             labelsTable.set([label], { actionId });
-            const maybeParentFacet = option.from(find(fetched, ({ label: l }) => l === label))
-            const maybeOldValue = maybeParentFacet.andThen(({ value }) => value);
-            await impl.activateFacet(db, label, maybeOldValue.data, facets[label])
         }
     })
 }
@@ -219,58 +235,58 @@ function find<T>(items: Iterable<T>, pred: (t: T) => boolean): Option<T> {
     }
 }
 
-function checkAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>,
-    actionId: string, action: SavedAction, annotations: fw.Annotations<TFacet>): Promise<void> {
-    return db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
+// function checkAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>,
+//     actionId: string, action: SavedAction, annotations: fw.Annotations<TFacet>): Promise<void> {
+//     return db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
 
-        const annotationsTable = db.open({
-            schema: [`annotations-${impl.id}`],
-            validator: impl.validateAnnotation,
-        })
+//         const annotationsTable = db.open({
+//             schema: [`annotations-${impl.id}`],
+//             validator: impl.validateAnnotation,
+//         })
 
 
-        const fetched: FetchedFacet<TFacet>[] = []
-        const inputs: fw.Input<TFacet> = {
-            async getFacet(label: string): Promise<Option<TFacet>> {
-                const maybeParent = option.of(annotations.parents[label]);
+//         const fetched: FetchedFacet<TFacet>[] = []
+//         const inputs: fw.Input<TFacet> = {
+//             async getFacet(label: string): Promise<Option<TFacet>> {
+//                 const maybeParent = option.of(annotations.parents[label]);
 
-                return await maybeParent.andThenAsync(async ref => {
-                    const annos = option.from(await readables.getOption(annotationsTable, [ref.actionId])).unwrap();
-                    const value = option.fromData(option.of(annos.facets[label]).unwrap());
+//                 return await maybeParent.andThenAsync(async ref => {
+//                     const annos = option.from(await readables.getOption(annotationsTable, [ref.actionId])).unwrap();
+//                     const value = option.fromData(option.of(annos.facets[label]).unwrap());
 
-                    fetched.push({
-                        label,
-                        actionId: ref.actionId,
-                        value,
-                    })
-                    return value
-                })
-            }
-        }
+//                     fetched.push({
+//                         label,
+//                         actionId: ref.actionId,
+//                         value,
+//                     })
+//                     return value
+//                 })
+//             }
+//         }
 
-        const { facets } = await impl.integrate(action.action, inputs);
+//         const { facets } = await impl.integrate(action.action, inputs);
 
-        const labelToParent: Record<string, Reference> = {};
-        for (const { label, actionId } of fetched) {
-            labelToParent[label] = { actionId };
-        }
-        const parentList: string[] = ix.toArray(ix.from(fetched).pipe(
-            ixop.map(({ actionId }) => actionId),
-            ixop.orderBy(actionId => actionId),
-            ixop.distinct(),
-        ))
+//         const labelToParent: Record<string, Reference> = {};
+//         for (const { label, actionId } of fetched) {
+//             labelToParent[label] = { actionId };
+//         }
+//         const parentList: string[] = ix.toArray(ix.from(fetched).pipe(
+//             ixop.map(({ actionId }) => actionId),
+//             ixop.orderBy(actionId => actionId),
+//             ixop.distinct(),
+//         ))
 
-        const actualAnnotations: fw.Annotations<TFacet> = {
-            parents: labelToParent,
-            facets,
-        }
+//         const actualAnnotations: fw.Annotations<TFacet> = {
+//             parents: labelToParent,
+//             facets,
+//         }
 
-        assert.deepEqual(parentList, action.parents);
-        assert.deepEqual(actualAnnotations, annotations);
-    })
-}
+//         assert.deepEqual(parentList, action.parents);
+//         assert.deepEqual(actualAnnotations, annotations);
+//     })
+// }
 
-async function handleReplay<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>): Promise<void> {
+async function handleReplay<TState>(impl: fw.Revision2<TState>): Promise<void> {
     let cursor: string = '';
     console.log('REPLAY')
     while (true) {
@@ -290,9 +306,9 @@ async function handleReplay<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>)
         });
         await option.from(annos).split({
             async onSome(annos): Promise<void> {
-                console.log(`CHECK ${actionId}`)
+                // console.log(`CHECK ${actionId}`)
 
-                await checkAction(impl, actionId, savedAction, annos)
+                // await checkAction(impl, actionId, savedAction, annos)
             },
             async onNone(): Promise<void> {
                 console.log(`REPLAY ${actionId}`)
@@ -321,9 +337,9 @@ function getNextAction(tx: db.TxRunner, startAfter: string): Promise<([string, S
 app.options('/action', cors())
 app.post('/action', cors(), function(req: Request<Dictionary<string>>, res, next) {
     doAction(REVISION1_1_1, validateSchema('AnyAction')(req.body)).then((resp) => {
-        if (resp.data.status === 'err') {
-            res.status(resp.data.error.status_code)
-            res.json(resp)
+        if (resp.newState.game.status === 'err') {
+            res.status(resp.newState.game.error.status_code)
+            res.json(resp.newState.game.error)
         } else {
             res.status(200)
             res.json()

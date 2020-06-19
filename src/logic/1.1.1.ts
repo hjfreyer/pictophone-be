@@ -2,6 +2,8 @@
 import produce from 'immer';
 import * as ix from "ix/iterable";
 import * as ixop from "ix/iterable/operators";
+import * as ixa from "ix/asynciterable";
+import * as ixaop from "ix/asynciterable/operators";
 import { applyChangesSimple, diffToChange } from '../base';
 import * as db from '../db';
 import * as diffs from '../diffs';
@@ -10,67 +12,60 @@ import { Item, item, Key } from '../interfaces';
 import * as model1_0 from '../model/1.0';
 import { validate as validate1_0 } from '../model/1.0.validator';
 import * as model1_1 from '../model/1.1';
-import { Error, Game, Action, MakeMoveAction } from '../model/1.1.1';
+import { Error, Game, Action, MakeMoveAction, State } from '../model/1.1.1';
 import { validate } from '../model/1.1.1.validator';
 import { validate as validate1_1 } from '../model/1.1.validator';
 import { AnyAction } from '../schema';
 import * as util from '../util';
 import { Defaultable, Option, option, Result, result } from '../util';
 import { OptionData } from '../util/option';
+import deepEqual from 'deep-equal';
 
-type IntegrationResult =
-    fw.IntegrationResult<Result<null, Error>, Game>;
 
-export const REVISION: fw.Revision<Result<null, Error>, Game> = {
+export const REVISION: fw.Revision2<State> = {
     id: '1.1.1',
-    validateAnnotation: validate('Annotations'),
+    validateAnnotation: validate('Annotation2'),
 
-    async integrate(action: AnyAction, inputs: fw.Input<Game>): Promise<IntegrationResult> {
-        const oldGame = option.from(await inputs.getFacet(action.gameId)).withDefault(defaultGame1_1);
+    async integrate(action: AnyAction, inputs: fw.Input2<State>): Promise<fw.IntegrationResult2<State>> {
+        const gameParent = await inputs.getParent(`game:${action.gameId}`);
+        const oldGame = option.from(gameParent).map(s => result.fromData(s.game).unwrap());
 
-        const maybeNewGameOrError = integrateHelper(convertAction(action), oldGame);
-        return result.from(maybeNewGameOrError).split({
-            onErr: (err): IntegrationResult => ({
-                facets: {},
-                result: result.err(err),
+        const newGameResult = integrateHelper(convertAction(action), oldGame);
+
+        return result.from(newGameResult).split({
+            onErr: (err): fw.IntegrationResult2<State> => ({
+                labels: [],
+                state: { game: newGameResult.data }
             }),
-            onOk: (maybeNewGame) => {
-                return option.from(maybeNewGame).split({
-                    onNone: (): IntegrationResult => ({
-                        facets: {},
-                        result: result.ok(null)
-                    }),
-                    onSome(newGame): IntegrationResult {
-                        return {
-                            facets: { [action.gameId]: option.some(newGame).data },
-                            result: result.ok(null)
-                        }
-                    }
-                })
+            onOk: (newGame): fw.IntegrationResult2<State> => {
+                return {
+                    labels: [`game:${action.gameId}`],
+                    state: { game: result.ok<Game, Error>(newGame).data }
+                }
             }
         })
     },
 
-    async activateFacet(db: db.Database, label: string, maybeOldGame: OptionData<Game>, newGame: OptionData<Game>): Promise<void> {
-        const oldGame = option.fromData(maybeOldGame).withDefault(defaultGame1_1);
+    // async activateFacet(db: db.Database, label: string, maybeOldGame: OptionData<Game>, newGame: OptionData<Game>): Promise<void> {
+    //     const oldGame = option.fromData(maybeOldGame).withDefault(defaultGame1_1);
 
-        const gameDiff = diffs.newDiff([label], oldGame, option.fromData(newGame).withDefault(defaultGame1_1));
+    //     const gameDiff = diffs.newDiff([label], oldGame, option.fromData(newGame).withDefault(defaultGame1_1));
 
-        const gamesByPlayer1_0Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_0).diffs;
-        const gamesByPlayer1_1Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_1).diffs
+    //     const gamesByPlayer1_0Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_0).diffs;
+    //     const gamesByPlayer1_1Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_1).diffs
 
-        const gamesByPlayer1_0 = db.open({
-            schema: ['players', 'games-gamesByPlayer-1.0'],
-            validator: validate1_0('PlayerGame'),
-        })
-        const gamesByPlayer1_1 = db.open({
-            schema: ['players', 'games-gamesByPlayer-1.1'],
-            validator: validate1_1('PlayerGame'),
-        })
+    //     const gamesByPlayer1_0 = db.open({
+    //         schema: ['players', 'games-gamesByPlayer-1.0'],
+    //         validator: validate1_0('PlayerGame'),
+    //     })
+    //     const gamesByPlayer1_1 = db.open({
+    //         schema: ['players', 'games-gamesByPlayer-1.1'],
+    //         validator: validate1_1('PlayerGame'),
+    //     })
 
-        applyChangesSimple(gamesByPlayer1_0, gamesByPlayer1_0Diffs.map(diffToChange));
-        applyChangesSimple(gamesByPlayer1_1, gamesByPlayer1_1Diffs.map(diffToChange))
-    }
+    //     applyChangesSimple(gamesByPlayer1_0, gamesByPlayer1_0Diffs.map(diffToChange));
+    //     applyChangesSimple(gamesByPlayer1_1, gamesByPlayer1_1Diffs.map(diffToChange))
+    // }
 }
 
 function defaultGame1_1(): Game {
@@ -106,9 +101,9 @@ function convertAction(a: AnyAction): Action {
     }
 }
 
-function integrateHelper(a: Action, gameOrDefault: Defaultable<Game>):
-    util.Result<Option<Game>, Error> {
-    const game = gameOrDefault.value;
+function integrateHelper(a: Action, maybeGame: Option<Game>):
+    util.Result<Game, Error> {
+    const game = option.from(maybeGame).orElse(defaultGame1_1);
     switch (a.kind) {
         case 'join_game':
             if (game.state !== 'UNSTARTED') {
@@ -121,35 +116,34 @@ function integrateHelper(a: Action, gameOrDefault: Defaultable<Game>):
             }
 
             if (game.players.some(p => p.id === a.playerId)) {
-                return result.ok(option.none())
+                return result.ok(game)
             }
-            return result.ok(option.some({
+            return result.ok({
                 ...game,
                 players: [...game.players, {
                     id: a.playerId,
                     displayName: a.playerDisplayName,
                 }]
-            }));
+            });
 
         case 'start_game':
-            if (game.state !== 'UNSTARTED') {
-                return result.ok(option.none())
+            if (game.state === 'STARTED') {
+                return result.ok(game)
             }
-            return result.ok(option.some({
+            return result.ok({
                 state: 'STARTED',
                 players: game.players.map(p => ({
                     ...p,
                     submissions: [],
                 })),
-            }))
+            })
         case 'make_move':
-            return makeMove(gameOrDefault, a)
+            return makeMove(maybeGame, a)
     }
 }
 
-function makeMove(gameOrDefault: util.Defaultable<Game>, action: MakeMoveAction): util.Result<
-    Option<Game>, Error> {
-    const game = gameOrDefault.value;
+function makeMove(maybeGame: Option<Game>, action: MakeMoveAction): util.Result<Game, Error> {
+    const game = option.from(maybeGame).orElse(defaultGame1_1);
     const playerId = action.playerId
 
     if (game.state !== 'STARTED') {
@@ -212,9 +206,9 @@ function makeMove(gameOrDefault: util.Defaultable<Game>, action: MakeMoveAction)
         })
     }
 
-    return result.ok(option.some(produce(game, game => {
+    return result.ok(produce(game, game => {
         findById(game.players, playerId)!.submissions.push(action.submission)
-    })))
+    }))
 }
 
 function findById<T extends { id: string }>(ts: T[], id: string): T | null {

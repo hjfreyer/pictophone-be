@@ -49,7 +49,15 @@ export class OptionView<T> implements Option<T> {
         }
     }
 
-    orElse<D>(def: () => D): T | D {
+    expect(msg: string): T {
+        if (this.data.some) {
+            return this.data.value
+        } else {
+            throw new Error("expected option to be some: " + msg)
+        }
+    }
+
+    orElse(def: () => T): T {
         if (this.data.some) {
             return this.data.value
         } else {
