@@ -373,7 +373,7 @@ function findById<T extends { id: string }>(ts: T[], id: string): T | null {
     return ts.find(t => t.id === id) || null
 }
 
-function gameToPlayerGames1_1([gameId]: Key, game: Game): Iterable<Item<model1_1.PlayerGame>> {
+function gameToPlayerGames([gameId]: Key, game: Game): Iterable<Item<model1_1.PlayerGame>> {
     return ix.from(game.players).pipe(
         ixop.map(({ id }): Item<model1_1.PlayerGame> =>
             item([id, gameId], getPlayerGameExport1_1(game, id)))
@@ -449,7 +449,7 @@ function getPlayerGameExport1_1(game: Game, playerId: string): model1_1.PlayerGa
 }
 
 function gameToPlayerGames1_0(key: Key, value: Game): Iterable<Item<model1_0.PlayerGame>> {
-    return ix.from(gameToPlayerGames1_1(key, value)).pipe(
+    return ix.from(gameToPlayerGames(key, value)).pipe(
         ixop.map(({ key, value: pg }: Item<model1_1.PlayerGame>): Item<model1_0.PlayerGame> => {
             return item(key, {
                 ...pg,

@@ -9,6 +9,7 @@ import produce from 'immer'
 import * as ixa from "ix/asynciterable"
 import * as ix from "ix/iterable"
 import * as ixop from "ix/iterable/operators"
+import * as ixaop from "ix/asynciterable/operators"
 import { applyChangesSimple, diffToChange, getActionId } from './base'
 import * as db from './db'
 import * as diffs from './diffs'
