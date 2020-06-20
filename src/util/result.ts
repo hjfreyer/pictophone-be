@@ -49,6 +49,13 @@ export class ResultView<R, E> implements Result<R, E>{
         }
     }
 
+    mapErr<O>(fn: (r: E) => O): ResultView<R, O> {
+        return this.split({
+            onErr: (e) => err(fn(e)),
+            onOk: (r) => ok(r),
+        })
+    }
+
     split<TResult>({ onOk, onErr }: { onOk: (t: R) => TResult, onErr: (e: E) => TResult }): TResult {
         if (this.data.status === 'ok') {
             return onOk(this.data.value)
@@ -57,14 +64,14 @@ export class ResultView<R, E> implements Result<R, E>{
         }
     }
 
-    get err(): Option<E> {
+    get err(): option.OptionView<E> {
         return this.split({
             onErr: e => option.some(e),
             onOk: () => option.none(),
         })
     }
 
-    get value(): Option<R> {
+    get value(): option.OptionView<R> {
         return this.split({
             onErr: () => option.none(),
             onOk: (v) => option.some(v),

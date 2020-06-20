@@ -21,6 +21,7 @@ import { Defaultable, Option, option, Result, result } from '../util';
 import { OptionData, OptionView } from '../util/option';
 import { ResultView } from '../util/result';
 import deepEqual from 'deep-equal';
+import { UnifiedInterface } from '..';
 
 type IntegrationResult =
     fw.IntegrationResult2<State>;
@@ -121,6 +122,35 @@ export const REVISION: fw.Revision2<State> = {
     //     // applyChangesSimple(gamesByPlayer1_0, gamesByPlayer1_0Diffs.map(diffToChange));
     //     // applyChangesSimple(gamesByPlayer1_1, gamesByPlayer1_1Diffs.map(diffToChange))
     // }
+}
+
+function convertError1_0(err: Error): model1_0.Error {
+    switch (err.version) {
+        case '1.0':
+            return err
+        case '1.2':
+            return {
+                version: 'UNKNOWN',
+                true_version: err.version,
+                status: "UNKNOWN ERROR",
+                status_code: err.status_code,
+            }
+    }
+}
+
+function convertError1_1(err: Error): model1_1.Error {
+    return convertError1_0(err)
+}
+
+export function getUnifiedInterface(gameId: string, state: State): UnifiedInterface {
+    return {
+        '1.0': result.fromData(state.game).map(game => ({
+            playerGames: ix.toArray(gameToPlayerGames1_0([gameId], game))
+        })).mapErr(convertError1_0).data,
+        '1.1': result.fromData(state.game).map(game => ({
+            playerGames: ix.toArray(gameToPlayerGames1_1([gameId], game))
+        })).mapErr(convertError1_1).data,
+    }
 }
 
 function gameToShortCodes(gameId: Key, game: Game): Item<ShortCode>[] {
@@ -362,7 +392,7 @@ function findById<T extends { id: string }>(ts: T[], id: string): T | null {
     return ts.find(t => t.id === id) || null
 }
 
-function gameToPlayerGames([gameId]: Key, game: Game): Iterable<Item<model1_1.PlayerGame>> {
+function gameToPlayerGames1_1([gameId]: Key, game: Game): Iterable<Item<model1_1.PlayerGame>> {
     return ix.from(game.players).pipe(
         ixop.map(({ id }): Item<model1_1.PlayerGame> =>
             item([id, gameId], getPlayerGameExport1_1(game, id)))
@@ -438,7 +468,7 @@ function getPlayerGameExport1_1(game: Game, playerId: string): model1_1.PlayerGa
 }
 
 function gameToPlayerGames1_0(key: Key, value: Game): Iterable<Item<model1_0.PlayerGame>> {
-    return ix.from(gameToPlayerGames(key, value)).pipe(
+    return ix.from(gameToPlayerGames1_1(key, value)).pipe(
         ixop.map(({ key, value: pg }: Item<model1_1.PlayerGame>): Item<model1_0.PlayerGame> => {
             return item(key, {
                 ...pg,

@@ -36,6 +36,7 @@ export function none<T>(): OptionView<T> {
     return fromData({ some: false })
 }
 
+
 export class OptionView<T> implements Option<T> {
     data: OptionData<T>
 
@@ -111,5 +112,10 @@ export class OptionView<T> implements Option<T> {
         } else {
             return onNone()
         }
+    }
+
+
+    and<O>(other: Option<O>): OptionView<[T, O]> {
+        return this.andThen(a => from(other).map(b => [a, b]))
     }
 }

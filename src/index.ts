@@ -31,8 +31,11 @@ import { Defaultable, defaultable, Option, option, Result, result } from './util
 import { OptionData } from './util/option'
 import { REVISION as REVISION1_1_1 } from './logic/1.1.1'
 import { REVISION as REVISION1_2_0 } from './logic/1.2.0'
+import * as logic1_1_1 from './logic/1.1.1'
+import * as logic1_2_0 from './logic/1.2.0'
 import * as fw from './framework';
 import { OperatorAsyncFunction, OperatorFunction } from 'ix/interfaces'
+import { ResultData } from './util/result'
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -109,12 +112,55 @@ type DoActionResult<TState> = {
     oldStates: Record<string, Option<TState>>
 }
 
+
+export interface UnifiedInterface {
+    '1.0': ResultData<Interface1_0, model1_0.Error>
+    '1.1': ResultData<Interface1_1, model1_1.Error>
+}
+
+export interface Interface1_0 {
+    playerGames: Item<model1_0.PlayerGame>[]
+}
+
+export interface Interface1_1 {
+    playerGames: Item<model1_1.PlayerGame>[]
+}
+
+function compareInterfaces(expected: UnifiedInterface, actual: UnifiedInterface) {
+    if (!deepEqual(expected, actual)) {
+        console.log("skew between implementation versions: ", expected, actual)
+    }
+}
+
+
 function handleAction<TState>(action: AnyAction): Promise<Result<null, AnyError>> {
     return db.runTransaction(fsDb)(async (db: db.Database): Promise<Result<null, AnyError>> => {
         const result1_1_1 = await doAction(db, REVISION1_1_1, action);
         const result1_2_0 = await replayActionForRevision(db, REVISION1_2_0, result1_1_1.actionId, result1_1_1.savedAction);
 
-        return result.fromData(result1_1_1.newState.game).map(() => null)
+        const pg1_1_1 = logic1_1_1.getUnifiedInterface(action.gameId, result1_1_1.newState)
+        option.from(result1_2_0).map(res => {
+            const pg1_2_0 = logic1_2_0.getUnifiedInterface(action.gameId, res.newState)
+            compareInterfaces(pg1_1_1, pg1_2_0)
+        })
+
+        const ts = openAll(db);
+        result.fromData(pg1_1_1['1.0']).map(i => {
+            for (const { key, value } of i.playerGames) {
+                ts["EXP,1.0,gamesByPlayer"].set(key, value)
+            }
+        })
+        result.fromData(pg1_1_1['1.1']).map(i => {
+            for (const { key, value } of i.playerGames) {
+                ts["EXP,1.1,gamesByPlayer"].set(key, value)
+            }
+        })
+        switch (action.version) {
+            case '1.0':
+                return result.fromData(pg1_1_1[action.version]).map(() => null)
+            case '1.1':
+                return result.fromData(pg1_1_1[action.version]).map(() => null)
+        }
     })
 }
 
@@ -185,14 +231,36 @@ async function doAction<TState>(db: db.Database, impl: fw.Revision2<TState>, act
 }
 
 type ReplayActionResult<TState> = {
+    kind: 'check' | 'replay'
     newState: TState
     oldStates: Record<string, Option<TState>>
 }
 
 function replayOrCheckAction<TState>(actionId: string, action: SavedAction): Promise<void> {
     return db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
-        await replayOrCheckActionForRevision(db, REVISION1_1_1, actionId, action)
-        await replayOrCheckActionForRevision(db, REVISION1_2_0, actionId, action)
+        const result1_1_1 = await replayOrCheckActionForRevision(db, REVISION1_1_1, actionId, action)
+        const result1_2_0 = await replayOrCheckActionForRevision(db, REVISION1_2_0, actionId, action)
+
+        const pg1_1_1 = option.from(result1_1_1).map(res => logic1_1_1.getUnifiedInterface(action.action.gameId, res.newState))
+        const pg1_2_0 = option.from(result1_2_0).map(res => logic1_2_0.getUnifiedInterface(action.action.gameId, res.newState))
+
+        pg1_1_1.and(pg1_2_0).map(([pg1_1_1, pg1_2_0]) => {
+            compareInterfaces(pg1_1_1, pg1_2_0)
+        })
+
+        const ts = openAll(db);
+        pg1_1_1.map(pg1_1_1 => {
+            result.fromData(pg1_1_1['1.0']).map(pg => {
+                for (const pgs of pg.playerGames) {
+                    ts["EXP,1.0,gamesByPlayer"].set(pgs.key, pgs.value)
+                }
+            })
+            result.fromData(pg1_1_1['1.1']).map(pg => {
+                for (const pgs of pg.playerGames) {
+                    ts["EXP,1.1,gamesByPlayer"].set(pgs.key, pgs.value)
+                }
+            })
+        })
     })
 }
 
@@ -280,7 +348,7 @@ not on allowed list: ${JSON.stringify(action.parents)}`);
         labelsTable.set([label], { actionId });
     }
 
-    return option.some({ newState: state, oldStates })
+    return option.some({ kind: 'replay', newState: state, oldStates })
 }
 
 function find<T>(items: Iterable<T>, pred: (t: T) => boolean): Option<T> {

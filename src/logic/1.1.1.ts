@@ -8,7 +8,7 @@ import { applyChangesSimple, diffToChange } from '../base';
 import * as db from '../db';
 import * as diffs from '../diffs';
 import * as fw from '../framework';
-import { Item, item, Key } from '../interfaces';
+import { Item, item, Key, Change } from '../interfaces';
 import * as model1_0 from '../model/1.0';
 import { validate as validate1_0 } from '../model/1.0.validator';
 import * as model1_1 from '../model/1.1';
@@ -20,6 +20,7 @@ import * as util from '../util';
 import { Defaultable, Option, option, Result, result } from '../util';
 import { OptionData } from '../util/option';
 import deepEqual from 'deep-equal';
+import { UnifiedInterface } from '..';
 
 
 export const REVISION: fw.Revision2<State> = {
@@ -66,6 +67,18 @@ export const REVISION: fw.Revision2<State> = {
     //     applyChangesSimple(gamesByPlayer1_0, gamesByPlayer1_0Diffs.map(diffToChange));
     //     applyChangesSimple(gamesByPlayer1_1, gamesByPlayer1_1Diffs.map(diffToChange))
     // }
+}
+
+
+export function getUnifiedInterface(gameId: string, state: State): UnifiedInterface {
+    return {
+        '1.0': result.fromData(state.game).map(game => ({
+            playerGames: ix.toArray(gameToPlayerGames1_0([gameId], game))
+        })).data,
+        '1.1': result.fromData(state.game).map(game => ({
+            playerGames: ix.toArray(gameToPlayerGames1_1([gameId], game))
+        })).data,
+    }
 }
 
 function defaultGame1_1(): Game {
