@@ -2,8 +2,10 @@
 import { strict as assert } from 'assert';
 
 import * as ix from "ix/iterable"
+import * as ixa from "ix/asynciterable"
 import * as ixop from "ix/iterable/operators"
-import { OperatorFunction } from 'ix/interfaces';
+import * as ixaop from "ix/asynciterable/operators"
+import { OperatorFunction, OperatorAsyncFunction } from 'ix/interfaces';
 import * as option from './option';
 import { Option } from './option';
 
@@ -179,4 +181,8 @@ export function narrow<TSource, TResult extends TSource>(
 
 export function filterNone<T>(): OperatorFunction<Option<T>, T> {
     return ixop.flatMap((opt: Option<T>): Iterable<T> => option.from(opt).map(v => ix.of(v)).orElse(ix.empty))
+}
+
+export function filterNoneAsync<T>(): OperatorAsyncFunction<Option<T>, T> {
+    return ixaop.flatMap((opt: Option<T>): AsyncIterable<T> => option.from(opt).map(v => ixa.of(v)).orElse(ixa.empty))
 }

@@ -135,32 +135,35 @@ function compareInterfaces(expected: UnifiedInterface, actual: UnifiedInterface)
 
 function handleAction<TState>(action: AnyAction): Promise<Result<null, AnyError>> {
     return db.runTransaction(fsDb)(async (db: db.Database): Promise<Result<null, AnyError>> => {
-        const result1_1_1 = await doAction(db, REVISION1_1_1, action);
-        const result1_2_0 = await replayActionForRevision(db, REVISION1_2_0, result1_1_1.actionId, result1_1_1.savedAction);
+        await logic1_2_0.commitAction(db, action);
+        return result.ok(null)
 
-        const pg1_1_1 = logic1_1_1.getUnifiedInterface(action.gameId, result1_1_1.newState)
-        option.from(result1_2_0).map(res => {
-            const pg1_2_0 = logic1_2_0.getUnifiedInterface(action.gameId, res.newState)
-            compareInterfaces(pg1_1_1, pg1_2_0)
-        })
+        // const result1_1_1 = await doAction(db, REVISION1_1_1, action);
+        // const result1_2_0 = await replayActionForRevision(db, REVISION1_2_0, result1_1_1.actionId, result1_1_1.savedAction);
 
-        const ts = openAll(db);
-        result.fromData(pg1_1_1['1.0']).map(i => {
-            for (const { key, value } of i.playerGames) {
-                ts["EXP,1.0,gamesByPlayer"].set(key, value)
-            }
-        })
-        result.fromData(pg1_1_1['1.1']).map(i => {
-            for (const { key, value } of i.playerGames) {
-                ts["EXP,1.1,gamesByPlayer"].set(key, value)
-            }
-        })
-        switch (action.version) {
-            case '1.0':
-                return result.fromData(pg1_1_1[action.version]).map(() => null)
-            case '1.1':
-                return result.fromData(pg1_1_1[action.version]).map(() => null)
-        }
+        // const pg1_1_1 = logic1_1_1.getUnifiedInterface(action.gameId, result1_1_1.newState)
+        // option.from(result1_2_0).map(res => {
+        //     const pg1_2_0 = logic1_2_0.getUnifiedInterface(action.gameId, res.newState)
+        //     compareInterfaces(pg1_1_1, pg1_2_0)
+        // })
+
+        // const ts = openAll(db);
+        // result.fromData(pg1_1_1['1.0']).map(i => {
+        //     for (const { key, value } of i.playerGames) {
+        //         ts["EXP,1.0,gamesByPlayer"].set(key, value)
+        //     }
+        // })
+        // result.fromData(pg1_1_1['1.1']).map(i => {
+        //     for (const { key, value } of i.playerGames) {
+        //         ts["EXP,1.1,gamesByPlayer"].set(key, value)
+        //     }
+        // })
+        // switch (action.version) {
+        //     case '1.0':
+        //         return result.fromData(pg1_1_1[action.version]).map(() => null)
+        //     case '1.1':
+        //         return result.fromData(pg1_1_1[action.version]).map(() => null)
+        // }
     })
 }
 
@@ -454,6 +457,23 @@ app.post('/action', cors(), function(req: Request<Dictionary<string>>, res, next
     }).catch(next)
 })
 
+
+app.get('/debug', cors(), function(req: Request<Dictionary<string>>, res, next) {
+    const foo = async () => {
+
+    }
+
+    // handleAction(validateSchema('AnyAction')(req.query)).then((resp) => {
+    //     if (resp.data.status === 'err') {
+    //         res.status(resp.data.error.status_code)
+    //         res.json(resp.data.error)
+    //     } else {
+    //         res.status(200)
+    //         res.json()
+    //     }
+    // }).catch(next)
+})
+
 app.use('/batch', batch())
 
 type DeleteCollectionRequest = {
@@ -532,3 +552,17 @@ function batch(): Router {
 //         }
 //     })
 // }
+
+async function debugMain() {
+    await db.runTransaction(fsDb)(async db => {
+
+
+
+        console.log(JSON.stringify(await logic1_2_0.getGameState(db, { kind: 'replay', actionId: "02020-06-19T17:43:18.392Z052beb85" }, "aa")))
+    })
+}
+
+(global as any)['logic'] = logic1_2_0;
+(global as any)['tx'] = db.runTransaction(fsDb);
+
+debugMain()

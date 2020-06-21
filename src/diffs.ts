@@ -4,6 +4,7 @@ import * as ixop from "ix/iterable/operators";
 import { Diff, Item, Key } from './interfaces';
 import * as util from './util';
 import deepEqual from "deep-equal";
+import { OperatorFunction } from "ix/interfaces";
 
 export class Diffs<T> {
     constructor(public diffs: Diff<T>[]) { }
@@ -135,4 +136,8 @@ function singleMap<I, O>(mapper: Mapper<I, O>, diff: Diff<I>): Iterable<Diff<O>>
             }
         })
     )
+}
+
+export function mapDiffs<I, O>(mapper: Mapper<I, O>): OperatorFunction<Diff<I>, Diff<O>> {
+    return ixop.flatMap(d => ix.from(singleMap(mapper, d)))
 }

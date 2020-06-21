@@ -4,27 +4,217 @@ import * as ix from "ix/iterable";
 import * as ixop from "ix/iterable/operators";
 import * as ixa from "ix/asynciterable";
 import * as ixaop from "ix/asynciterable/operators";
-import { applyChangesSimple, diffToChange } from '../base';
+import { applyChangesSimple, diffToChange, getActionId } from '../base';
 import * as db from '../db';
 import * as diffs from '../diffs';
 import * as fw from '../framework';
-import { Item, item, Key } from '../interfaces';
+import { Item, item, Key, Change, Diff } from '../interfaces';
 import * as model1_0 from '../model/1.0';
 import { validate as validate1_0 } from '../model/1.0.validator';
 import * as model1_1 from '../model/1.1';
 import { Error, Game, Action, MakeMoveAction, ShortCode, StartedGame, State } from '../model/1.2.0';
 import { validate } from '../model/1.2.0.validator';
 import { validate as validate1_1 } from '../model/1.1.validator';
-import { AnyAction } from '../schema';
+import { AnyAction, SavedAction } from '../schema';
 import * as util from '../util';
 import { Defaultable, Option, option, Result, result } from '../util';
 import { OptionData, OptionView } from '../util/option';
 import { ResultView } from '../util/result';
 import deepEqual from 'deep-equal';
 import { UnifiedInterface } from '..';
+import { validate as validateSchema } from '../schema/interfaces.validator'
+import * as readables from '../readables';
 
 type IntegrationResult =
     fw.IntegrationResult2<State>;
+
+type MaybeLiveAction = {
+    kind: 'live'
+    action: Action
+} | {
+    kind: 'replay'
+    actionId: string
+}
+
+export async function commitAction(db: db.Database, anyAction: AnyAction): Promise<SavedAction> {
+    const action = convertAction(anyAction)
+    const res = await getNewGameOrError(db, { kind: 'live', action: action })
+    const parentList = await ixa.toArray(ixa.from(res.labelsQueried).pipe(
+        ixaop.map(label => getParent(db, { kind: 'live', action }, label)),
+        util.filterNoneAsync(),
+        ixaop.orderBy(actionId => actionId)
+    ))
+
+    const facets = await getFacets(db, { kind: 'live', action })
+
+    const actionsTable = db.open({
+        schema: ['actions'],
+        validator: validateSchema('SavedAction')
+    })
+
+    const savedAction: SavedAction = { parents: parentList, action: anyAction };
+    const actionId = getActionId(savedAction);
+
+    actionsTable.set([actionId], savedAction)
+    // annotationsTable.set([actionId], { labels, parents: labelToParent, state })
+    // const oldStates: Record<string, Option<TState>> = {};
+
+    const labelsTable = db.open({
+        schema: [`labels-1.2.0`],
+        validator: validateSchema('Reference')
+    })
+    for (const label of facets) {
+        // const oldFetched = option.of(ix.find(fetched, f => f.label === label)).expect("No blind writes");
+        //oldStates[label] = oldFetched.state;
+        labelsTable.set([label], { actionId });
+    }
+
+    return savedAction
+}
+
+
+export async function getAction(db: db.Database, actionId: string): Promise<Option<SavedAction>> {
+    return await readables.getOption(db.open({
+        schema: ['actions'],
+        validator: validateSchema('SavedAction')
+    }), [actionId])
+}
+
+export async function getParent(db: db.Database, action: MaybeLiveAction, facetId: string): Promise<Option<string>> {
+    if (action.kind === 'live') {
+        const labelsTable = db.open({
+            schema: [`labels-1.2.0`],
+            validator: validateSchema('Reference')
+        })
+        return option.from(await readables.getOption(labelsTable, [facetId])).map(x => x.actionId)
+    } else {
+        const savedAction = option.from(await getAction(db, action.actionId)).unwrap();
+
+        const orderedParentsWithFacets = ixa.from(savedAction.parents).pipe(
+            ixaop.orderByDescending(actionId => actionId),
+            ixaop.map(async actionId => ({ actionId, facets: await getFacets(db, { kind: 'replay', actionId }) }))
+        )
+
+        return option.of(await ixa.first(orderedParentsWithFacets, ({ facets }) => facets.indexOf(facetId) !== -1)).map(
+            x => x.actionId
+        )
+    }
+}
+
+export async function getNewGameOrError(db: db.Database, maybeAction: MaybeLiveAction): Promise<IntRes> {
+    const action = maybeAction.kind === 'live'
+        ? maybeAction.action
+        : convertAction(option.from(await getAction(db, maybeAction.actionId)).unwrap().action);
+
+    const gameParentId = await getParent(db, maybeAction, `game:${action.gameId}`);
+    const oldGame = await option.from(gameParentId).andThenAsync(
+        actionId => getGameState(db, { kind: 'replay', actionId }, action.gameId))
+
+    const queried = [`game:${action.gameId}`]
+
+    const internalIsShortCodeUsed = async (sc: string): Promise<boolean> => {
+        queried.push(`shortCode:${sc}`);
+        const shortCodeParent = await getParent(db, maybeAction, `shortCode:${sc}`);
+        return (await option.from(shortCodeParent).andThenAsync(
+            actionId => getShortCodeState(db, { kind: 'replay', actionId }, sc)
+        )).data.some;
+    }
+
+    const res = await helper(action, oldGame, internalIsShortCodeUsed);
+
+    return {
+        labelsQueried: queried,
+        gameId: action.gameId,
+        oldGame,
+        newGame: res
+    };
+}
+
+export interface IntRes {
+    labelsQueried: string[]
+    gameId: string
+    oldGame: Option<Game>
+    newGame: Result<Game, Error>
+}
+
+export async function getGameDiffs(db: db.Database, maybeAction: MaybeLiveAction): Promise<Diff<Game>[]> {
+    const { gameId, oldGame, newGame } = await getNewGameOrError(db, maybeAction)
+
+    return result.from(newGame).map(newGame => diffs.newDiff2([gameId], oldGame, option.some(newGame)).diffs).orElse(() => [])
+}
+
+export async function getGameState(db: db.Database, action: MaybeLiveAction, gameId: string): Promise<Option<Game>> {
+    // Illegal to call for an action that doesn't touch the state.
+    const diff = option.of(ix.find(await getGameDiffs(db, action),
+        ({ key: [diffGameId] }) => diffGameId === gameId)).unwrap();
+
+    switch (diff.kind) {
+        case 'add':
+            return option.some(diff.value)
+        case 'replace':
+            return option.some(diff.newValue)
+        case 'delete':
+            return option.none()
+    }
+}
+
+// async function getGameStates(actionId : Option<string>, action: Action): Promise<Item<Game>[]> {
+//     return Array.from(ix.from(await getGameDiffs(actionId, action)).pipe(
+//         ixop.flatMap(diff => {
+//             switch (diff.kind) {
+//                 case 'add':
+//                     return [{key: diff.key, value: diff.value}]
+//                 case 'replace':
+//                     return [{key: diff.key, value: diff.newValue}]
+//                 case 'delete':
+//                     return []
+//             }
+//         })
+//     ));
+// }
+
+export async function getShortCodeDiffs(db: db.Database, action: MaybeLiveAction): Promise<Diff<ShortCode>[]> {
+    return Array.from(ix.from(await getGameDiffs(db, action)).pipe(
+        diffs.mapDiffs(gameToShortCodes)
+    ))
+}
+
+export async function getShortCodeState(db: db.Database, action: MaybeLiveAction, shortCode: string): Promise<Option<ShortCode>> {
+    // Illegal to call for an action that doesn't touch the state.
+    const diff = option.of(ix.find(await getShortCodeDiffs(db, action),
+        ({ key: [diffId] }) => diffId === shortCode)).unwrap();
+
+    switch (diff.kind) {
+        case 'add':
+            return option.some(diff.value)
+        case 'replace':
+            return option.some(diff.newValue)
+        case 'delete':
+            return option.none()
+    }
+}
+
+
+export async function getFacets(db: db.Database, action: MaybeLiveAction): Promise<string[]> {
+    const gameFacets = (await getGameDiffs(db, action)).map(({ key: [sc] }) => `game:${sc}`)
+    const scFacets = (await getShortCodeDiffs(db, action)).map(({ key: [sc] }) => `shortCode:${sc}`)
+    return [...gameFacets, ...scFacets]
+}
+
+// async function getShortCodeStates(actionId : Option<string>, action: Action): Promise<Item<ShortCode>[]> {
+//     return Array.from(ix.from(await getShortCodeDiffs(actionId, action)).pipe(
+//         ixop.flatMap(diff => {
+//             switch (diff.kind) {
+//                 case 'add':
+//                     return [{key: diff.key, value: diff.value}]
+//                 case 'replace':
+//                     return [{key: diff.key, value: diff.newValue}]
+//                 case 'delete':
+//                     return []
+//             }
+//         })
+//     ));
+// }
 
 
 async function getGame(inputs: fw.Input2<State>, gameId: string): Promise<OptionView<Game>> {
@@ -55,7 +245,7 @@ export const REVISION: fw.Revision2<State> = {
     async integrate(anyAction: AnyAction, inputs: fw.Input2<State>): Promise<IntegrationResult> {
         const maybeOldGame = await getGame(inputs, anyAction.gameId);
 
-        const res = await helper(convertAction(anyAction), maybeOldGame, inputs);
+        const res = await helper(convertAction(anyAction), maybeOldGame, sc => isShortCodeUsed(inputs, sc));
         if (res.data.status === 'err') {
             return { labels: [], state: { game: res.data } }
         }
@@ -79,27 +269,6 @@ export const REVISION: fw.Revision2<State> = {
         }
 
         return { labels, state: { game: result.ok<Game, Error>(newGame).data } }
-        //     const maybeNewGameOrError = integrateHelper(convertAction(action), oldGame);
-        //     return result.from(maybeNewGameOrError).split({
-        //         onErr: (err): IntegrationResult => ({
-        //             States: {},
-        //             result: result.err(err),
-        //         }),
-        //         onOk: (maybeNewGame) => {
-        //             return option.from(maybeNewGame).split({
-        //                 onNone: (): IntegrationResult => ({
-        //                     States: {},
-        //                     result: result.ok(null)
-        //                 }),
-        //                 onSome(newGame): IntegrationResult {
-        //                     return {
-        //                         States: { [action.gameId]: option.some(newGame).data },
-        //                         result: result.ok(null)
-        //                     }
-        //                 }
-        //             })
-        //         }
-        //     })
     },
 
     // async activateState(db: db.Database, label: string, maybeOldGame: OptionData<State>, newGame: OptionData<State>): Promise<void> {
@@ -160,7 +329,7 @@ function gameToShortCodes(gameId: Key, game: Game): Item<ShortCode>[] {
     return [{ key: [game.shortCode], value: {} }]
 }
 
-async function helper(a: Action, maybeOldGame: Option<Game>, inputs: fw.Input2<State>): Promise<ResultView<Game, Error>> {
+async function helper(a: Action, maybeOldGame: Option<Game>, isShortCodeUsed: (shortCode: string) => Promise<boolean>): Promise<ResultView<Game, Error>> {
 
     switch (a.kind) {
         case 'create_game': {
@@ -172,7 +341,7 @@ async function helper(a: Action, maybeOldGame: Option<Game>, inputs: fw.Input2<S
                     gameId: a.gameId,
                 })
             }
-            if (await isShortCodeUsed(inputs, a.shortCode)) {
+            if (await isShortCodeUsed(a.shortCode)) {
                 return result.err({
                     version: '1.2',
                     status: 'SHORT_CODE_IN_USE',
