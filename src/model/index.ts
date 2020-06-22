@@ -13,7 +13,13 @@ export type SavedAction = {
 }
 
 export type ReferenceGroup = {
-    actionIds: string[]
+    kind: 'leaf'
+    actionId: string
+} | {
+    kind: 'node'
+    subfacets: Record<string, ReferenceGroup>
+} | {
+    kind: 'nil'
 }
 
 // export interface NumberValue {

@@ -27,6 +27,7 @@ import { ReferenceGroup } from '../model';
 import { validate as validateSchema } from '../model/index.validator'
 import * as readables from '../readables';
 import admin from 'firebase-admin'
+import { strict as assert } from 'assert';
 
 
 // type IntegrationResult =
@@ -57,7 +58,7 @@ export async function commitAction(db: db.Database, anyAction: AnyAction): Promi
     //     ixaop.orderBy(actionId => actionId)
     // ))
 
-    const facetChanges = await getFacetChanges(db, { kind: 'live', action })
+    const affectedFacets = await getEffectedFacets(db, { kind: 'live', action })
 
 
     // const actionsTable = db.open({
@@ -76,20 +77,42 @@ export async function commitAction(db: db.Database, anyAction: AnyAction): Promi
     //     schema: [`labels-1.2.0`],
     //     validator: validateSchema('ReferenceGroup')
     // })
-    for (const label of facetChanges.steal) {
-        // const oldFetched = option.of(ix.find(fetched, f => f.label === label)).expect("No blind writes");
-        //oldStates[label] = oldFetched.state;
-        const labelPath = `labels-1.2.0/${label}`
-        if (label in res.parents) {
-            for (const parent of res.parents[label].actionIds) {
-                db.tx.set(db.db.doc(labelPath), {
-                    actionIds: admin.firestore.FieldValue.arrayRemove(parent)
-                })
+    for (const label of affectedFacets) {
+        if (label.length === 1) {
+
+            const [facetId] = label;
+            const ref: ReferenceGroup = {
+                kind: 'leaf',
+                actionId,
             }
-        }
-        db.tx.set(db.db.doc(labelPath), {
-            actionIds: admin.firestore.FieldValue.arrayUnion(actionId)
-        })
+            const labelPath = `labels-1.2.0/${facetId}`
+            db.tx.set(db.db.doc(labelPath), ref)
+        } else
+            if (label.length === 2) {
+                const [first, second] = label;
+                const labelPath = `labels-1.2.0/${first}`
+                const ref: ReferenceGroup = {
+                    kind: 'node',
+                    subfacets: {
+                        [second]: { kind: 'leaf', actionId }
+                    }
+                }
+                db.tx.set(db.db.doc(labelPath), ref, { merge: true })
+            } else {
+                throw new Error('wtf')
+            }// const oldFetched = option.of(ix.find(fetched, f => f.label === label)).expect("No blind writes");
+        //oldStates[label] = oldFetched.state;
+        // const labelPath = `labels-1.2.0/${label}`
+        // if (label in res.parents) {
+        //     for (const parent of res.parents[label].actionIds) {
+        //         db.tx.set(db.db.doc(labelPath), {
+        //             actionIds: admin.firestore.FieldValue.arrayRemove(parent)
+        //         })
+        //     }
+        // }
+        // db.tx.set(db.db.doc(labelPath), {
+        //     actionIds: admin.firestore.FieldValue.arrayUnion(actionId)
+        // })
         // labelsTable.set([label], { actionId });
     }
 
@@ -108,7 +131,7 @@ export async function getParents(db: db.Database, action: MaybeLiveAction, facet
             schema: [`labels-1.2.0`],
             validator: validateSchema('ReferenceGroup')
         })
-        return option.from(await readables.getOption(labelsTable, [facetId])).orElse(() => ({ actionIds: [] }))
+        return option.from(await readables.getOption(labelsTable, [facetId])).orElse(() => ({ kind: 'nil' }))
     } else {
         const savedAction = option.from(await getAction(db, action.actionId)).unwrap();
         return option.of(savedAction.parents[facetId]).expect("Illegal parent get");
@@ -129,15 +152,15 @@ export async function getSingleParent(db: db.Database, maybeAction: MaybeLiveAct
 }
 
 export function extractSingleParent(rg: ReferenceGroup): Option<string> {
-    if (rg.actionIds.length === 0) {
-        return option.none()
-    }
-    if (rg.actionIds.length === 1) {
-        return option.some(rg.actionIds[0])
-    }
-    throw new Error("facet may only have a single head")
+    switch (rg.kind) {
+        case 'nil':
+            return option.none()
+        case 'leaf':
+            return option.some(rg.actionId)
+        case 'node':
+            throw new Error("facet may only have a single head")
 
-
+    }
 }
 
 export async function getNewGameOrError(db: db.Database, maybeAction: MaybeLiveAction): Promise<IntRes> {
@@ -154,10 +177,7 @@ export async function getNewGameOrError(db: db.Database, maybeAction: MaybeLiveA
 
     const internalIsShortCodeUsed = async (sc: string): Promise<boolean> => {
         parents[`shortCode:${sc}`] = await getParents(db, maybeAction, `shortCode:${sc}`)
-        const shortCodeParent = extractSingleParent(parents[`shortCode:${sc}`]);
-        return (await option.from(shortCodeParent).andThenAsync(
-            actionId => getShortCodeState(db, { kind: 'replay', actionId }, sc)
-        )).data.some;
+        return (await getShortCodeState(db, parents[`shortCode:${sc}`], sc)).data.some
     }
 
     const res = await helper(action, oldGame, internalIsShortCodeUsed);
@@ -218,11 +238,20 @@ export async function getShortCodeDiffs(db: db.Database, action: MaybeLiveAction
         diffs.mapDiffs(gameToShortCodes)
     ))
 }
+export async function getGamesByPlayerDiffs(db: db.Database, action: MaybeLiveAction): Promise<Diff<string>[]> {
+    return Array.from(ix.from(await getGameDiffs(db, action)).pipe(
+        diffs.mapDiffs(([gameId]: Key, value: Game): Iterable<Item<string>> => {
+            return ix.from(value.players).pipe(
+                ixop.map(player => item([player.id], gameId))
+            )
+        })
+    ))
+}
 
-export async function getShortCodeState(db: db.Database, action: MaybeLiveAction, shortCode: string): Promise<Option<ShortCode>> {
+export async function getShortCodeAndGameState(db: db.Database, action: MaybeLiveAction, shortCode: string, gameId: string): Promise<Option<ShortCode>> {
     // Illegal to call for an action that doesn't touch the state.
     const diff = option.of(ix.find(await getShortCodeDiffs(db, action),
-        ({ key: [diffId] }) => diffId === shortCode)).unwrap();
+        ({ key: [diffId,] }) => diffId === shortCode)).unwrap();
 
     switch (diff.kind) {
         case 'add':
@@ -234,16 +263,44 @@ export async function getShortCodeState(db: db.Database, action: MaybeLiveAction
     }
 }
 
-export interface FacetChanges {
-    steal: string[]
+export async function getShortCodeState(db: db.Database, refs: ReferenceGroup, shortCode: string): Promise<Option<ShortCode>> {
+    if (refs.kind === 'nil') {
+        return option.none()
+    }
+    if (refs.kind !== 'node') {
+        throw new Error('wtf')
+    }
+
+    for (const [subFacetId, subReference] of Object.entries(refs.subfacets)) {
+        const scgRes = await getShortCodeAndGameState(
+            db, { kind: 'replay', actionId: option.from(extractSingleParent(subReference)).unwrap() },
+            shortCode, subFacetId)
+        if (scgRes.data.some) {
+            return scgRes
+        }
+    }
+
+    return option.none()
+
+    // // Illegal to call for an action that doesn't touch the state.
+    // const diff = option.of(ix.find(await getShortCodeDiffs(db, action),
+    //     ({ key: [diffId, ] }) => diffId === shortCode)).unwrap();
+
+    // switch (diff.kind) {
+    //     case 'add':
+    //         return option.some(diff.value)
+    //     case 'replace':
+    //         return option.some(diff.newValue)
+    //     case 'delete':
+    //         return option.none()
+    // }
 }
 
-export async function getFacetChanges(db: db.Database, action: MaybeLiveAction): Promise<FacetChanges> {
-    const gameFacets = (await getGameDiffs(db, action)).map(({ key: [sc] }) => `game:${sc}`)
-    const scFacets = (await getShortCodeDiffs(db, action)).map(({ key: [sc] }) => `shortCode:${sc}`)
-    return {
-        steal: [...gameFacets, ...scFacets]
-    }
+export async function getEffectedFacets(db: db.Database, action: MaybeLiveAction): Promise<Key[]> {
+    const gameFacets = (await getGameDiffs(db, action)).map(({ key: [gameId] }) => [`game:${gameId}`])
+    const scFacets = (await getShortCodeDiffs(db, action)).map(
+        ({ key: [scId, gameId] }) => [`shortCode:${scId}`, `game:${gameId}`])
+    return [...gameFacets, ...scFacets]
 }
 
 function getNewValue<T>(d: Diff<T>): Option<T> {
@@ -405,11 +462,11 @@ function convertError1_1(err: Error): model1_1.Error {
 //     }
 // }
 
-function gameToShortCodes(gameId: Key, game: Game): Item<ShortCode>[] {
+function gameToShortCodes([gameId]: Key, game: Game): Item<ShortCode>[] {
     if (game.state !== 'UNSTARTED' || game.shortCode === '') {
         return []
     }
-    return [{ key: [game.shortCode], value: {} }]
+    return [{ key: [game.shortCode, gameId], value: {} }]
 }
 
 async function helper(a: Action, maybeOldGame: Option<Game>, isShortCodeUsed: (shortCode: string) => Promise<boolean>): Promise<ResultView<Game, Error>> {

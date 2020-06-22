@@ -108,7 +108,7 @@ function singleMap<I, O>(mapper: Mapper<I, O>, diff: Diff<I>): Iterable<Diff<O>>
         ix.from(oldMapped).pipe(ixop.map(tagger('old'))),
         ix.from(newMapped).pipe(ixop.map(tagger('new'))));
     return aged.pipe(
-        ixop.groupBy(({ key }) => JSON.stringify(key), x => x, (_, valueIter) => {
+        ixop.groupBy(({ key }) => JSON.stringify(key), x => x, (_, valueIter): Iterable<Diff<O>> => {
             const values = Array.from(valueIter);
             if (values.length === 0) {
                 throw new Error("wtf")
@@ -118,23 +118,29 @@ function singleMap<I, O>(mapper: Mapper<I, O>, diff: Diff<I>): Iterable<Diff<O>>
             }
             if (values.length === 1) {
                 const [{ age, key, value }] = values;
-                return {
+                return [{
                     kind: age === 'old' ? 'delete' : 'add',
                     key,
                     value,
-                }
+                }]
             }
             // Else, values has 2 elements.
             if (values[0].age === values[1].age) {
                 throw new Error("mapper must have returned the same key multiple times")
             }
-            return {
+
+            if (deepEqual(values[0].value, values[1].value)) {
+                return []
+            }
+
+            return [{
                 kind: 'replace',
                 key: values[0].key,
                 oldValue: values[0].age === 'old' ? values[0].value : values[1].value,
                 newValue: values[0].age === 'new' ? values[0].value : values[1].value,
-            }
-        })
+            }]
+        }),
+        ixop.flatMap(diffs => diffs),
     )
 }
 

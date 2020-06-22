@@ -2,7 +2,7 @@
 import * as db from './db'
 import { Live, Diff, Change } from './interfaces'
 // import { validate } from './schema/interfaces.validator'
-import { AnyAction, AnyError, SavedAction } from './model';
+import { AnyAction, AnyError, SavedAction, ReferenceGroup } from './model';
 import { sha256 } from 'js-sha256';
 import _ from 'lodash';
 // import { Tables } from './schema';
@@ -133,13 +133,29 @@ function dateCmp(a: Date, b: Date): number {
     return 0
 }
 
+function* collectLeafs(rg: ReferenceGroup): Iterable<string> {
+    switch (rg.kind) {
+        case 'nil':
+            return
+        case 'leaf':
+            yield rg.actionId
+            return
+        case 'node':
+            for (const rg2 of Object.values(rg.subfacets)) {
+                yield* collectLeafs(rg2)
+
+            }
+            return
+    }
+}
+
 export function getActionId(action: SavedAction): string {
     // TODO: JSON.stringify isn't deterministic, so what's saved in the DB
     // should really be a particular serialization, but I'm not worrying
     // about that at the moment.
     const hashHex = sha256.hex(JSON.stringify(action));
     const maxDate = maxBy(ix.from(Object.entries(action.parents)).pipe(
-        ixop.flatMap(([label, refGroup]) => refGroup.actionIds),
+        ixop.flatMap(([label, refGroup]) => collectLeafs(refGroup)),
         ixop.map(actionId => parseActionId(actionId)[0]),
     ), dateCmp)
 

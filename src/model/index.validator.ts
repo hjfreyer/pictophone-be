@@ -1315,20 +1315,120 @@ export const Schema = {
             "type": "object"
         },
         "ReferenceGroup": {
-            "defaultProperties": [
-            ],
-            "properties": {
-                "actionIds": {
-                    "items": {
-                        "type": "string"
+            "else": {
+                "else": {
+                    "else": {
+                        "properties": {
+                            "kind": {
+                                "enum": [
+                                    "leaf",
+                                    "node",
+                                    "nil"
+                                ],
+                                "type": "string"
+                            }
+                        },
+                        "required": [
+                            "kind"
+                        ]
                     },
-                    "type": "array"
+                    "if": {
+                        "properties": {
+                            "kind": {
+                                "enum": [
+                                    "nil"
+                                ],
+                                "type": "string"
+                            }
+                        },
+                        "required": [
+                            "kind"
+                        ]
+                    },
+                    "then": {
+                        "defaultProperties": [
+                        ],
+                        "properties": {
+                            "kind": {
+                                "enum": [
+                                    "nil"
+                                ],
+                                "type": "string"
+                            }
+                        },
+                        "required": [
+                            "kind"
+                        ],
+                        "type": "object"
+                    }
+                },
+                "if": {
+                    "properties": {
+                        "kind": {
+                            "enum": [
+                                "node"
+                            ],
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "kind"
+                    ]
+                },
+                "then": {
+                    "defaultProperties": [
+                    ],
+                    "properties": {
+                        "kind": {
+                            "enum": [
+                                "node"
+                            ],
+                            "type": "string"
+                        },
+                        "subfacets": {
+                            "$ref": "#/definitions/Record<string,ReferenceGroup>"
+                        }
+                    },
+                    "required": [
+                        "kind",
+                        "subfacets"
+                    ],
+                    "type": "object"
                 }
             },
-            "required": [
-                "actionIds"
-            ],
-            "type": "object"
+            "if": {
+                "properties": {
+                    "kind": {
+                        "enum": [
+                            "leaf"
+                        ],
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "kind"
+                ]
+            },
+            "then": {
+                "defaultProperties": [
+                ],
+                "properties": {
+                    "actionId": {
+                        "type": "string"
+                    },
+                    "kind": {
+                        "enum": [
+                            "leaf"
+                        ],
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "actionId",
+                    "kind"
+                ],
+                "type": "object"
+            }
         },
         "SavedAction": {
             "defaultProperties": [
