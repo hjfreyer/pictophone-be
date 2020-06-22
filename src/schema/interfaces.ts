@@ -56,11 +56,6 @@ export type Metadata1_1_1 = Metadata["1.1.1"]
 export type AnyAction = import('../model/1.0').Action | import('../model/1.1').Action
 export type AnyError = import('../model/1.0').Error | import('../model/1.1').Error
 
-export type SavedAction = {
-    parents: string[]
-    action: AnyAction
-}
-
 export interface LiveUnknown {
     actionId: string
     value: unknown

@@ -7,6 +7,7 @@ import * as ranges from './ranges';
 import * as ixaop from 'ix/asynciterable/operators';
 import * as ixa from "ix/asynciterable";
 import { AsyncIterableX } from 'ix/asynciterable';
+import { Option, option } from './util';
 
 export interface TxRunner {
     <R>(cb: (db: Database) => Promise<R>): Promise<R>
@@ -31,7 +32,17 @@ export function runTransaction(fsDb: Firestore): TxRunner {
 export class Database {
     private committers: (() => void)[] = []
 
-    constructor(private db: Firestore, private tx: Transaction) { }
+    constructor(public db: Firestore, public tx: Transaction) { }
+
+    async getRaw(path: string): Promise<Option<DocumentData>> {
+        const doc = await this.tx.get(this.db.doc(path))
+
+        if (doc.exists) {
+            return option.some(doc.data()!)
+        } else {
+            return option.none()
+        }
+    }
 
     open<T>(spec: TableSpec<T>): Table<T> {
         const res = new FSTable(this.db, this.tx, spec.schema, spec.validator);

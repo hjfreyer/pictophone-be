@@ -12,21 +12,25 @@ import { Item, item, Key, Change, Diff } from '../interfaces';
 import * as model1_0 from '../model/1.0';
 import { validate as validate1_0 } from '../model/1.0.validator';
 import * as model1_1 from '../model/1.1';
-import { Error, Game, Action, MakeMoveAction, ShortCode, StartedGame, State } from '../model/1.2.0';
+import * as model1_2 from '../model/1.2';
+import { Error, Game, Action, MakeMoveAction, ShortCode, StartedGame } from '../model/1.2.0';
 import { validate } from '../model/1.2.0.validator';
 import { validate as validate1_1 } from '../model/1.1.validator';
-import { AnyAction, SavedAction } from '../schema';
+import { AnyAction, SavedAction } from '../model';
 import * as util from '../util';
 import { Defaultable, Option, option, Result, result } from '../util';
 import { OptionData, OptionView } from '../util/option';
 import { ResultView } from '../util/result';
 import deepEqual from 'deep-equal';
 import { UnifiedInterface } from '..';
-import { validate as validateSchema } from '../schema/interfaces.validator'
+import { ReferenceGroup } from '../model';
+import { validate as validateSchema } from '../model/index.validator'
 import * as readables from '../readables';
+import admin from 'firebase-admin'
 
-type IntegrationResult =
-    fw.IntegrationResult2<State>;
+
+// type IntegrationResult =
+//     fw.IntegrationResult2<State>;
 
 type MaybeLiveAction = {
     kind: 'live'
@@ -36,37 +40,57 @@ type MaybeLiveAction = {
     actionId: string
 }
 
+// // Diff keys are [facetId, actionId].
+// export async function getFacetTransfers(db: db.Database, action: MaybeLiveAction): Diff<{}>[] {}
+
+// // Item keys are [facetId, actionId].
+// export async function getFacetOwnersJustBefore(db: db.Database, action: MaybeLiveAction): Item<{}>[] {
+
+// }
+
 export async function commitAction(db: db.Database, anyAction: AnyAction): Promise<SavedAction> {
     const action = convertAction(anyAction)
     const res = await getNewGameOrError(db, { kind: 'live', action: action })
-    const parentList = await ixa.toArray(ixa.from(res.labelsQueried).pipe(
-        ixaop.map(label => getParent(db, { kind: 'live', action }, label)),
-        util.filterNoneAsync(),
-        ixaop.orderBy(actionId => actionId)
-    ))
+    // const parentList = await ixa.toArray(ixa.from(res.labelsQueried).pipe(
+    //     ixaop.map(label => getParent(db, { kind: 'live', action }, label)),
+    //     util.filterNoneAsync(),
+    //     ixaop.orderBy(actionId => actionId)
+    // ))
 
-    const facets = await getFacets(db, { kind: 'live', action })
+    const facetChanges = await getFacetChanges(db, { kind: 'live', action })
 
-    const actionsTable = db.open({
-        schema: ['actions'],
-        validator: validateSchema('SavedAction')
-    })
 
-    const savedAction: SavedAction = { parents: parentList, action: anyAction };
+    // const actionsTable = db.open({
+    //     schema: ['actions'],
+    //     validator: validateSchema('SavedAction')
+    // })
+
+    const savedAction: SavedAction = { parents: res.parents, action: anyAction };
     const actionId = getActionId(savedAction);
 
-    actionsTable.set([actionId], savedAction)
+    db.tx.set(db.db.doc(actionId), savedAction)
     // annotationsTable.set([actionId], { labels, parents: labelToParent, state })
     // const oldStates: Record<string, Option<TState>> = {};
 
-    const labelsTable = db.open({
-        schema: [`labels-1.2.0`],
-        validator: validateSchema('Reference')
-    })
-    for (const label of facets) {
+    // const labelsTable = db.open({
+    //     schema: [`labels-1.2.0`],
+    //     validator: validateSchema('ReferenceGroup')
+    // })
+    for (const label of facetChanges.steal) {
         // const oldFetched = option.of(ix.find(fetched, f => f.label === label)).expect("No blind writes");
         //oldStates[label] = oldFetched.state;
-        labelsTable.set([label], { actionId });
+        const labelPath = `labels-1.2.0/${label}`
+        if (label in res.parents) {
+            for (const parent of res.parents[label].actionIds) {
+                db.tx.set(db.db.doc(labelPath), {
+                    actionIds: admin.firestore.FieldValue.arrayRemove(parent)
+                })
+            }
+        }
+        db.tx.set(db.db.doc(labelPath), {
+            actionIds: admin.firestore.FieldValue.arrayUnion(actionId)
+        })
+        // labelsTable.set([label], { actionId });
     }
 
     return savedAction
@@ -74,31 +98,46 @@ export async function commitAction(db: db.Database, anyAction: AnyAction): Promi
 
 
 export async function getAction(db: db.Database, actionId: string): Promise<Option<SavedAction>> {
-    return await readables.getOption(db.open({
-        schema: ['actions'],
-        validator: validateSchema('SavedAction')
-    }), [actionId])
+    const data = await db.getRaw(actionId);
+    return option.from(data).map(validateSchema('SavedAction'))
 }
 
-export async function getParent(db: db.Database, action: MaybeLiveAction, facetId: string): Promise<Option<string>> {
+export async function getParents(db: db.Database, action: MaybeLiveAction, facetId: string): Promise<ReferenceGroup> {
     if (action.kind === 'live') {
         const labelsTable = db.open({
             schema: [`labels-1.2.0`],
-            validator: validateSchema('Reference')
+            validator: validateSchema('ReferenceGroup')
         })
-        return option.from(await readables.getOption(labelsTable, [facetId])).map(x => x.actionId)
+        return option.from(await readables.getOption(labelsTable, [facetId])).orElse(() => ({ actionIds: [] }))
     } else {
         const savedAction = option.from(await getAction(db, action.actionId)).unwrap();
+        return option.of(savedAction.parents[facetId]).expect("Illegal parent get");
 
-        const orderedParentsWithFacets = ixa.from(savedAction.parents).pipe(
-            ixaop.orderByDescending(actionId => actionId),
-            ixaop.map(async actionId => ({ actionId, facets: await getFacets(db, { kind: 'replay', actionId }) }))
-        )
+        // const orderedParentsWithFacets = ixa.from(savedAction.parents).pipe(
+        //     ixaop.orderByDescending(actionId => actionId),
+        //     ixaop.map(async actionId => ({ actionId, facets: await getFacets(db, { kind: 'replay', actionId }) }))
+        // )
 
-        return option.of(await ixa.first(orderedParentsWithFacets, ({ facets }) => facets.indexOf(facetId) !== -1)).map(
-            x => x.actionId
-        )
+        // return option.of(await ixa.first(orderedParentsWithFacets, ({ facets }) => facets.indexOf(facetId) !== -1)).map(
+        //     x => x.actionId
+        // )
     }
+}
+
+export async function getSingleParent(db: db.Database, maybeAction: MaybeLiveAction, facetId: string): Promise<Option<string>> {
+    return extractSingleParent(await getParents(db, maybeAction, facetId));
+}
+
+export function extractSingleParent(rg: ReferenceGroup): Option<string> {
+    if (rg.actionIds.length === 0) {
+        return option.none()
+    }
+    if (rg.actionIds.length === 1) {
+        return option.some(rg.actionIds[0])
+    }
+    throw new Error("facet may only have a single head")
+
+
 }
 
 export async function getNewGameOrError(db: db.Database, maybeAction: MaybeLiveAction): Promise<IntRes> {
@@ -106,15 +145,16 @@ export async function getNewGameOrError(db: db.Database, maybeAction: MaybeLiveA
         ? maybeAction.action
         : convertAction(option.from(await getAction(db, maybeAction.actionId)).unwrap().action);
 
-    const gameParentId = await getParent(db, maybeAction, `game:${action.gameId}`);
-    const oldGame = await option.from(gameParentId).andThenAsync(
+    const parents: Record<string, ReferenceGroup> = {}
+    parents[`game:${action.gameId}`] = await getParents(db, maybeAction, `game:${action.gameId}`)
+
+    const oldGame = await option.from(extractSingleParent(parents[`game:${action.gameId}`])).andThenAsync(
         actionId => getGameState(db, { kind: 'replay', actionId }, action.gameId))
 
-    const queried = [`game:${action.gameId}`]
 
     const internalIsShortCodeUsed = async (sc: string): Promise<boolean> => {
-        queried.push(`shortCode:${sc}`);
-        const shortCodeParent = await getParent(db, maybeAction, `shortCode:${sc}`);
+        parents[`shortCode:${sc}`] = await getParents(db, maybeAction, `shortCode:${sc}`)
+        const shortCodeParent = extractSingleParent(parents[`shortCode:${sc}`]);
         return (await option.from(shortCodeParent).andThenAsync(
             actionId => getShortCodeState(db, { kind: 'replay', actionId }, sc)
         )).data.some;
@@ -123,7 +163,7 @@ export async function getNewGameOrError(db: db.Database, maybeAction: MaybeLiveA
     const res = await helper(action, oldGame, internalIsShortCodeUsed);
 
     return {
-        labelsQueried: queried,
+        parents,
         gameId: action.gameId,
         oldGame,
         newGame: res
@@ -131,7 +171,7 @@ export async function getNewGameOrError(db: db.Database, maybeAction: MaybeLiveA
 }
 
 export interface IntRes {
-    labelsQueried: string[]
+    parents: Record<string, ReferenceGroup>,
     gameId: string
     oldGame: Option<Game>
     newGame: Result<Game, Error>
@@ -194,12 +234,55 @@ export async function getShortCodeState(db: db.Database, action: MaybeLiveAction
     }
 }
 
+export interface FacetChanges {
+    steal: string[]
+}
 
-export async function getFacets(db: db.Database, action: MaybeLiveAction): Promise<string[]> {
+export async function getFacetChanges(db: db.Database, action: MaybeLiveAction): Promise<FacetChanges> {
     const gameFacets = (await getGameDiffs(db, action)).map(({ key: [sc] }) => `game:${sc}`)
     const scFacets = (await getShortCodeDiffs(db, action)).map(({ key: [sc] }) => `shortCode:${sc}`)
-    return [...gameFacets, ...scFacets]
+    return {
+        steal: [...gameFacets, ...scFacets]
+    }
 }
+
+function getNewValue<T>(d: Diff<T>): Option<T> {
+    switch (d.kind) {
+        case "add":
+            return option.some(d.value)
+        case "delete":
+            return option.none()
+        case "replace":
+            return option.some(d.newValue)
+    }
+}
+// export function getGamesForPlayerByAction([gameId]: Key, game : Game): Iterable<Item<string[]>> {
+// return ix.from(game.players).pipe(
+//     ixop.map(    player => {key: player.id, value: [gameId]})
+// )
+//     for (const player of game.players) {
+
+//     }
+// }
+
+// export async function getGamesForPlayerByAction(db: db.Database, action: MaybeLiveAction): Promise<string[]> {
+//     ix.from(await getGameDiffs(db, action))
+//         .pipe(
+//             ixop.map(getNewValue),
+//             util.filterNone(),
+//         )
+
+
+//     .map(({ key: [sc] }) => `game:${sc}`)
+//     const scFacets = (await getShortCodeDiffs(db, action)).map(({ key: [sc] }) => `shortCode:${sc}`)
+//     return [...gameFacets, ...scFacets]
+// }
+
+// export async function getGamesForPlayer(db: db.Database, playerId: string): Promise<string[]> {
+//     const gameFacets = (await getGameDiffs(db, action)).map(({ key: [sc] }) => `game:${sc}`)
+//     const scFacets = (await getShortCodeDiffs(db, action)).map(({ key: [sc] }) => `shortCode:${sc}`)
+//     return [...gameFacets, ...scFacets]
+// }
 
 // async function getShortCodeStates(actionId : Option<string>, action: Action): Promise<Item<ShortCode>[]> {
 //     return Array.from(ix.from(await getShortCodeDiffs(actionId, action)).pipe(
@@ -217,81 +300,81 @@ export async function getFacets(db: db.Database, action: MaybeLiveAction): Promi
 // }
 
 
-async function getGame(inputs: fw.Input2<State>, gameId: string): Promise<OptionView<Game>> {
-    return option.from(await inputs.getParent(`game:${gameId}`))
-        .map(state => result.fromData(state.game).unwrap())
-}
+// async function getGame(inputs: fw.Input2<State>, gameId: string): Promise<OptionView<Game>> {
+//     return option.from(await inputs.getParent(`game:${gameId}`))
+//         .map(state => result.fromData(state.game).unwrap())
+// }
 
 // function setGame(States: Record<string, OptionData<State>>, gameId: string, game: Option<Game>): void {
 //     States[`game:${gameId}`] = game.data;
 // }
 
-async function isShortCodeUsed(inputs: fw.Input2<State>, shortCodeId: string): Promise<boolean> {
-    return option.from(await inputs.getParent(`shortCode:${shortCodeId}`))
-        .map(state => {
-            const game = result.fromData(state.game).unwrap();
-            return game.state === 'UNSTARTED' && game.shortCode === shortCodeId;
-        }).orElse(() => false)
-}
+// async function isShortCodeUsed(inputs: fw.Input2<State>, shortCodeId: string): Promise<boolean> {
+//     return option.from(await inputs.getParent(`shortCode:${shortCodeId}`))
+//         .map(state => {
+//             const game = result.fromData(state.game).unwrap();
+//             return game.state === 'UNSTARTED' && game.shortCode === shortCodeId;
+//         }).orElse(() => false)
+// }
 
 // function setShortCode(States: Record<string, OptionData<State>>, shortCodeId: string, sc: Option<ShortCode>): void {
 //     States[`shortCode:${shortCodeId}`] = sc.data;
 // }
 
-export const REVISION: fw.Revision2<State> = {
-    id: '1.2.0',
-    validateAnnotation: validate('Annotation2'),
+// export const REVISION: fw.Revision2<State> = {
+//     id: '1.2.0',
+//     validateAnnotation: validate('Annotation2'),
 
-    async integrate(anyAction: AnyAction, inputs: fw.Input2<State>): Promise<IntegrationResult> {
-        const maybeOldGame = await getGame(inputs, anyAction.gameId);
+//     async integrate(anyAction: AnyAction, inputs: fw.Input2<State>): Promise<IntegrationResult> {
+//         const maybeOldGame = await getGame(inputs, anyAction.gameId);
 
-        const res = await helper(convertAction(anyAction), maybeOldGame, sc => isShortCodeUsed(inputs, sc));
-        if (res.data.status === 'err') {
-            return { labels: [], state: { game: res.data } }
-        }
-        const newGame = res.data.value;
+//         const res = await helper(convertAction(anyAction), maybeOldGame, sc => isShortCodeUsed(inputs, sc));
+//         if (res.data.status === 'err') {
+//             return { labels: [], state: { game: res.data } }
+//         }
+//         const newGame = res.data.value;
 
-        const oldShortCode = maybeOldGame.andThen(oldGame => {
-            return oldGame.state === 'UNSTARTED' && oldGame.shortCode !== ""
-                ? option.some(oldGame.shortCode)
-                : option.none<string>()
-        })
-        const newShortCode = newGame.state === 'UNSTARTED' && newGame.shortCode !== ""
-            ? option.some(newGame.shortCode)
-            : option.none<string>()
+//         const oldShortCode = maybeOldGame.andThen(oldGame => {
+//             return oldGame.state === 'UNSTARTED' && oldGame.shortCode !== ""
+//                 ? option.some(oldGame.shortCode)
+//                 : option.none<string>()
+//         })
+//         const newShortCode = newGame.state === 'UNSTARTED' && newGame.shortCode !== ""
+//             ? option.some(newGame.shortCode)
+//             : option.none<string>()
 
-        const labels: string[] = [`game:${anyAction.gameId}`];
+//         const labels: string[] = [`game:${anyAction.gameId}`];
 
-        if (!deepEqual(oldShortCode.data, newShortCode.data)) {
-            const changedShortCodes = ix.toArray(ix.of(oldShortCode, newShortCode).pipe(util.filterNone()))
-            await Promise.all(changedShortCodes.map(sc => isShortCodeUsed(inputs, sc)))
-            labels.push(...changedShortCodes.map(sc => `shortCode:${sc}`));
-        }
+//         if (!deepEqual(oldShortCode.data, newShortCode.data)) {
+//             const changedShortCodes = ix.toArray(ix.of(oldShortCode, newShortCode).pipe(util.filterNone()))
+//             await Promise.all(changedShortCodes.map(sc => isShortCodeUsed(inputs, sc)))
+//             labels.push(...changedShortCodes.map(sc => `shortCode:${sc}`));
+//         }
 
-        return { labels, state: { game: result.ok<Game, Error>(newGame).data } }
-    },
+//         return { labels, state: { game: result.ok<Game, Error>(newGame).data } }
+//     },
 
-    // async activateState(db: db.Database, label: string, maybeOldGame: OptionData<State>, newGame: OptionData<State>): Promise<void> {
-    //     // const oldGame = option.fromData(maybeOldGame).withDefault(defaultGame1_1);
+//     // async activateState(db: db.Database, label: string, maybeOldGame: OptionData<State>, newGame: OptionData<State>): Promise<void> {
+//     //     // const oldGame = option.fromData(maybeOldGame).withDefault(defaultGame1_1);
 
-    //     // const gameDiff = diffs.newDiff([label], oldGame, option.fromData(newGame).withDefault(defaultGame1_1));
+//     //     // const gameDiff = diffs.newDiff([label], oldGame, option.fromData(newGame).withDefault(defaultGame1_1));
 
-    //     // const gamesByPlayer1_0Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_0).diffs;
-    //     // const gamesByPlayer1_1Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_1).diffs
+//     //     // const gamesByPlayer1_0Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_0).diffs;
+//     //     // const gamesByPlayer1_1Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_1).diffs
 
-    //     // const gamesByPlayer1_0 = db.open({
-    //     //     schema: ['players', 'games-gamesByPlayer-1.0'],
-    //     //     validator: validate1_0('PlayerGame'),
-    //     // })
-    //     // const gamesByPlayer1_1 = db.open({
-    //     //     schema: ['players', 'games-gamesByPlayer-1.1'],
-    //     //     validator: validate1_1('PlayerGame'),
-    //     // })
+//     //     // const gamesByPlayer1_0 = db.open({
+//     //     //     schema: ['players', 'games-gamesByPlayer-1.0'],
+//     //     //     validator: validate1_0('PlayerGame'),
+//     //     // })
+//     //     // const gamesByPlayer1_1 = db.open({
+//     //     //     schema: ['players', 'games-gamesByPlayer-1.1'],
+//     //     //     validator: validate1_1('PlayerGame'),
+//     //     // })
 
-    //     // applyChangesSimple(gamesByPlayer1_0, gamesByPlayer1_0Diffs.map(diffToChange));
-    //     // applyChangesSimple(gamesByPlayer1_1, gamesByPlayer1_1Diffs.map(diffToChange))
-    // }
-}
+//     //     // applyChangesSimple(gamesByPlayer1_0, gamesByPlayer1_0Diffs.map(diffToChange));
+//     //     // applyChangesSimple(gamesByPlayer1_1, gamesByPlayer1_1Diffs.map(diffToChange))
+//     // }
+// }
 
 function convertError1_0(err: Error): model1_0.Error {
     switch (err.version) {
@@ -311,16 +394,16 @@ function convertError1_1(err: Error): model1_1.Error {
     return convertError1_0(err)
 }
 
-export function getUnifiedInterface(gameId: string, state: State): UnifiedInterface {
-    return {
-        '1.0': result.fromData(state.game).map(game => ({
-            playerGames: ix.toArray(gameToPlayerGames1_0([gameId], game))
-        })).mapErr(convertError1_0).data,
-        '1.1': result.fromData(state.game).map(game => ({
-            playerGames: ix.toArray(gameToPlayerGames1_1([gameId], game))
-        })).mapErr(convertError1_1).data,
-    }
-}
+// export function getUnifiedInterface(gameId: string, state: State): UnifiedInterface {
+//     return {
+//         '1.0': result.fromData(state.game).map(game => ({
+//             playerGames: ix.toArray(gameToPlayerGames1_0([gameId], game))
+//         })).mapErr(convertError1_0).data,
+//         '1.1': result.fromData(state.game).map(game => ({
+//             playerGames: ix.toArray(gameToPlayerGames1_1([gameId], game))
+//         })).mapErr(convertError1_1).data,
+//     }
+// }
 
 function gameToShortCodes(gameId: Key, game: Game): Item<ShortCode>[] {
     if (game.state !== 'UNSTARTED' || game.shortCode === '') {
@@ -489,12 +572,33 @@ function convertAction1_1(a: model1_1.Action): Action {
     }
 }
 
+function convertAction1_2(a: model1_2.Action): Action {
+    switch (a.kind) {
+        case 'join_game':
+            return {
+                kind: 'join_game',
+                gameId: a.gameId,
+                playerId: a.playerId,
+                playerDisplayName: a.playerDisplayName,
+                createIfNecessary: false
+            }
+        case 'create_game':
+        case 'start_game':
+        case 'make_move':
+            return {
+                ...a,
+            }
+    }
+}
+
 function convertAction(a: AnyAction): Action {
     switch (a.version) {
         case '1.0':
             return convertAction1_0(a)
         case '1.1':
             return convertAction1_1(a)
+        case '1.2':
+            return convertAction1_2(a)
     }
 }
 

@@ -22,15 +22,17 @@ import { validate as validate1_1_1 } from './model/1.1.1.validator'
 import { validate as validate1_1 } from './model/1.1.validator'
 import * as readables from './readables'
 import {
-    AnyAction, AnyError, CollectionId,
-    deleteTable, Reference, SavedAction
+    //AnyAction, AnyError, CollectionId,
+    // deleteTable,
+    // Reference
 } from './schema'
-import { validate as validateSchema } from './schema/interfaces.validator'
+import { SavedAction, AnyAction, AnyError } from './model'
+import { validate as validateSchema } from './model/index.validator'
 import * as util from './util'
 import { Defaultable, defaultable, Option, option, Result, result } from './util'
 import { OptionData } from './util/option'
 import { REVISION as REVISION1_1_1 } from './logic/1.1.1'
-import { REVISION as REVISION1_2_0 } from './logic/1.2.0'
+// import { REVISION as REVISION1_2_0 } from './logic/1.2.0'
 import * as logic1_1_1 from './logic/1.1.1'
 import * as logic1_2_0 from './logic/1.2.0'
 import * as fw from './framework';
@@ -167,202 +169,202 @@ function handleAction<TState>(action: AnyAction): Promise<Result<null, AnyError>
     })
 }
 
-async function doAction<TState>(db: db.Database, impl: fw.Revision2<TState>, action: AnyAction): Promise<DoActionResult<TState>> {
-    const fetched: FetchedState<TState>[] = []
+// async function doAction<TState>(db: db.Database, impl: fw.Revision2<TState>, action: AnyAction): Promise<DoActionResult<TState>> {
+//     const fetched: FetchedState<TState>[] = []
 
-    const annotationsTable = db.open({
-        schema: [`annotations-${impl.id}`],
-        validator: impl.validateAnnotation,
-    })
+//     const annotationsTable = db.open({
+//         schema: [`annotations-${impl.id}`],
+//         validator: impl.validateAnnotation,
+//     })
 
-    const labelsTable = db.open({
-        schema: [`labels-${impl.id}`],
-        validator: validateSchema('Reference')
-    })
+//     const labelsTable = db.open({
+//         schema: [`labels-${impl.id}`],
+//         validator: validateSchema('Reference')
+//     })
 
-    const inputs: fw.Input2<TState> = {
-        async getParent(label: string): Promise<Option<TState>> {
-            const maybeRef = await readables.getOption(labelsTable, [label]);
-            const f: FetchedState<TState> = {
-                label,
-                actionId: option.from(maybeRef).map(({ actionId }) => actionId),
-                state: await option.from(maybeRef).mapAsync(async ref => {
-                    const annos = option.from(await readables.getOption(annotationsTable, [ref.actionId])).unwrap();
+//     const inputs: fw.Input2<TState> = {
+//         async getParent(label: string): Promise<Option<TState>> {
+//             const maybeRef = await readables.getOption(labelsTable, [label]);
+//             const f: FetchedState<TState> = {
+//                 label,
+//                 actionId: option.from(maybeRef).map(({ actionId }) => actionId),
+//                 state: await option.from(maybeRef).mapAsync(async ref => {
+//                     const annos = option.from(await readables.getOption(annotationsTable, [ref.actionId])).unwrap();
 
-                    return annos.state
-                })
-            }
-            fetched.push(f)
-            return f.state
-        }
-    }
+//                     return annos.state
+//                 })
+//             }
+//             fetched.push(f)
+//             return f.state
+//         }
+//     }
 
-    const { labels, state } = await impl.integrate(action, inputs);
+//     const { labels, state } = await impl.integrate(action, inputs);
 
-    const labelToParent: Record<string, fw.ParentLink> = {};
-    for (const { label, actionId } of fetched) {
-        labelToParent[label] = {
-            actionId: actionId.data
-        };
-    }
-    const parentList: string[] = ix.toArray(ix.from(fetched).pipe(
-        ixop.map(({ actionId }) => actionId),
-        util.filterNone(),
-        ixop.orderBy(actionId => actionId),
-        ixop.distinct(),
-    ))
+//     const labelToParent: Record<string, fw.ParentLink> = {};
+//     for (const { label, actionId } of fetched) {
+//         labelToParent[label] = {
+//             actionId: actionId.data
+//         };
+//     }
+//     const parentList: string[] = ix.toArray(ix.from(fetched).pipe(
+//         ixop.map(({ actionId }) => actionId),
+//         util.filterNone(),
+//         ixop.orderBy(actionId => actionId),
+//         ixop.distinct(),
+//     ))
 
-    const savedAction: SavedAction = { parents: parentList, action };
-    const actionId = getActionId(savedAction);
+//     const savedAction: SavedAction = { parents: parentList, action };
+//     const actionId = getActionId(savedAction);
 
-    openAll(db)["ACTIONS"].set([actionId], savedAction)
-    annotationsTable.set([actionId], { labels, parents: labelToParent, state })
-    const oldStates: Record<string, Option<TState>> = {};
+//     openAll(db)["ACTIONS"].set([actionId], savedAction)
+//     annotationsTable.set([actionId], { labels, parents: labelToParent, state })
+//     const oldStates: Record<string, Option<TState>> = {};
 
-    for (const label of labels) {
-        const oldFetched = option.of(ix.find(fetched, f => f.label === label)).expect("No blind writes");
-        oldStates[label] = oldFetched.state;
-        labelsTable.set([label], { actionId });
-    }
+//     for (const label of labels) {
+//         const oldFetched = option.of(ix.find(fetched, f => f.label === label)).expect("No blind writes");
+//         oldStates[label] = oldFetched.state;
+//         labelsTable.set([label], { actionId });
+//     }
 
-    return {
-        actionId,
-        savedAction,
-        newState: state,
-        oldStates,
-    };
-}
+//     return {
+//         actionId,
+//         savedAction,
+//         newState: state,
+//         oldStates,
+//     };
+// }
 
-type ReplayActionResult<TState> = {
-    kind: 'check' | 'replay'
-    newState: TState
-    oldStates: Record<string, Option<TState>>
-}
+// type ReplayActionResult<TState> = {
+//     kind: 'check' | 'replay'
+//     newState: TState
+//     oldStates: Record<string, Option<TState>>
+// }
 
-function replayOrCheckAction<TState>(actionId: string, action: SavedAction): Promise<void> {
-    return db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
-        const result1_1_1 = await replayOrCheckActionForRevision(db, REVISION1_1_1, actionId, action)
-        const result1_2_0 = await replayOrCheckActionForRevision(db, REVISION1_2_0, actionId, action)
+// function replayOrCheckAction<TState>(actionId: string, action: SavedAction): Promise<void> {
+//     return db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
+//         const result1_1_1 = await replayOrCheckActionForRevision(db, REVISION1_1_1, actionId, action)
+//         const result1_2_0 = await replayOrCheckActionForRevision(db, REVISION1_2_0, actionId, action)
 
-        const pg1_1_1 = option.from(result1_1_1).map(res => logic1_1_1.getUnifiedInterface(action.action.gameId, res.newState))
-        const pg1_2_0 = option.from(result1_2_0).map(res => logic1_2_0.getUnifiedInterface(action.action.gameId, res.newState))
+//         const pg1_1_1 = option.from(result1_1_1).map(res => logic1_1_1.getUnifiedInterface(action.action.gameId, res.newState))
+//         const pg1_2_0 = option.from(result1_2_0).map(res => logic1_2_0.getUnifiedInterface(action.action.gameId, res.newState))
 
-        pg1_1_1.and(pg1_2_0).map(([pg1_1_1, pg1_2_0]) => {
-            compareInterfaces(pg1_1_1, pg1_2_0)
-        })
+//         pg1_1_1.and(pg1_2_0).map(([pg1_1_1, pg1_2_0]) => {
+//             compareInterfaces(pg1_1_1, pg1_2_0)
+//         })
 
-        const ts = openAll(db);
-        pg1_1_1.map(pg1_1_1 => {
-            result.fromData(pg1_1_1['1.0']).map(pg => {
-                for (const pgs of pg.playerGames) {
-                    ts["EXP,1.0,gamesByPlayer"].set(pgs.key, pgs.value)
-                }
-            })
-            result.fromData(pg1_1_1['1.1']).map(pg => {
-                for (const pgs of pg.playerGames) {
-                    ts["EXP,1.1,gamesByPlayer"].set(pgs.key, pgs.value)
-                }
-            })
-        })
-    })
-}
+//         const ts = openAll(db);
+//         pg1_1_1.map(pg1_1_1 => {
+//             result.fromData(pg1_1_1['1.0']).map(pg => {
+//                 for (const pgs of pg.playerGames) {
+//                     ts["EXP,1.0,gamesByPlayer"].set(pgs.key, pgs.value)
+//                 }
+//             })
+//             result.fromData(pg1_1_1['1.1']).map(pg => {
+//                 for (const pgs of pg.playerGames) {
+//                     ts["EXP,1.1,gamesByPlayer"].set(pgs.key, pgs.value)
+//                 }
+//             })
+//         })
+//     })
+// }
 
-async function replayOrCheckActionForRevision<TState>(db: db.Database, impl: fw.Revision2<TState>, actionId: string, action: SavedAction):
-    Promise<Option<ReplayActionResult<TState>>> {
-    const annotationsTable = db.open({
-        schema: [`annotations-${impl.id}`],
-        validator: impl.validateAnnotation,
-    })
+// async function replayOrCheckActionForRevision<TState>(db: db.Database, impl: fw.Revision2<TState>, actionId: string, action: SavedAction):
+//     Promise<Option<ReplayActionResult<TState>>> {
+//     const annotationsTable = db.open({
+//         schema: [`annotations-${impl.id}`],
+//         validator: impl.validateAnnotation,
+//     })
 
-    const annos = await readables.getOption(annotationsTable, [actionId])
+//     const annos = await readables.getOption(annotationsTable, [actionId])
 
-    return await option.from(annos).split({
-        async onSome(annos): Promise<Option<ReplayActionResult<TState>>> {
-            // console.log(`CHECK ${actionId}`)
+//     return await option.from(annos).split({
+//         async onSome(annos): Promise<Option<ReplayActionResult<TState>>> {
+//             // console.log(`CHECK ${actionId}`)
 
-            // await checkAction(impl, actionId, savedAction, annos)
-            // TODO
-            return option.none()
-        },
-        onNone: (): Promise<Option<ReplayActionResult<TState>>> => {
-            return replayActionForRevision(db, impl, actionId, action)
-        }
-    })
-}
+//             // await checkAction(impl, actionId, savedAction, annos)
+//             // TODO
+//             return option.none()
+//         },
+//         onNone: (): Promise<Option<ReplayActionResult<TState>>> => {
+//             return replayActionForRevision(db, impl, actionId, action)
+//         }
+//     })
+// }
 
-async function replayActionForRevision<TState>(db: db.Database, impl: fw.Revision2<TState>, actionId: string, action: SavedAction):
-    Promise<Option<ReplayActionResult<TState>>> {
-    console.log(`REPLAY ${impl.id} ${actionId}`)
+// async function replayActionForRevision<TState>(db: db.Database, impl: fw.Revision2<TState>, actionId: string, action: SavedAction):
+//     Promise<Option<ReplayActionResult<TState>>> {
+//     console.log(`REPLAY ${impl.id} ${actionId}`)
 
-    const fetched: FetchedState<TState>[] = []
+//     const fetched: FetchedState<TState>[] = []
 
-    const annotationsTable = db.open({
-        schema: [`annotations-${impl.id}`],
-        validator: impl.validateAnnotation,
-    })
+//     const annotationsTable = db.open({
+//         schema: [`annotations-${impl.id}`],
+//         validator: impl.validateAnnotation,
+//     })
 
-    const labelsTable = db.open({
-        schema: [`labels-${impl.id}`],
-        validator: validateSchema('Reference')
-    })
+//     const labelsTable = db.open({
+//         schema: [`labels-${impl.id}`],
+//         validator: validateSchema('Reference')
+//     })
 
-    for (const parent of action.parents) {
-        const parentAnnos = await readables.getOption(annotationsTable, [parent]);
-        if (!parentAnnos.data.some) {
-            // Not ready to replay.
-            return option.none()
-        }
-    }
+//     for (const parent of action.parents) {
+//         const parentAnnos = await readables.getOption(annotationsTable, [parent]);
+//         if (!parentAnnos.data.some) {
+//             // Not ready to replay.
+//             return option.none()
+//         }
+//     }
 
-    const inputs: fw.Input2<TState> = {
-        async getParent(label: string): Promise<Option<TState>> {
-            const maybeRef = await readables.getOption(labelsTable, [label]);
-            const f: FetchedState<TState> = {
-                label,
-                actionId: option.from(maybeRef).map(({ actionId }) => actionId),
-                state: await option.from(maybeRef).mapAsync(async ref => {
-                    const annos = option.from(await readables.getOption(annotationsTable, [ref.actionId])).unwrap();
+//     const inputs: fw.Input2<TState> = {
+//         async getParent(label: string): Promise<Option<TState>> {
+//             const maybeRef = await readables.getOption(labelsTable, [label]);
+//             const f: FetchedState<TState> = {
+//                 label,
+//                 actionId: option.from(maybeRef).map(({ actionId }) => actionId),
+//                 state: await option.from(maybeRef).mapAsync(async ref => {
+//                     const annos = option.from(await readables.getOption(annotationsTable, [ref.actionId])).unwrap();
 
-                    return annos.state
-                })
-            }
-            fetched.push(f)
-            return f.state
-        }
-    }
+//                     return annos.state
+//                 })
+//             }
+//             fetched.push(f)
+//             return f.state
+//         }
+//     }
 
-    const { labels, state } = await impl.integrate(action.action, inputs);
+//     const { labels, state } = await impl.integrate(action.action, inputs);
 
-    const labelToParent: Record<string, fw.ParentLink> = {};
-    for (const { label, actionId } of fetched) {
-        labelToParent[label] = { actionId: actionId.data };
-        if (actionId.data.some && action.parents.indexOf(actionId.data.value) === -1) {
-            throw new Error(`Requested actionId ${JSON.stringify(actionId.data.value)} for label ${JSON.stringify(label)} 
-not on allowed list: ${JSON.stringify(action.parents)}`);
-        }
-    }
+//     const labelToParent: Record<string, fw.ParentLink> = {};
+//     for (const { label, actionId } of fetched) {
+//         labelToParent[label] = { actionId: actionId.data };
+//         if (actionId.data.some && action.parents.indexOf(actionId.data.value) === -1) {
+//             throw new Error(`Requested actionId ${JSON.stringify(actionId.data.value)} for label ${JSON.stringify(label)} 
+// not on allowed list: ${JSON.stringify(action.parents)}`);
+//         }
+//     }
 
-    annotationsTable.set([actionId], { parents: labelToParent, labels, state })
-    const oldStates: Record<string, Option<TState>> = {};
+//     annotationsTable.set([actionId], { parents: labelToParent, labels, state })
+//     const oldStates: Record<string, Option<TState>> = {};
 
-    for (const label of labels) {
-        const oldFetched = option.of(ix.find(fetched, f => f.label === label)).expect("No blind writes");
-        oldStates[label] = oldFetched.state;
-        labelsTable.set([label], { actionId });
-    }
+//     for (const label of labels) {
+//         const oldFetched = option.of(ix.find(fetched, f => f.label === label)).expect("No blind writes");
+//         oldStates[label] = oldFetched.state;
+//         labelsTable.set([label], { actionId });
+//     }
 
-    return option.some({ kind: 'replay', newState: state, oldStates })
-}
+//     return option.some({ kind: 'replay', newState: state, oldStates })
+// }
 
-function find<T>(items: Iterable<T>, pred: (t: T) => boolean): Option<T> {
-    const first = ix.first(ix.from(items).pipe(ixop.filter(pred)));
+// function find<T>(items: Iterable<T>, pred: (t: T) => boolean): Option<T> {
+//     const first = ix.first(ix.from(items).pipe(ixop.filter(pred)));
 
-    if (first === undefined) {
-        return option.none();
-    } else {
-        return option.some(first)
-    }
-}
+//     if (first === undefined) {
+//         return option.none();
+//     } else {
+//         return option.some(first)
+//     }
+// }
 
 // function checkAction<TResult, TFacet>(impl: fw.Revision<TResult, TFacet>,
 //     actionId: string, action: SavedAction, annotations: fw.Annotations<TFacet>): Promise<void> {
@@ -415,22 +417,22 @@ function find<T>(items: Iterable<T>, pred: (t: T) => boolean): Option<T> {
 //     })
 // }
 
-async function handleReplay<TState>(): Promise<void> {
-    let cursor: string = '';
-    console.log('REPLAY')
-    while (true) {
+// async function handleReplay<TState>(): Promise<void> {
+//     let cursor: string = '';
+//     console.log('REPLAY')
+//     while (true) {
 
-        const nextActionOrNull = await getNextAction(db.runTransaction(fsDb), cursor);
-        if (nextActionOrNull === null) {
-            break;
-        }
-        const [actionId, savedAction] = nextActionOrNull;
-        await replayOrCheckAction(actionId, savedAction)
+//         const nextActionOrNull = await getNextAction(db.runTransaction(fsDb), cursor);
+//         if (nextActionOrNull === null) {
+//             break;
+//         }
+//         const [actionId, savedAction] = nextActionOrNull;
+//         await replayOrCheckAction(actionId, savedAction)
 
-        cursor = actionId;
-    }
-    console.log('DONE')
-}
+//         cursor = actionId;
+//     }
+//     console.log('DONE')
+// }
 
 function getNextAction(tx: db.TxRunner, startAfter: string): Promise<([string, SavedAction] | null)> {
     return tx(async (db: db.Database): Promise<([string, SavedAction] | null)> => {
@@ -506,12 +508,12 @@ async function purgeCollection(cref: CollectionReference): Promise<void> {
 function batch(): Router {
     const res = Router()
 
-    res.post('/replay', function(_req: Request<{}>, res, next) {
-        handleReplay().then(result => {
-            res.status(200)
-            res.json(result)
-        }).catch(next)
-    })
+    // res.post('/replay', function(_req: Request<{}>, res, next) {
+    //     handleReplay().then(result => {
+    //         res.status(200)
+    //         res.json(result)
+    //     }).catch(next)
+    // })
 
     // res.post('/reexport', function(req: Request<{}>, res, next) {
     //     FRAMEWORK.handleReexport().then(result => {
@@ -565,4 +567,4 @@ async function debugMain() {
 (global as any)['logic'] = logic1_2_0;
 (global as any)['tx'] = db.runTransaction(fsDb);
 
-debugMain()
+// debugMain()

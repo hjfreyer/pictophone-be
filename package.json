@@ -9,7 +9,7 @@
     "tsc": "tsc",
     "dev": "gcloud config set project pictophone-app && FIRESTORE_EMULATOR_HOST=localhost:8181 ts-node-dev --respawn --transpileOnly ./src/index.ts",
     "test-live": "gcloud config set project pictophone-test && PORT=3111 nodemon ./src/index.ts",
-    "test-live-inspect": "gcloud config set project pictophone-test && PORT=3111 node --inspect -r ts-node/register ./src/index.ts",
+    "test-live-inspect": "gcloud config set project pictophone-test && PORT=3111 nodemon --exec node --inspect -r ts-node/register ./src/index.ts",
     "prod-live": "gcloud config set project pictophone-app && ts-node-dev --respawn --transpileOnly ./src/index.ts",
     "prod": "tsc && node ./dist/index.js",
     "gen": "npm-run-all gen:*",

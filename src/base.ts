@@ -2,13 +2,15 @@
 import * as db from './db'
 import { Live, Diff, Change } from './interfaces'
 // import { validate } from './schema/interfaces.validator'
-import { AnyAction, AnyError, SavedAction } from './schema/interfaces';
+import { AnyAction, AnyError, SavedAction } from './model';
 import { sha256 } from 'js-sha256';
 import _ from 'lodash';
 // import { Tables } from './schema';
 import * as util from './util'
 import * as ixa from "ix/asynciterable"
 import * as ixaop from "ix/asynciterable/operators"
+import * as ix from "ix/iterable"
+import * as ixop from "ix/iterable/operators"
 import * as readables from './readables'
 
 
@@ -92,19 +94,43 @@ export function diffToChange<T>(d: Diff<T>): Change<T> {
 
 
 const HASH_HEX_CHARS_LEN = (32 / 8) * 2;  // 32 bits of hash
+const PREFIX = 'actions/0';
 function serializeActionId(date: Date, hashHex: string): string {
-    return `0${date.toISOString()}${hashHex.slice(0, HASH_HEX_CHARS_LEN)}`
+    return PREFIX + `${date.toISOString()}${hashHex.slice(0, HASH_HEX_CHARS_LEN)}`
 }
 
 function parseActionId(serialized: string): [Date, string] {
-    if (serialized[0] !== '0') {
+    if (!serialized.startsWith(PREFIX)) {
         throw new Error('unknown action ID format');
     }
 
-    const dateStr = serialized.slice(1, serialized.length - HASH_HEX_CHARS_LEN);
+    const dateStr = serialized.slice(PREFIX.length, serialized.length - HASH_HEX_CHARS_LEN);
     const hashStr = serialized.slice(serialized.length - HASH_HEX_CHARS_LEN);
 
     return [new Date(dateStr), hashStr]
+}
+
+
+export function maxBy<T>(source: Iterable<T>, cmp: (a: T, b: T) => number): util.Option<T> {
+    let value: util.Option<T> = util.option.none();
+    for (const item of source) {
+        if (!value.data.some) {
+            value = util.option.some(item);
+            continue
+        }
+    }
+
+    return value;
+}
+
+function dateCmp(a: Date, b: Date): number {
+    if (a < b) {
+        return -1
+    }
+    if (b < a) {
+        return 1
+    }
+    return 0
 }
 
 export function getActionId(action: SavedAction): string {
@@ -112,12 +138,15 @@ export function getActionId(action: SavedAction): string {
     // should really be a particular serialization, but I'm not worrying
     // about that at the moment.
     const hashHex = sha256.hex(JSON.stringify(action));
-    const maxDate = _.max(action.parents.map(id => parseActionId(id)[0]));
+    const maxDate = maxBy(ix.from(Object.entries(action.parents)).pipe(
+        ixop.flatMap(([label, refGroup]) => refGroup.actionIds),
+        ixop.map(actionId => parseActionId(actionId)[0]),
+    ), dateCmp)
 
     let now = new Date();
 
     // TODO: just fake the date rather than waiting.
-    while (maxDate !== undefined && now < maxDate) {
+    while (util.option.from(maxDate).map(maxDate => now < maxDate).orElse(() => false)) {
         now = new Date();
     }
     return serializeActionId(now, hashHex);

@@ -9,7 +9,7 @@ genFile () {
     tsfmt -r "${f%.*}.validator.ts"
 }
 
-for f in $(find src/model/ -type f|grep -v "validator\|index"); do
+for f in $(find src/model/ -type f|grep -v "validator"); do
     genFile $f &
 done
 wait
