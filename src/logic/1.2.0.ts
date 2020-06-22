@@ -238,13 +238,9 @@ export async function getShortCodeDiffs(db: db.Database, action: MaybeLiveAction
         diffs.mapDiffs(gameToShortCodes)
     ))
 }
-export async function getGamesByPlayerDiffs(db: db.Database, action: MaybeLiveAction): Promise<Diff<string>[]> {
+export async function getGamesByPlayerDiffs1_0(db: db.Database, action: MaybeLiveAction): Promise<Diff<model1_0.PlayerGame>[]> {
     return Array.from(ix.from(await getGameDiffs(db, action)).pipe(
-        diffs.mapDiffs(([gameId]: Key, value: Game): Iterable<Item<string>> => {
-            return ix.from(value.players).pipe(
-                ixop.map(player => item([player.id], gameId))
-            )
-        })
+        diffs.mapDiffs(gameToPlayerGames1_0)
     ))
 }
 
@@ -300,7 +296,9 @@ export async function getEffectedFacets(db: db.Database, action: MaybeLiveAction
     const gameFacets = (await getGameDiffs(db, action)).map(({ key: [gameId] }) => [`game:${gameId}`])
     const scFacets = (await getShortCodeDiffs(db, action)).map(
         ({ key: [scId, gameId] }) => [`shortCode:${scId}`, `game:${gameId}`])
-    return [...gameFacets, ...scFacets]
+    const pgFacets = (await getGamesByPlayerDiffs1_0(db, action)).map(
+        ({ key: [playerId, gameId] }) => [`player:${playerId}`, `game:${gameId}`])
+    return [...gameFacets, ...scFacets, ...pgFacets]
 }
 
 function getNewValue<T>(d: Diff<T>): Option<T> {
