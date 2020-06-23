@@ -26,7 +26,7 @@ import {
     // deleteTable,
     // Reference
 } from './schema'
-import { SavedAction, AnyAction, AnyError } from './model'
+import { SavedAction, AnyAction, AnyError, ReferenceGroup } from './model'
 import { validate as validateSchema } from './model/index.validator'
 import * as util from './util'
 import { Defaultable, defaultable, Option, option, Result, result } from './util'
@@ -434,6 +434,116 @@ function handleAction<TState>(action: AnyAction): Promise<Result<null, AnyError>
 //     console.log('DONE')
 // }
 
+
+async function handleRefacetForAction(actionId: string): Promise<void> {
+    await db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
+
+        const labelsTable = db.open({
+            schema: ['labels-1.2.0'],
+            validator: validateSchema('ReferenceGroup')
+        })
+
+        const facetIds = await logic1_2_0.getEffectedFacets(db, { kind: 'replay', actionId })
+        for (const label of facetIds) {
+            if (label.length === 1) {
+
+                const [facetId] = label;
+
+                const currentRef = option.from(await readables.getOption(labelsTable, [facetId])).orElse(() => ({ kind: 'nil' }));
+                const newRef = ((): ReferenceGroup => {
+                    switch (currentRef.kind) {
+                        case "nil":
+                            return {
+                                kind: "leaf",
+                                actionId,
+                            }
+                        case "leaf":
+                            return {
+                                kind: "leaf",
+                                actionId: currentRef.actionId < actionId ? actionId : currentRef.actionId,
+                            }
+                        case "node":
+                            throw new Error("incompatible reference")
+                    }
+                })();
+                labelsTable.set([facetId], newRef)
+            } else if (label.length === 2) {
+                const [first, second] = label;
+                const currentRef = option.from(await readables.getOption(labelsTable, [first])).orElse(() => ({ kind: 'nil' }));
+                const newRef = ((): ReferenceGroup => {
+                    switch (currentRef.kind) {
+                        case "nil":
+                            return {
+                                kind: "node",
+                                subfacets: {
+                                    [second]: { kind: 'leaf', actionId },
+                                }
+                            }
+                        case "leaf":
+                            throw new Error("incompatible reference")
+
+                        case "node":
+                            if (!(second in currentRef.subfacets)) {
+                                return {
+                                    kind: "node",
+                                    subfacets: {
+                                        ...currentRef.subfacets,
+                                        [second]: { kind: 'leaf', actionId },
+                                    }
+                                }
+                            } else {
+                                const subfacet = currentRef.subfacets[second];
+                                switch (subfacet.kind) {
+                                    case 'nil':
+                                        return {
+                                            kind: "node",
+                                            subfacets: {
+                                                ...currentRef.subfacets,
+                                                [second]: { kind: 'leaf', actionId },
+                                            }
+                                        }
+                                    case 'node':
+                                        throw new Error("incompatible reference")
+                                    case 'leaf':
+                                        return {
+                                            kind: "node",
+                                            subfacets: {
+                                                ...currentRef.subfacets,
+                                                [second]: {
+                                                    kind: 'leaf', actionId:
+                                                        subfacet.actionId < actionId ? actionId : subfacet.actionId,
+                                                },
+                                            }
+                                        }
+                                }
+                            }
+                    }
+                })();
+
+                labelsTable.set([first], newRef)
+            } else {
+                throw new Error('wtf')
+            }
+        }
+    })
+}
+
+async function handleRefacet(): Promise<void> {
+    let cursor: string = '';
+    console.log('REPLAY')
+    while (true) {
+        const nextActionOrNull = await getNextAction(db.runTransaction(fsDb), cursor);
+        if (nextActionOrNull === null) {
+            break;
+        }
+        const [actionId, savedAction] = nextActionOrNull;
+        await handleRefacetForAction(`actions/${actionId}`)
+
+        cursor = actionId;
+    }
+    console.log('DONE')
+}
+
 function getNextAction(tx: db.TxRunner, startAfter: string): Promise<([string, SavedAction] | null)> {
     return tx(async (db: db.Database): Promise<([string, SavedAction] | null)> => {
         const actions = openAll(db)["ACTIONS"];
@@ -514,6 +624,12 @@ function batch(): Router {
     //         res.json(result)
     //     }).catch(next)
     // })
+    res.post('/refacet', function(_req: Request<{}>, res, next) {
+        handleRefacet().then(result => {
+            res.status(200)
+            res.json(result)
+        }).catch(next)
+    })
 
     // res.post('/reexport', function(req: Request<{}>, res, next) {
     //     FRAMEWORK.handleReexport().then(result => {

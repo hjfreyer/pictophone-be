@@ -238,10 +238,16 @@ export async function getShortCodeDiffs(db: db.Database, action: MaybeLiveAction
         diffs.mapDiffs(gameToShortCodes)
     ))
 }
-export async function getGamesByPlayerDiffs1_0(db: db.Database, action: MaybeLiveAction): Promise<Diff<model1_0.PlayerGame>[]> {
+export async function getGamesByPlayerIndexDiffs(db: db.Database, action: MaybeLiveAction): Promise<Diff<{}>[]> {
     return Array.from(ix.from(await getGameDiffs(db, action)).pipe(
-        diffs.mapDiffs(gameToPlayerGames1_0)
+        diffs.mapDiffs(gameToPlayerToMemberGames)
     ))
+}
+
+export function gameToPlayerToMemberGames([gameId]: Key, game: Game): Item<{}>[] {
+    return Array.from(ix.from(game.players).pipe(
+        ixop.map(p => ({ key: [p.id, gameId], value: {} }))
+    ));
 }
 
 export async function getShortCodeAndGameState(db: db.Database, action: MaybeLiveAction, shortCode: string, gameId: string): Promise<Option<ShortCode>> {
@@ -296,7 +302,7 @@ export async function getEffectedFacets(db: db.Database, action: MaybeLiveAction
     const gameFacets = (await getGameDiffs(db, action)).map(({ key: [gameId] }) => [`game:${gameId}`])
     const scFacets = (await getShortCodeDiffs(db, action)).map(
         ({ key: [scId, gameId] }) => [`shortCode:${scId}`, `game:${gameId}`])
-    const pgFacets = (await getGamesByPlayerDiffs1_0(db, action)).map(
+    const pgFacets = (await getGamesByPlayerIndexDiffs(db, action)).map(
         ({ key: [playerId, gameId] }) => [`player:${playerId}`, `game:${gameId}`])
     return [...gameFacets, ...scFacets, ...pgFacets]
 }
