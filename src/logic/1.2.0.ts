@@ -30,9 +30,6 @@ import admin from 'firebase-admin'
 import { strict as assert } from 'assert';
 
 
-// type IntegrationResult =
-//     fw.IntegrationResult2<State>;
-
 type MaybeLiveAction = {
     kind: 'live'
     action: Action
@@ -41,42 +38,19 @@ type MaybeLiveAction = {
     actionId: string
 }
 
-// // Diff keys are [facetId, actionId].
-// export async function getFacetTransfers(db: db.Database, action: MaybeLiveAction): Diff<{}>[] {}
-
-// // Item keys are [facetId, actionId].
-// export async function getFacetOwnersJustBefore(db: db.Database, action: MaybeLiveAction): Item<{}>[] {
-
-// }
-
 export async function commitAction(db: db.Database, anyAction: AnyAction): Promise<SavedAction> {
     const action = convertAction(anyAction)
     const res = await getNewGameOrError(db, { kind: 'live', action: action })
-    // const parentList = await ixa.toArray(ixa.from(res.labelsQueried).pipe(
-    //     ixaop.map(label => getParent(db, { kind: 'live', action }, label)),
-    //     util.filterNoneAsync(),
-    //     ixaop.orderBy(actionId => actionId)
-    // ))
+
+    console.log(JSON.stringify(res.newGame, undefined, 2))
 
     const affectedFacets = await getEffectedFacets(db, { kind: 'live', action })
-
-
-    // const actionsTable = db.open({
-    //     schema: ['actions'],
-    //     validator: validateSchema('SavedAction')
-    // })
 
     const savedAction: SavedAction = { parents: res.parents, action: anyAction };
     const actionId = getActionId(savedAction);
 
     db.tx.set(db.db.doc(actionId), savedAction)
-    // annotationsTable.set([actionId], { labels, parents: labelToParent, state })
-    // const oldStates: Record<string, Option<TState>> = {};
 
-    // const labelsTable = db.open({
-    //     schema: [`labels-1.2.0`],
-    //     validator: validateSchema('ReferenceGroup')
-    // })
     for (const label of affectedFacets) {
         if (label.length === 1) {
 
@@ -87,33 +61,19 @@ export async function commitAction(db: db.Database, anyAction: AnyAction): Promi
             }
             const labelPath = `labels-1.2.0/${facetId}`
             db.tx.set(db.db.doc(labelPath), ref)
-        } else
-            if (label.length === 2) {
-                const [first, second] = label;
-                const labelPath = `labels-1.2.0/${first}`
-                const ref: ReferenceGroup = {
-                    kind: 'node',
-                    subfacets: {
-                        [second]: { kind: 'leaf', actionId }
-                    }
+        } else if (label.length === 2) {
+            const [first, second] = label;
+            const labelPath = `labels-1.2.0/${first}`
+            const ref: ReferenceGroup = {
+                kind: 'node',
+                subfacets: {
+                    [second]: { kind: 'leaf', actionId }
                 }
-                db.tx.set(db.db.doc(labelPath), ref, { merge: true })
-            } else {
-                throw new Error('wtf')
-            }// const oldFetched = option.of(ix.find(fetched, f => f.label === label)).expect("No blind writes");
-        //oldStates[label] = oldFetched.state;
-        // const labelPath = `labels-1.2.0/${label}`
-        // if (label in res.parents) {
-        //     for (const parent of res.parents[label].actionIds) {
-        //         db.tx.set(db.db.doc(labelPath), {
-        //             actionIds: admin.firestore.FieldValue.arrayRemove(parent)
-        //         })
-        //     }
-        // }
-        // db.tx.set(db.db.doc(labelPath), {
-        //     actionIds: admin.firestore.FieldValue.arrayUnion(actionId)
-        // })
-        // labelsTable.set([label], { actionId });
+            }
+            db.tx.set(db.db.doc(labelPath), ref, { merge: true })
+        } else {
+            throw new Error('wtf')
+        }
     }
 
     return savedAction
@@ -135,15 +95,6 @@ export async function getParents(db: db.Database, action: MaybeLiveAction, facet
     } else {
         const savedAction = option.from(await getAction(db, action.actionId)).unwrap();
         return option.of(savedAction.parents[facetId]).expect("Illegal parent get");
-
-        // const orderedParentsWithFacets = ixa.from(savedAction.parents).pipe(
-        //     ixaop.orderByDescending(actionId => actionId),
-        //     ixaop.map(async actionId => ({ actionId, facets: await getFacets(db, { kind: 'replay', actionId }) }))
-        // )
-
-        // return option.of(await ixa.first(orderedParentsWithFacets, ({ facets }) => facets.indexOf(facetId) !== -1)).map(
-        //     x => x.actionId
-        // )
     }
 }
 
@@ -171,9 +122,7 @@ export async function getNewGameOrError(db: db.Database, maybeAction: MaybeLiveA
     const parents: Record<string, ReferenceGroup> = {}
     parents[`game:${action.gameId}`] = await getParents(db, maybeAction, `game:${action.gameId}`)
 
-    const oldGame = await option.from(extractSingleParent(parents[`game:${action.gameId}`])).andThenAsync(
-        actionId => getGameState(db, { kind: 'replay', actionId }, action.gameId))
-
+    const oldGame = await getGameState(db, parents[`game:${action.gameId}`], action.gameId);
 
     const internalIsShortCodeUsed = async (sc: string): Promise<boolean> => {
         parents[`shortCode:${sc}`] = await getParents(db, maybeAction, `shortCode:${sc}`)
@@ -203,104 +152,110 @@ export async function getGameDiffs(db: db.Database, maybeAction: MaybeLiveAction
     return result.from(newGame).map(newGame => diffs.newDiff2([gameId], oldGame, option.some(newGame)).diffs).orElse(() => [])
 }
 
-export async function getGameState(db: db.Database, action: MaybeLiveAction, gameId: string): Promise<Option<Game>> {
-    // Illegal to call for an action that doesn't touch the state.
-    const diff = option.of(ix.find(await getGameDiffs(db, action),
-        ({ key: [diffGameId] }) => diffGameId === gameId)).unwrap();
-
-    switch (diff.kind) {
-        case 'add':
-            return option.some(diff.value)
-        case 'replace':
-            return option.some(diff.newValue)
-        case 'delete':
-            return option.none()
+export async function getGameState(db: db.Database, ref: ReferenceGroup, gameId: string): Promise<Option<Game>> {
+    if (ref.kind === "nil") {
+        return option.none()
     }
+    if (ref.kind === 'node') {
+        throw new Error("GameState is not an aggregation")
+    }
+    const { gameId: newGameId, newGame } = await getNewGameOrError(db, { kind: 'replay', actionId: ref.actionId })
+
+    if (gameId !== newGameId) {
+        throw new Error(`Action "${ref.actionId}" impacts game "${newGameId}", not "${gameId}"`)
+    }
+    if (newGame.data.status === 'err') {
+        throw new Error(`Action "${ref.actionId}" yields an error, not a game: ${JSON.stringify(newGame.data.error)}"`)
+    }
+    return option.some(newGame.data.value);
 }
 
-// async function getGameStates(actionId : Option<string>, action: Action): Promise<Item<Game>[]> {
-//     return Array.from(ix.from(await getGameDiffs(actionId, action)).pipe(
-//         ixop.flatMap(diff => {
-//             switch (diff.kind) {
-//                 case 'add':
-//                     return [{key: diff.key, value: diff.value}]
-//                 case 'replace':
-//                     return [{key: diff.key, value: diff.newValue}]
-//                 case 'delete':
-//                     return []
-//             }
-//         })
-//     ));
-// }
+function gameToPlayerToMemberGames([gameId]: Key, game: Game): Item<{}>[] {
+    return Array.from(ix.from(game.players).pipe(
+        ixop.map(p => ({ key: [p.id, gameId], value: {} }))
+    ));
+}
 
-export async function getShortCodeDiffs(db: db.Database, action: MaybeLiveAction): Promise<Diff<ShortCode>[]> {
+function gameToShortCodeFragments([gameId]: Key, game: Game): Item<{}>[] {
+    if (game.state !== 'UNSTARTED' || game.shortCode === '') {
+        return []
+    }
+    return [{ key: [game.shortCode, gameId], value: {} }]
+}
+
+function aggregateShortCodeFragments(fragments: Iterable<Item<{}>>): Iterable<Item<{}>> {
+    return ix.from(fragments).pipe(
+        ixop.groupBy(
+            ({ key: [shortCodeId,] }) => shortCodeId,
+            item => item,
+            (shortCodeId: string, fragments: Iterable<Item<{}>>): Iterable<Item<{}>> => {
+                return ix.isEmpty(fragments) ? ix.empty() : ix.of(item([shortCodeId], {}))
+            }
+        ),
+        ixop.concatAll()
+    )
+}
+
+export async function getShortCodeState(db: db.Database, ref: ReferenceGroup, shortCodeId: string): Promise<Option<ShortCode>> {
+    if (ref.kind === "nil") {
+        return option.none()
+    }
+    if (ref.kind === 'leaf') {
+        throw new Error("ShortCode is an aggregation")
+    }
+
+    const gameStates = ixa.from(Object.entries(ref.subfacets)).pipe(
+        ixaop.map(async ([subFacetId, subFacetRef]) => {
+            if (!subFacetId.startsWith("game:")) {
+                throw new Error(`bogus subfacet: ${subFacetId}`)
+            }
+            const gameId = subFacetId.replace("game:", "")
+            return { key: [gameId], value: option.from(await getGameState(db, subFacetRef, gameId)).expect("Why was there a nil ref in a node?") }
+        })
+    )
+    const shortCodeFragmentStates = await ixa.toArray(gameStates.pipe(
+        ixaop.flatMap(({ key, value: game }) => ixa.from(gameToShortCodeFragments(key, game)))
+    ))
+    const shortCodeStates = Array.from(aggregateShortCodeFragments(shortCodeFragmentStates))
+    if (shortCodeStates.length === 0) {
+        return option.none()
+    }
+    if (1 < shortCodeStates.length || shortCodeStates[0].key[0] !== shortCodeId) {
+        throw new Error("Aggregation did something weird")
+    }
+    return option.some(shortCodeStates[0].value)
+}
+
+export async function getShortCodeFragmentDiffs(db: db.Database, action: MaybeLiveAction): Promise<Diff<ShortCode>[]> {
     return Array.from(ix.from(await getGameDiffs(db, action)).pipe(
-        diffs.mapDiffs(gameToShortCodes)
+        diffs.mapDiffs(gameToShortCodeFragments)
     ))
 }
+
 export async function getGamesByPlayerIndexDiffs(db: db.Database, action: MaybeLiveAction): Promise<Diff<{}>[]> {
     return Array.from(ix.from(await getGameDiffs(db, action)).pipe(
         diffs.mapDiffs(gameToPlayerToMemberGames)
     ))
 }
 
-export function gameToPlayerToMemberGames([gameId]: Key, game: Game): Item<{}>[] {
-    return Array.from(ix.from(game.players).pipe(
-        ixop.map(p => ({ key: [p.id, gameId], value: {} }))
-    ));
-}
+// export async function getShortCodeAndGameState(db: db.Database, action: MaybeLiveAction, shortCode: string, gameId: string): Promise<Option<ShortCode>> {
+//     // Illegal to call for an action that doesn't touch the state.
+//     const diff = option.of(ix.find(await getShortCodeFragmentDiffs(db, action),
+//         ({ key: [diffId,] }) => diffId === shortCode)).unwrap();
 
-export async function getShortCodeAndGameState(db: db.Database, action: MaybeLiveAction, shortCode: string, gameId: string): Promise<Option<ShortCode>> {
-    // Illegal to call for an action that doesn't touch the state.
-    const diff = option.of(ix.find(await getShortCodeDiffs(db, action),
-        ({ key: [diffId,] }) => diffId === shortCode)).unwrap();
-
-    switch (diff.kind) {
-        case 'add':
-            return option.some(diff.value)
-        case 'replace':
-            return option.some(diff.newValue)
-        case 'delete':
-            return option.none()
-    }
-}
-
-export async function getShortCodeState(db: db.Database, refs: ReferenceGroup, shortCode: string): Promise<Option<ShortCode>> {
-    if (refs.kind === 'nil') {
-        return option.none()
-    }
-    if (refs.kind !== 'node') {
-        throw new Error('wtf')
-    }
-
-    for (const [subFacetId, subReference] of Object.entries(refs.subfacets)) {
-        const scgRes = await getShortCodeAndGameState(
-            db, { kind: 'replay', actionId: option.from(extractSingleParent(subReference)).unwrap() },
-            shortCode, subFacetId)
-        if (scgRes.data.some) {
-            return scgRes
-        }
-    }
-
-    return option.none()
-
-    // // Illegal to call for an action that doesn't touch the state.
-    // const diff = option.of(ix.find(await getShortCodeDiffs(db, action),
-    //     ({ key: [diffId, ] }) => diffId === shortCode)).unwrap();
-
-    // switch (diff.kind) {
-    //     case 'add':
-    //         return option.some(diff.value)
-    //     case 'replace':
-    //         return option.some(diff.newValue)
-    //     case 'delete':
-    //         return option.none()
-    // }
-}
+//     switch (diff.kind) {
+//         case 'add':
+//             return option.some(diff.value)
+//         case 'replace':
+//             return option.some(diff.newValue)
+//         case 'delete':
+//             return option.none()
+//     }
+// }
 
 export async function getEffectedFacets(db: db.Database, action: MaybeLiveAction): Promise<Key[]> {
     const gameFacets = (await getGameDiffs(db, action)).map(({ key: [gameId] }) => [`game:${gameId}`])
-    const scFacets = (await getShortCodeDiffs(db, action)).map(
+    const scFacets = (await getShortCodeFragmentDiffs(db, action)).map(
         ({ key: [scId, gameId] }) => [`shortCode:${scId}`, `game:${gameId}`])
     const pgFacets = (await getGamesByPlayerIndexDiffs(db, action)).map(
         ({ key: [playerId, gameId] }) => [`player:${playerId}`, `game:${gameId}`])
@@ -466,12 +421,6 @@ function convertError1_1(err: Error): model1_1.Error {
 //     }
 // }
 
-function gameToShortCodes([gameId]: Key, game: Game): Item<ShortCode>[] {
-    if (game.state !== 'UNSTARTED' || game.shortCode === '') {
-        return []
-    }
-    return [{ key: [game.shortCode, gameId], value: {} }]
-}
 
 async function helper(a: Action, maybeOldGame: Option<Game>, isShortCodeUsed: (shortCode: string) => Promise<boolean>): Promise<ResultView<Game, Error>> {
 

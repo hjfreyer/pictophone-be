@@ -671,14 +671,14 @@ function batch(): Router {
 //     })
 // }
 
-async function debugMain() {
-    await db.runTransaction(fsDb)(async db => {
+// async function debugMain() {
+//     await db.runTransaction(fsDb)(async db => {
 
 
 
-        console.log(JSON.stringify(await logic1_2_0.getGameState(db, { kind: 'replay', actionId: "02020-06-19T17:43:18.392Z052beb85" }, "aa")))
-    })
-}
+//         console.log(JSON.stringify(await logic1_2_0.getGameState(db, { kind: 'replay', actionId: "02020-06-19T17:43:18.392Z052beb85" }, "aa")))
+//     })
+// }
 
 (global as any)['logic'] = logic1_2_0;
 (global as any)['tx'] = db.runTransaction(fsDb);
