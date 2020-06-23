@@ -13,13 +13,18 @@ export type SavedAction = {
 }
 
 export type ReferenceGroup = {
-    kind: 'leaf'
+    kind: 'single'
     actionId: string
 } | {
-    kind: 'node'
-    subfacets: Record<string, ReferenceGroup>
+    kind: 'collection'
+    id: string
+    members: Record<string, ReferenceGroup>
 } | {
-    kind: 'nil'
+    kind: 'none'
+}
+
+export interface Pointer {
+    actionId: string
 }
 
 // export interface NumberValue {

@@ -12,6 +12,7 @@ import * as ixaop from "ix/asynciterable/operators"
 import * as ix from "ix/iterable"
 import * as ixop from "ix/iterable/operators"
 import * as readables from './readables'
+import { basename } from 'path';
 
 
 // export function validateLive<T>(validator: (u: unknown) => T): (u: unknown) => Live<T> {
@@ -94,18 +95,19 @@ export function diffToChange<T>(d: Diff<T>): Change<T> {
 
 
 const HASH_HEX_CHARS_LEN = (32 / 8) * 2;  // 32 bits of hash
-const PREFIX = 'actions/0';
+const PREFIX = '0';
 function serializeActionId(date: Date, hashHex: string): string {
     return PREFIX + `${date.toISOString()}${hashHex.slice(0, HASH_HEX_CHARS_LEN)}`
 }
 
 function parseActionId(serialized: string): [Date, string] {
-    if (!serialized.startsWith(PREFIX)) {
+    const id = basename(serialized)
+    if (!id.startsWith(PREFIX)) {
         throw new Error('unknown action ID format');
     }
 
-    const dateStr = serialized.slice(PREFIX.length, serialized.length - HASH_HEX_CHARS_LEN);
-    const hashStr = serialized.slice(serialized.length - HASH_HEX_CHARS_LEN);
+    const dateStr = id.slice(PREFIX.length, id.length - HASH_HEX_CHARS_LEN);
+    const hashStr = id.slice(id.length - HASH_HEX_CHARS_LEN);
 
     return [new Date(dateStr), hashStr]
 }
@@ -135,13 +137,13 @@ function dateCmp(a: Date, b: Date): number {
 
 function* collectLeafs(rg: ReferenceGroup): Iterable<string> {
     switch (rg.kind) {
-        case 'nil':
+        case 'none':
             return
-        case 'leaf':
+        case 'single':
             yield rg.actionId
             return
-        case 'node':
-            for (const rg2 of Object.values(rg.subfacets)) {
+        case 'collection':
+            for (const rg2 of Object.values(rg.members)) {
                 yield* collectLeafs(rg2)
 
             }
@@ -165,5 +167,5 @@ export function getActionId(action: SavedAction): string {
     while (util.option.from(maxDate).map(maxDate => now < maxDate).orElse(() => false)) {
         now = new Date();
     }
-    return serializeActionId(now, hashHex);
+    return `games/${action.action.gameId}/actions/${serializeActionId(now, hashHex)}`;
 }

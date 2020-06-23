@@ -28,6 +28,7 @@ import { validate as validateSchema } from '../model/index.validator'
 import * as readables from '../readables';
 import admin from 'firebase-admin'
 import { strict as assert } from 'assert';
+import { dirname } from 'path';
 
 
 type MaybeLiveAction = {
@@ -44,36 +45,37 @@ export async function commitAction(db: db.Database, anyAction: AnyAction): Promi
 
     console.log(JSON.stringify(res.newGame, undefined, 2))
 
-    const affectedFacets = await getEffectedFacets(db, { kind: 'live', action })
+    const affectedFacets = await getAffectedFacets(db, { kind: 'live', action })
 
     const savedAction: SavedAction = { parents: res.parents, action: anyAction };
     const actionId = getActionId(savedAction);
 
     db.tx.set(db.db.doc(actionId), savedAction)
 
-    for (const label of affectedFacets) {
-        if (label.length === 1) {
+    for (const facetId of affectedFacets) {
+        db.tx.set(db.db.doc(facetId), { actionId })
+        // if (facetId.length === 1) {
 
-            const [facetId] = label;
-            const ref: ReferenceGroup = {
-                kind: 'leaf',
-                actionId,
-            }
-            const labelPath = `labels-1.2.0/${facetId}`
-            db.tx.set(db.db.doc(labelPath), ref)
-        } else if (label.length === 2) {
-            const [first, second] = label;
-            const labelPath = `labels-1.2.0/${first}`
-            const ref: ReferenceGroup = {
-                kind: 'node',
-                subfacets: {
-                    [second]: { kind: 'leaf', actionId }
-                }
-            }
-            db.tx.set(db.db.doc(labelPath), ref, { merge: true })
-        } else {
-            throw new Error('wtf')
-        }
+        //     const [facetId] = facetId;
+        //     const ref: ReferenceGroup = {
+        //         kind: 'single',
+        //         actionId,
+        //     }
+        //     const labelPath = `labels-1.2.0/${facetId}`
+        //     db.tx.set(db.db.doc(labelPath), ref)
+        // } else if (facetId.length === 2) {
+        //     const [first, second] = facetId;
+        //     const labelPath = `labels-1.2.0/${first}`
+        //     const ref: ReferenceGroup = {
+        //         kind: 'collection',
+        //         members: {
+        //             [second]: { kind: 'single', actionId }
+        //         }
+        //     }
+        //     db.tx.set(db.db.doc(labelPath), ref, { merge: true })
+        // } else {
+        //     throw new Error('wtf')
+        // }
     }
 
     return savedAction
@@ -87,32 +89,49 @@ export async function getAction(db: db.Database, actionId: string): Promise<Opti
 
 export async function getParents(db: db.Database, action: MaybeLiveAction, facetId: string): Promise<ReferenceGroup> {
     if (action.kind === 'live') {
-        const labelsTable = db.open({
-            schema: [`labels-1.2.0`],
-            validator: validateSchema('ReferenceGroup')
-        })
-        return option.from(await readables.getOption(labelsTable, [facetId])).orElse(() => ({ kind: 'nil' }))
+        if (facetId.endsWith("/*")) {
+            const res: ReferenceGroup = {
+                kind: 'collection',
+                id: dirname(facetId),
+                members: {},
+            }
+
+            const collection = await db.tx.get(db.db.collection(dirname(facetId)));
+            for (const doc of collection.docs) {
+                const ptr = validateSchema('Pointer')(doc.data())
+                res.members[doc.id] = {
+                    kind: 'single',
+                    actionId: ptr.actionId,
+                }
+            }
+            return res;
+        } else {
+            return option.from(await db.getRaw(facetId))
+                .map(validateSchema('Pointer'))
+                .map((p): ReferenceGroup => ({ kind: 'single', actionId: p.actionId }))
+                .orElse(() => ({ kind: 'none' }))
+        }
     } else {
         const savedAction = option.from(await getAction(db, action.actionId)).unwrap();
         return option.of(savedAction.parents[facetId]).expect("Illegal parent get");
     }
 }
 
-export async function getSingleParent(db: db.Database, maybeAction: MaybeLiveAction, facetId: string): Promise<Option<string>> {
-    return extractSingleParent(await getParents(db, maybeAction, facetId));
-}
+// export async function getSingleParent(db: db.Database, maybeAction: MaybeLiveAction, facetId: string): Promise<Option<string>> {
+//     return extractSingleParent(await getParents(db, maybeAction, facetId));
+// }
 
-export function extractSingleParent(rg: ReferenceGroup): Option<string> {
-    switch (rg.kind) {
-        case 'nil':
-            return option.none()
-        case 'leaf':
-            return option.some(rg.actionId)
-        case 'node':
-            throw new Error("facet may only have a single head")
+// export function extractSingleParent(rg: ReferenceGroup): Option<string> {
+//     switch (rg.kind) {
+//         case 'nil':
+//             return option.none()
+//         case 'leaf':
+//             return option.some(rg.actionId)
+//         case 'node':
+//             throw new Error("facet may only have a single head")
 
-    }
-}
+//     }
+// }
 
 export async function getNewGameOrError(db: db.Database, maybeAction: MaybeLiveAction): Promise<IntRes> {
     const action = maybeAction.kind === 'live'
@@ -120,13 +139,15 @@ export async function getNewGameOrError(db: db.Database, maybeAction: MaybeLiveA
         : convertAction(option.from(await getAction(db, maybeAction.actionId)).unwrap().action);
 
     const parents: Record<string, ReferenceGroup> = {}
-    parents[`game:${action.gameId}`] = await getParents(db, maybeAction, `game:${action.gameId}`)
+    const gameFacetId = `games/${action.gameId}`
+    parents[gameFacetId] = await getParents(db, maybeAction, gameFacetId)
 
-    const oldGame = await getGameState(db, parents[`game:${action.gameId}`], action.gameId);
+    const oldGame = await getGameState(db, parents[gameFacetId], action.gameId);
 
     const internalIsShortCodeUsed = async (sc: string): Promise<boolean> => {
-        parents[`shortCode:${sc}`] = await getParents(db, maybeAction, `shortCode:${sc}`)
-        return (await getShortCodeState(db, parents[`shortCode:${sc}`], sc)).data.some
+        const scFacetId = `shortCodes/${sc}/games/*`
+        parents[scFacetId] = await getParents(db, maybeAction, scFacetId)
+        return (await getShortCodeState(db, parents[scFacetId], sc)).data.some
     }
 
     const res = await helper(action, oldGame, internalIsShortCodeUsed);
@@ -153,10 +174,10 @@ export async function getGameDiffs(db: db.Database, maybeAction: MaybeLiveAction
 }
 
 export async function getGameState(db: db.Database, ref: ReferenceGroup, gameId: string): Promise<Option<Game>> {
-    if (ref.kind === "nil") {
+    if (ref.kind === "none") {
         return option.none()
     }
-    if (ref.kind === 'node') {
+    if (ref.kind === 'collection') {
         throw new Error("GameState is not an aggregation")
     }
     const { gameId: newGameId, newGame } = await getNewGameOrError(db, { kind: 'replay', actionId: ref.actionId })
@@ -197,19 +218,15 @@ function aggregateShortCodeFragments(fragments: Iterable<Item<{}>>): Iterable<It
 }
 
 export async function getShortCodeState(db: db.Database, ref: ReferenceGroup, shortCodeId: string): Promise<Option<ShortCode>> {
-    if (ref.kind === "nil") {
+    if (ref.kind === "none") {
         return option.none()
     }
-    if (ref.kind === 'leaf') {
+    if (ref.kind === 'single') {
         throw new Error("ShortCode is an aggregation")
     }
 
-    const gameStates = ixa.from(Object.entries(ref.subfacets)).pipe(
-        ixaop.map(async ([subFacetId, subFacetRef]) => {
-            if (!subFacetId.startsWith("game:")) {
-                throw new Error(`bogus subfacet: ${subFacetId}`)
-            }
-            const gameId = subFacetId.replace("game:", "")
+    const gameStates = ixa.from(Object.entries(ref.members)).pipe(
+        ixaop.map(async ([gameId, subFacetRef]) => {
             return { key: [gameId], value: option.from(await getGameState(db, subFacetRef, gameId)).expect("Why was there a nil ref in a node?") }
         })
     )
@@ -253,25 +270,25 @@ export async function getGamesByPlayerIndexDiffs(db: db.Database, action: MaybeL
 //     }
 // }
 
-export async function getEffectedFacets(db: db.Database, action: MaybeLiveAction): Promise<Key[]> {
-    const gameFacets = (await getGameDiffs(db, action)).map(({ key: [gameId] }) => [`game:${gameId}`])
+export async function getAffectedFacets(db: db.Database, action: MaybeLiveAction): Promise<string[]> {
+    const gameFacets = (await getGameDiffs(db, action)).map(({ key: [gameId] }) => `games/${gameId}`)
     const scFacets = (await getShortCodeFragmentDiffs(db, action)).map(
-        ({ key: [scId, gameId] }) => [`shortCode:${scId}`, `game:${gameId}`])
+        ({ key: [scId, gameId] }) => `shortCodes/${scId}/games/${gameId}`)
     const pgFacets = (await getGamesByPlayerIndexDiffs(db, action)).map(
-        ({ key: [playerId, gameId] }) => [`player:${playerId}`, `game:${gameId}`])
+        ({ key: [playerId, gameId] }) => `players/${playerId}/games/${gameId}`)
     return [...gameFacets, ...scFacets, ...pgFacets]
 }
 
-function getNewValue<T>(d: Diff<T>): Option<T> {
-    switch (d.kind) {
-        case "add":
-            return option.some(d.value)
-        case "delete":
-            return option.none()
-        case "replace":
-            return option.some(d.newValue)
-    }
-}
+// function getNewValue<T>(d: Diff<T>): Option<T> {
+//     switch (d.kind) {
+//         case "add":
+//             return option.some(d.value)
+//         case "delete":
+//             return option.none()
+//         case "replace":
+//             return option.some(d.newValue)
+//     }
+// }
 // export function getGamesForPlayerByAction([gameId]: Key, game : Game): Iterable<Item<string[]>> {
 // return ix.from(game.players).pipe(
 //     ixop.map(    player => {key: player.id, value: [gameId]})

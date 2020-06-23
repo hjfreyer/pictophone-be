@@ -26,7 +26,7 @@ import {
     // deleteTable,
     // Reference
 } from './schema'
-import { SavedAction, AnyAction, AnyError, ReferenceGroup } from './model'
+import { SavedAction, AnyAction, AnyError, ReferenceGroup, Pointer } from './model'
 import { validate as validateSchema } from './model/index.validator'
 import * as util from './util'
 import { Defaultable, defaultable, Option, option, Result, result } from './util'
@@ -438,92 +438,102 @@ function handleAction<TState>(action: AnyAction): Promise<Result<null, AnyError>
 async function handleRefacetForAction(actionId: string): Promise<void> {
     await db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
 
-        const labelsTable = db.open({
-            schema: ['labels-1.2.0'],
-            validator: validateSchema('ReferenceGroup')
-        })
+        // const labelsTable = db.open({
+        //     schema: ['labels-1.2.0'],
+        //     validator: validateSchema('ReferenceGroup')
+        // })
 
-        const facetIds = await logic1_2_0.getEffectedFacets(db, { kind: 'replay', actionId })
-        for (const label of facetIds) {
-            if (label.length === 1) {
+        const facetIds = await logic1_2_0.getAffectedFacets(db, { kind: 'replay', actionId })
+        for (const facetId of facetIds) {
+            const newPointer: Pointer = option.from(await db.getRaw(facetId))
+                .map(validateSchema('Pointer'))
+                .map(ptr => ({
+                    actionId: ptr.actionId < actionId ? actionId : ptr.actionId
+                }))
+                .orElse(() => ({ actionId }))
 
-                const [facetId] = label;
+            db.tx.set(db.db.doc(facetId), newPointer);
 
-                const currentRef = option.from(await readables.getOption(labelsTable, [facetId])).orElse(() => ({ kind: 'nil' }));
-                const newRef = ((): ReferenceGroup => {
-                    switch (currentRef.kind) {
-                        case "nil":
-                            return {
-                                kind: "leaf",
-                                actionId,
-                            }
-                        case "leaf":
-                            return {
-                                kind: "leaf",
-                                actionId: currentRef.actionId < actionId ? actionId : currentRef.actionId,
-                            }
-                        case "node":
-                            throw new Error("incompatible reference")
-                    }
-                })();
-                labelsTable.set([facetId], newRef)
-            } else if (label.length === 2) {
-                const [first, second] = label;
-                const currentRef = option.from(await readables.getOption(labelsTable, [first])).orElse(() => ({ kind: 'nil' }));
-                const newRef = ((): ReferenceGroup => {
-                    switch (currentRef.kind) {
-                        case "nil":
-                            return {
-                                kind: "node",
-                                subfacets: {
-                                    [second]: { kind: 'leaf', actionId },
-                                }
-                            }
-                        case "leaf":
-                            throw new Error("incompatible reference")
+            // if (facetId.length === 1) {
 
-                        case "node":
-                            if (!(second in currentRef.subfacets)) {
-                                return {
-                                    kind: "node",
-                                    subfacets: {
-                                        ...currentRef.subfacets,
-                                        [second]: { kind: 'leaf', actionId },
-                                    }
-                                }
-                            } else {
-                                const subfacet = currentRef.subfacets[second];
-                                switch (subfacet.kind) {
-                                    case 'nil':
-                                        return {
-                                            kind: "node",
-                                            subfacets: {
-                                                ...currentRef.subfacets,
-                                                [second]: { kind: 'leaf', actionId },
-                                            }
-                                        }
-                                    case 'node':
-                                        throw new Error("incompatible reference")
-                                    case 'leaf':
-                                        return {
-                                            kind: "node",
-                                            subfacets: {
-                                                ...currentRef.subfacets,
-                                                [second]: {
-                                                    kind: 'leaf', actionId:
-                                                        subfacet.actionId < actionId ? actionId : subfacet.actionId,
-                                                },
-                                            }
-                                        }
-                                }
-                            }
-                    }
-                })();
+            //     const [facetId] = facetId;
 
-                labelsTable.set([first], newRef)
-            } else {
-                throw new Error('wtf')
-            }
+            //     const currentRef = option.from(await readables.getOption(labelsTable, [facetId])).orElse(() => ({ kind: 'nil' }));
+            //     const newRef = ((): ReferenceGroup => {
+            //         switch (currentRef.kind) {
+            //             case "none":
+            //                 return {
+            //                     kind: "leaf",
+            //                     actionId,
+            //                 }
+            //             case "leaf":
+            //                 return {
+            //                     kind: "leaf",
+            //                     actionId: currentRef.actionId < actionId ? actionId : currentRef.actionId,
+            //                 }
+            //             case "node":
+            //                 throw new Error("incompatible reference")
+            //         }
+            //     })();
+            //     labelsTable.set([facetId], newRef)
+            // } else if (facetId.length === 2) {
+            //     const [first, second] = facetId;
+            //     const currentRef = option.from(await readables.getOption(labelsTable, [first])).orElse(() => ({ kind: 'nil' }));
+            //     const newRef = ((): ReferenceGroup => {
+            //         switch (currentRef.kind) {
+            //             case "nil":
+            //                 return {
+            //                     kind: "node",
+            //                     members: {
+            //                         [second]: { kind: 'leaf', actionId },
+            //                     }
+            //                 }
+            //             case "leaf":
+            //                 throw new Error("incompatible reference")
+
+            //             case "node":
+            //                 if (!(second in currentRef.subfacets)) {
+            //                     return {
+            //                         kind: "node",
+            //                         members: {
+            //                             ...currentRef.subfacets,
+            //                             [second]: { kind: 'leaf', actionId },
+            //                         }
+            //                     }
+            //                 } else {
+            //                     const subfacet = currentRef.subfacets[second];
+            //                     switch (subfacet.kind) {
+            //                         case 'nil':
+            //                             return {
+            //                                 kind: "node",
+            //                                 members: {
+            //                                     ...currentRef.subfacets,
+            //                                     [second]: { kind: 'leaf', actionId },
+            //                                 }
+            //                             }
+            //                         case 'node':
+            //                             throw new Error("incompatible reference")
+            //                         case 'leaf':
+            //                             return {
+            //                                 kind: "node",
+            //                                 members: {
+            //                                     ...currentRef.subfacets,
+            //                                     [second]: {
+            //                                         kind: 'leaf', actionId:
+            //                                             subfacet.actionId < actionId ? actionId : subfacet.actionId,
+            //                                     },
+            //                                 }
+            //                             }
+            //                     }
+            //                 }
+            //         }
+            //     })();
+
+            //     labelsTable.set([first], newRef)
+            // } else {
+            //     throw new Error('wtf')
+            // }
+
         }
     })
 }
