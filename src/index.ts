@@ -21,17 +21,17 @@ import * as state1_1_1 from './model/1.1.1'
 import { validate as validate1_1_1 } from './model/1.1.1.validator'
 import { validate as validate1_1 } from './model/1.1.validator'
 import * as readables from './readables'
-import {
-    //AnyAction, AnyError, CollectionId,
-    // deleteTable,
-    // Reference
-} from './schema'
+// import {
+//     //AnyAction, AnyError, CollectionId,
+//     // deleteTable,
+//     // Reference
+// } from './schema'
 import { SavedAction, AnyAction, AnyError, ReferenceGroup, Pointer } from './model'
 import { validate as validateSchema } from './model/index.validator'
 import * as util from './util'
 import { Defaultable, defaultable, Option, option, Result, result } from './util'
 import { OptionData } from './util/option'
-import { REVISION as REVISION1_1_1 } from './logic/1.1.1'
+// import { REVISION as REVISION1_1_1 } from './logic/1.1.1'
 // import { REVISION as REVISION1_2_0 } from './logic/1.2.0'
 import * as logic1_1_1 from './logic/1.1.1'
 import * as logic1_2_0 from './logic/1.2.0'

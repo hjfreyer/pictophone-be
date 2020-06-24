@@ -624,8 +624,8 @@ function convertAction(a: AnyAction): Action {
             return convertAction1_0(a)
         case '1.1':
             return convertAction1_1(a)
-        case '1.2':
-            return convertAction1_2(a)
+        // case '1.2':
+        //     return convertAction1_2(a)
     }
 }
 

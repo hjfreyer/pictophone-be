@@ -1,8 +1,7 @@
 import * as db from './db'
 import {
     AnyAction,
-    Reference
-} from './schema'
+} from './model'
 import { Option } from './util'
 import { OptionData } from './util/option'
 import { Key, Item } from './interfaces'

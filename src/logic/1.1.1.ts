@@ -12,10 +12,10 @@ import { Item, item, Key, Change } from '../interfaces';
 import * as model1_0 from '../model/1.0';
 import { validate as validate1_0 } from '../model/1.0.validator';
 import * as model1_1 from '../model/1.1';
-import { Error, Game, Action, MakeMoveAction, State } from '../model/1.1.1';
+import { Error, Game, Action, MakeMoveAction } from '../model/1.1.1';
 import { validate } from '../model/1.1.1.validator';
 import { validate as validate1_1 } from '../model/1.1.validator';
-import { AnyAction } from '../schema';
+import { AnyAction } from '../model';
 import * as util from '../util';
 import { Defaultable, Option, option, Result, result } from '../util';
 import { OptionData } from '../util/option';
@@ -23,63 +23,63 @@ import deepEqual from 'deep-equal';
 import { UnifiedInterface } from '..';
 
 
-export const REVISION: fw.Revision2<State> = {
-    id: '1.1.1',
-    validateAnnotation: validate('Annotation2'),
+// export const REVISION: fw.Revision2<State> = {
+//     id: '1.1.1',
+//     validateAnnotation: validate('Annotation2'),
 
-    async integrate(action: AnyAction, inputs: fw.Input2<State>): Promise<fw.IntegrationResult2<State>> {
-        const gameParent = await inputs.getParent(`game:${action.gameId}`);
-        const oldGame = option.from(gameParent).map(s => result.fromData(s.game).unwrap());
+//     async integrate(action: AnyAction, inputs: fw.Input2<State>): Promise<fw.IntegrationResult2<State>> {
+//         const gameParent = await inputs.getParent(`game:${action.gameId}`);
+//         const oldGame = option.from(gameParent).map(s => result.fromData(s.game).unwrap());
 
-        const newGameResult = integrateHelper(convertAction(action), oldGame);
+//         const newGameResult = integrateHelper(convertAction(action), oldGame);
 
-        return result.from(newGameResult).split({
-            onErr: (err): fw.IntegrationResult2<State> => ({
-                labels: [],
-                state: { game: newGameResult.data }
-            }),
-            onOk: (newGame): fw.IntegrationResult2<State> => {
-                return {
-                    labels: [`game:${action.gameId}`],
-                    state: { game: result.ok<Game, Error>(newGame).data }
-                }
-            }
-        })
-    },
+//         return result.from(newGameResult).split({
+//             onErr: (err): fw.IntegrationResult2<State> => ({
+//                 labels: [],
+//                 state: { game: newGameResult.data }
+//             }),
+//             onOk: (newGame): fw.IntegrationResult2<State> => {
+//                 return {
+//                     labels: [`game:${action.gameId}`],
+//                     state: { game: result.ok<Game, Error>(newGame).data }
+//                 }
+//             }
+//         })
+//     },
 
-    // async activateFacet(db: db.Database, label: string, maybeOldGame: OptionData<Game>, newGame: OptionData<Game>): Promise<void> {
-    //     const oldGame = option.fromData(maybeOldGame).withDefault(defaultGame1_1);
+//     // async activateFacet(db: db.Database, label: string, maybeOldGame: OptionData<Game>, newGame: OptionData<Game>): Promise<void> {
+//     //     const oldGame = option.fromData(maybeOldGame).withDefault(defaultGame1_1);
 
-    //     const gameDiff = diffs.newDiff([label], oldGame, option.fromData(newGame).withDefault(defaultGame1_1));
+//     //     const gameDiff = diffs.newDiff([label], oldGame, option.fromData(newGame).withDefault(defaultGame1_1));
 
-    //     const gamesByPlayer1_0Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_0).diffs;
-    //     const gamesByPlayer1_1Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_1).diffs
+//     //     const gamesByPlayer1_0Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_0).diffs;
+//     //     const gamesByPlayer1_1Diffs = diffs.from(gameDiff).map(gameToPlayerGames1_1).diffs
 
-    //     const gamesByPlayer1_0 = db.open({
-    //         schema: ['players', 'games-gamesByPlayer-1.0'],
-    //         validator: validate1_0('PlayerGame'),
-    //     })
-    //     const gamesByPlayer1_1 = db.open({
-    //         schema: ['players', 'games-gamesByPlayer-1.1'],
-    //         validator: validate1_1('PlayerGame'),
-    //     })
+//     //     const gamesByPlayer1_0 = db.open({
+//     //         schema: ['players', 'games-gamesByPlayer-1.0'],
+//     //         validator: validate1_0('PlayerGame'),
+//     //     })
+//     //     const gamesByPlayer1_1 = db.open({
+//     //         schema: ['players', 'games-gamesByPlayer-1.1'],
+//     //         validator: validate1_1('PlayerGame'),
+//     //     })
 
-    //     applyChangesSimple(gamesByPlayer1_0, gamesByPlayer1_0Diffs.map(diffToChange));
-    //     applyChangesSimple(gamesByPlayer1_1, gamesByPlayer1_1Diffs.map(diffToChange))
-    // }
-}
+//     //     applyChangesSimple(gamesByPlayer1_0, gamesByPlayer1_0Diffs.map(diffToChange));
+//     //     applyChangesSimple(gamesByPlayer1_1, gamesByPlayer1_1Diffs.map(diffToChange))
+//     // }
+// }
 
 
-export function getUnifiedInterface(gameId: string, state: State): UnifiedInterface {
-    return {
-        '1.0': result.fromData(state.game).map(game => ({
-            playerGames: ix.toArray(gameToPlayerGames1_0([gameId], game))
-        })).data,
-        '1.1': result.fromData(state.game).map(game => ({
-            playerGames: ix.toArray(gameToPlayerGames1_1([gameId], game))
-        })).data,
-    }
-}
+// export function getUnifiedInterface(gameId: string, state: State): UnifiedInterface {
+//     return {
+//         '1.0': result.fromData(state.game).map(game => ({
+//             playerGames: ix.toArray(gameToPlayerGames1_0([gameId], game))
+//         })).data,
+//         '1.1': result.fromData(state.game).map(game => ({
+//             playerGames: ix.toArray(gameToPlayerGames1_1([gameId], game))
+//         })).data,
+//     }
+// }
 
 function defaultGame1_1(): Game {
     return {
