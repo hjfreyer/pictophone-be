@@ -8,7 +8,7 @@ import { applyChangesSimple, diffToChange } from '../base';
 import * as db from '../db';
 import * as diffs from '../diffs';
 import * as fw from '../framework';
-import { Item, item, Key, Change, Diff } from '../interfaces';
+import { Item, item, Key, Change, Diff, ItemIterable } from '../interfaces';
 import * as model1_0 from '../model/1.0';
 import { validate as validate1_0 } from '../model/1.0.validator';
 import * as model1_1 from '../model/1.1';
@@ -81,16 +81,17 @@ export function getNeededReferenceIds(action: AnyAction): string[] {
 export async function getGameDiffs(db: db.Database, action: AnyAction, deps: Record<string, ReferenceGroup>): Promise<Diff<Game>[]> {
     const { gameId } = action;
     const oldGameRef = option.of(deps[`games/${gameId}`]).unwrap()
-    const oldGame = await getGameState(db, oldGameRef, [gameId]);
-
-    const newGameResult = integrateHelper(convertAction(action), oldGame);
+    const oldGameItem = await getGameState(db, oldGameRef);
+    const oldGame = option.from(oldGameItem).map(item => item.value)
+    const newGameResult = integrateHelper(convertAction(action),
+        oldGame);
     return result.from(newGameResult)
         .map((newGame: Game): Diff<Game>[] =>
             diffs.newDiff2([gameId], oldGame, option.some(newGame)).diffs)
         .orElse(() => [])
 }
 
-export async function getGameState(db: db.Database, ref: ReferenceGroup, [gameId]: Key): Promise<Option<Game>> {
+export async function getGameState(db: db.Database, ref: ReferenceGroup): Promise<Option<Item<Game>>> {
     if (ref.kind === 'none') {
         return option.none()
     }
@@ -101,13 +102,11 @@ export async function getGameState(db: db.Database, ref: ReferenceGroup, [gameId
     const savedAction = option.from(await getAction(db, ref.actionId)).unwrap();
 
     const gameDiffs = await getGameDiffs(db, savedAction.action, savedAction.parents);
-    const gameDiff = gameDiffs.find(({ key: [diffGameId] }) => diffGameId === gameId);
-
-    if (gameDiff === undefined) {
-        throw new Error(`Action "${ref.actionId}" does not impact game "${gameId}"`);
+    if (gameDiffs.length !== 1) {
+        throw new Error("weird output from getGameDiffs: " + JSON.stringify(gameDiffs))
     }
 
-    return getNewValue(gameDiff)
+    return getNewValue(gameDiffs[0])
 }
 
 
@@ -119,6 +118,30 @@ export async function getGameByPlayer1_0Diffs(
     ))
 }
 
+export function getGamesByPlayer1_0State(db: db.Database, ref: ReferenceGroup): ItemIterable<model1_0.PlayerGame> {
+    return ixa.from(getGameState(db, ref)).pipe(
+        util.filterNoneAsync(),
+        ixaop.flatMap(({ key, value }) => ixa.from(gameToPlayerGames1_0(key, value)))
+    )
+}
+
+
+export function getGamesByPlayer1_0Placement([playerId, gameId]: Key): string {
+    return `players/${playerId}/games-1.0/${gameId}`
+}
+
+
+export function getGamesByPlayer1_1State(db: db.Database, ref: ReferenceGroup): ItemIterable<model1_1.PlayerGame> {
+    return ixa.from(getGameState(db, ref)).pipe(
+        util.filterNoneAsync(),
+        ixaop.flatMap(({ key, value }) => ixa.from(gameToPlayerGames1_1(key, value)))
+    )
+}
+
+export function getGamesByPlayer1_1Placement([playerId, gameId]: Key): string {
+    return `players/${playerId}/games-1.1/${gameId}`
+}
+
 export async function getGameByPlayer1_1Diffs(
     db: db.Database, action: AnyAction,
     deps: Record<string, ReferenceGroup>): Promise<Diff<model1_1.PlayerGame>[]> {
@@ -127,14 +150,14 @@ export async function getGameByPlayer1_1Diffs(
     ))
 }
 
-function getNewValue<T>(d: Diff<T>): Option<T> {
+function getNewValue<T>(d: Diff<T>): Option<Item<T>> {
     switch (d.kind) {
         case "add":
-            return option.some(d.value)
+            return option.some(item(d.key, d.value))
         case "delete":
             return option.none()
         case "replace":
-            return option.some(d.newValue)
+            return option.some(item(d.key, d.newValue))
     }
 }
 

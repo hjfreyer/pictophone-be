@@ -1,4 +1,4 @@
-import { CollectionReference } from '@google-cloud/firestore'
+import { CollectionReference, DocumentReference } from '@google-cloud/firestore'
 import { strict as assert } from 'assert'
 import cors from 'cors'
 import deepEqual from 'deep-equal'
@@ -175,8 +175,7 @@ function handleAction(action: AnyAction): Promise<Result<null, AnyError>> {
         const gamesByPlayer1_1Diffs = await logic1_1_1.getGameByPlayer1_1Diffs(db, action, parents);
 
         for (const diff of gamesByPlayer1_0Diffs) {
-            const [playerId, gameId] = diff.key;
-            const doc = db.db.doc(`players/${playerId}/games-1.0/${gameId}`)
+            const doc = db.db.doc(logic1_1_1.getGamesByPlayer1_0Placement(diff.key))
             switch (diff.kind) {
                 case 'add':
                     db.tx.set(doc, diff.value)
@@ -190,8 +189,7 @@ function handleAction(action: AnyAction): Promise<Result<null, AnyError>> {
             }
         }
         for (const diff of gamesByPlayer1_1Diffs) {
-            const [playerId, gameId] = diff.key;
-            const doc = db.db.doc(`players/${playerId}/games-1.1/${gameId}`)
+            const doc = db.db.doc(logic1_1_1.getGamesByPlayer1_1Placement(diff.key))
             switch (diff.kind) {
                 case 'add':
                     db.tx.set(doc, diff.value)
@@ -641,6 +639,13 @@ async function handleRefacetForAction(actionId: string): Promise<void> {
     })
 }
 
+function listGameRefs(db: db.Database): AsyncIterable<string> {
+    return ixa.from(db.tx.get(db.db.collection('games'))).pipe(
+        ixaop.flatMap(snapshot => ixa.from(snapshot.docs)),
+        ixaop.map(doc => doc.ref.path)
+    )
+}
+
 async function handleRefacet(): Promise<void> {
     let cursor: string = '';
     console.log('REPLAY')
@@ -655,6 +660,31 @@ async function handleRefacet(): Promise<void> {
         cursor = actionId;
     }
     console.log('DONE')
+}
+
+function handleReexport(): Promise<void> {
+    return db.runTransaction(fsDb)(async (db): Promise<void> => {
+        const queue: { doc: DocumentReference, value: unknown }[] = []
+        for await (const refId of listGameRefs(db)) {
+            const ref = await getCurrentRefGroup(db, refId);
+
+            const pg1_0s = await ixa.toArray(logic1_1_1.getGamesByPlayer1_0State(db, ref))
+            const pg1_1s = await ixa.toArray(logic1_1_1.getGamesByPlayer1_1State(db, ref))
+
+            for await (const { key, value } of pg1_0s) {
+                const doc = db.db.doc(logic1_1_1.getGamesByPlayer1_0Placement(key))
+                queue.push({ doc, value })
+            }
+            for await (const { key, value } of pg1_1s) {
+                const doc = db.db.doc(logic1_1_1.getGamesByPlayer1_1Placement(key))
+                queue.push({ doc, value })
+            }
+        }
+
+        for (const { doc, value } of queue) {
+            db.tx.set(doc, value)
+        }
+    });
 }
 
 function getNextAction(tx: db.TxRunner, startAfter: string): Promise<([string, SavedAction] | null)> {
@@ -736,6 +766,12 @@ function batch(): Router {
     // })
     res.post('/refacet', function(_req: Request<{}>, res, next) {
         handleRefacet().then(result => {
+            res.status(200)
+            res.json(result)
+        }).catch(next)
+    })
+    res.post('/reexport', function(_req: Request<{}>, res, next) {
+        handleReexport().then(result => {
             res.status(200)
             res.json(result)
         }).catch(next)
