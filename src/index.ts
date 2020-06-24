@@ -38,6 +38,7 @@ import * as logic1_2_0 from './logic/1.2.0'
 import * as fw from './framework';
 import { OperatorAsyncFunction, OperatorFunction } from 'ix/interfaces'
 import { ResultData } from './util/result'
+import { dirname } from 'path'
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -135,39 +136,101 @@ function compareInterfaces(expected: UnifiedInterface, actual: UnifiedInterface)
 }
 
 
-function handleAction<TState>(action: AnyAction): Promise<Result<null, AnyError>> {
+export async function getCurrentRefGroup(db: db.Database, refId: string): Promise<ReferenceGroup> {
+    if (refId.endsWith("/*")) {
+        const res: ReferenceGroup = {
+            kind: 'collection',
+            id: dirname(refId),
+            members: {},
+        }
+
+        const collection = await db.tx.get(db.db.collection(dirname(refId)));
+        for (const doc of collection.docs) {
+            const ptr = validateSchema('Pointer')(doc.data())
+            res.members[doc.id] = {
+                kind: 'single',
+                actionId: ptr.actionId,
+            }
+        }
+        return res;
+    } else {
+        return option.from(await db.getRaw(refId))
+            .map(validateSchema('Pointer'))
+            .map((p): ReferenceGroup => ({ kind: 'single', actionId: p.actionId }))
+            .orElse(() => ({ kind: 'none' }))
+    }
+}
+
+function handleAction(action: AnyAction): Promise<Result<null, AnyError>> {
     return db.runTransaction(fsDb)(async (db: db.Database): Promise<Result<null, AnyError>> => {
-        await logic1_2_0.commitAction(db, action);
+        const refIds = logic1_1_1.getNeededReferenceIds(action)
+
+        const parents: Record<string, ReferenceGroup> = {}
+        for (const refId of refIds) {
+            parents[refId] = await getCurrentRefGroup(db, refId)
+        }
+
+        const gameDiffs = await logic1_1_1.getGameDiffs(db, action, parents);
+        const gamesByPlayer1_0Diffs = await logic1_1_1.getGameByPlayer1_0Diffs(db, action, parents);
+        const gamesByPlayer1_1Diffs = await logic1_1_1.getGameByPlayer1_1Diffs(db, action, parents);
+
+        console.log(JSON.stringify(gameDiffs, undefined, 2))
+
+        const refsToUpdate = ix.concat(
+            ix.from(gameDiffs).pipe(
+                ixop.map(({ key }) => logic1_1_1.gameKeyToRefId(key))),
+            ix.from(gamesByPlayer1_0Diffs).pipe(
+                ixop.map(({ key }) => logic1_1_1.gameByPlayer1_0KeyToRefId(key))),
+            ix.from(gamesByPlayer1_1Diffs).pipe(
+                ixop.map(({ key }) => logic1_1_1.gameByPlayer1_1KeyToRefId(key))),
+        ).pipe(
+            ixop.distinct()
+        )
+
+        const savedAction: SavedAction = { parents, action };
+        const actionId = getActionId(savedAction);
+
+        db.tx.set(db.db.doc(actionId), savedAction)
+
+        for (const refId of refsToUpdate) {
+            db.tx.set(db.db.doc(refId), { actionId })
+        }
+
         return result.ok(null)
-
-        // const result1_1_1 = await doAction(db, REVISION1_1_1, action);
-        // const result1_2_0 = await replayActionForRevision(db, REVISION1_2_0, result1_1_1.actionId, result1_1_1.savedAction);
-
-        // const pg1_1_1 = logic1_1_1.getUnifiedInterface(action.gameId, result1_1_1.newState)
-        // option.from(result1_2_0).map(res => {
-        //     const pg1_2_0 = logic1_2_0.getUnifiedInterface(action.gameId, res.newState)
-        //     compareInterfaces(pg1_1_1, pg1_2_0)
-        // })
-
-        // const ts = openAll(db);
-        // result.fromData(pg1_1_1['1.0']).map(i => {
-        //     for (const { key, value } of i.playerGames) {
-        //         ts["EXP,1.0,gamesByPlayer"].set(key, value)
-        //     }
-        // })
-        // result.fromData(pg1_1_1['1.1']).map(i => {
-        //     for (const { key, value } of i.playerGames) {
-        //         ts["EXP,1.1,gamesByPlayer"].set(key, value)
-        //     }
-        // })
-        // switch (action.version) {
-        //     case '1.0':
-        //         return result.fromData(pg1_1_1[action.version]).map(() => null)
-        //     case '1.1':
-        //         return result.fromData(pg1_1_1[action.version]).map(() => null)
-        // }
     })
 }
+
+
+
+// await logic1_2_0.commitAction(db, action);
+// return result.ok(null)
+
+// const result1_1_1 = await doAction(db, REVISION1_1_1, action);
+// const result1_2_0 = await replayActionForRevision(db, REVISION1_2_0, result1_1_1.actionId, result1_1_1.savedAction);
+
+// const pg1_1_1 = logic1_1_1.getUnifiedInterface(action.gameId, result1_1_1.newState)
+// option.from(result1_2_0).map(res => {
+//     const pg1_2_0 = logic1_2_0.getUnifiedInterface(action.gameId, res.newState)
+//     compareInterfaces(pg1_1_1, pg1_2_0)
+// })
+
+// const ts = openAll(db);
+// result.fromData(pg1_1_1['1.0']).map(i => {
+//     for (const { key, value } of i.playerGames) {
+//         ts["EXP,1.0,gamesByPlayer"].set(key, value)
+//     }
+// })
+// result.fromData(pg1_1_1['1.1']).map(i => {
+//     for (const { key, value } of i.playerGames) {
+//         ts["EXP,1.1,gamesByPlayer"].set(key, value)
+//     }
+// })
+// switch (action.version) {
+//     case '1.0':
+//         return result.fromData(pg1_1_1[action.version]).map(() => null)
+//     case '1.1':
+//         return result.fromData(pg1_1_1[action.version]).map(() => null)
+// }
 
 // async function doAction<TState>(db: db.Database, impl: fw.Revision2<TState>, action: AnyAction): Promise<DoActionResult<TState>> {
 //     const fetched: FetchedState<TState>[] = []
@@ -604,17 +667,14 @@ type DeleteCollectionRequest = {
 
 async function handlePurge(): Promise<void> {
     for (const collection of await fsDb.listCollections()) {
-        // Never purge the "actions" collection.
-        if (collection.id !== 'actions') {
-            await purgeCollection(collection)
-        }
+        await purgeCollection(collection)
     }
 }
 
 async function purgeCollection(cref: CollectionReference): Promise<void> {
     // Never purge the "actions" collection.
     if (cref.id === 'actions') {
-        throw new Error("unexpected 'actions' collection.")
+        return
     }
     for (const doc of await cref.listDocuments()) {
         console.log("Deleting:", doc.path)

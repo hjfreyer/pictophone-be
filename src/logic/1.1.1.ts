@@ -8,20 +8,146 @@ import { applyChangesSimple, diffToChange } from '../base';
 import * as db from '../db';
 import * as diffs from '../diffs';
 import * as fw from '../framework';
-import { Item, item, Key, Change } from '../interfaces';
+import { Item, item, Key, Change, Diff } from '../interfaces';
 import * as model1_0 from '../model/1.0';
 import { validate as validate1_0 } from '../model/1.0.validator';
 import * as model1_1 from '../model/1.1';
 import { Error, Game, Action, MakeMoveAction } from '../model/1.1.1';
 import { validate } from '../model/1.1.1.validator';
 import { validate as validate1_1 } from '../model/1.1.validator';
-import { AnyAction } from '../model';
+import { AnyAction, ReferenceGroup, SavedAction } from '../model';
 import * as util from '../util';
 import { Defaultable, Option, option, Result, result } from '../util';
 import { OptionData } from '../util/option';
 import deepEqual from 'deep-equal';
 import { UnifiedInterface } from '..';
+import { validate as validateSchema } from '../model/index.validator'
+import { dirname } from 'path';
 
+export async function getAction(db: db.Database, actionId: string): Promise<Option<SavedAction>> {
+    const data = await db.getRaw(actionId);
+    return option.from(data).map(validateSchema('SavedAction'))
+}
+
+export async function getCurrentRefGroup(db: db.Database, refId: string): Promise<ReferenceGroup> {
+    if (refId.endsWith("/*")) {
+        const res: ReferenceGroup = {
+            kind: 'collection',
+            id: dirname(refId),
+            members: {},
+        }
+
+        const collection = await db.tx.get(db.db.collection(dirname(refId)));
+        for (const doc of collection.docs) {
+            const ptr = validateSchema('Pointer')(doc.data())
+            res.members[doc.id] = {
+                kind: 'single',
+                actionId: ptr.actionId,
+            }
+        }
+        return res;
+    } else {
+        return option.from(await db.getRaw(refId))
+            .map(validateSchema('Pointer'))
+            .map((p): ReferenceGroup => ({ kind: 'single', actionId: p.actionId }))
+            .orElse(() => ({ kind: 'none' }))
+    }
+}
+
+export function gameKeyToRefId([gameId]: Key): string {
+    return `games/${gameId}`
+}
+
+export function gameByPlayer1_0KeyToRefId([, gameId]: Key): string {
+    return `games/${gameId}`
+}
+
+export function gameByPlayer1_1KeyToRefId([, gameId]: Key): string {
+    return `games/${gameId}`
+}
+
+export function getNeededReferenceIds(action: AnyAction): string[] {
+    return [`games/${action.gameId}`]
+}
+
+// export function gameByPlayer1_0NeededReferenceIds(action: AnyAction): string[] {
+//     return [`games/${action.gameId}`]
+// }
+
+// export function gameByPlayer1_1NeededReferenceIds(action: AnyAction): string[] {
+//     return [`games/${action.gameId}`]
+// }
+
+export async function getGameDiffs(db: db.Database, action: AnyAction, deps: Record<string, ReferenceGroup>): Promise<Diff<Game>[]> {
+    const { gameId } = action;
+    const oldGameRef = option.of(deps[`games/${gameId}`]).unwrap()
+    const oldGame = await getGameState(db, oldGameRef, [gameId]);
+
+    const newGameResult = integrateHelper(convertAction(action), oldGame);
+    return result.from(newGameResult)
+        .map((newGame: Game): Diff<Game>[] =>
+            diffs.newDiff2([gameId], oldGame, option.some(newGame)).diffs)
+        .orElse(() => [])
+}
+
+export async function getGameState(db: db.Database, ref: ReferenceGroup, [gameId]: Key): Promise<Option<Game>> {
+    if (ref.kind === 'none') {
+        return option.none()
+    }
+    if (ref.kind === 'collection') {
+        throw new Error("Game is not a collection")
+    }
+
+    const savedAction = option.from(await getAction(db, ref.actionId)).unwrap();
+
+    const gameDiffs = await getGameDiffs(db, savedAction.action, savedAction.parents);
+    const gameDiff = gameDiffs.find(({ key: [diffGameId] }) => diffGameId === gameId);
+
+    if (gameDiff === undefined) {
+        throw new Error(`Action "${ref.actionId}" does not impact game "${gameId}"`);
+    }
+
+    return getNewValue(gameDiff)
+}
+
+
+export async function getGameByPlayer1_0Diffs(
+    db: db.Database, action: AnyAction,
+    deps: Record<string, ReferenceGroup>): Promise<Diff<model1_0.PlayerGame>[]> {
+    return Array.from(ix.from(await getGameDiffs(db, action, deps)).pipe(
+        diffs.mapDiffs(gameToPlayerGames1_0)
+    ))
+}
+
+export async function getGameByPlayer1_1Diffs(
+    db: db.Database, action: AnyAction,
+    deps: Record<string, ReferenceGroup>): Promise<Diff<model1_1.PlayerGame>[]> {
+    return Array.from(ix.from(await getGameDiffs(db, action, deps)).pipe(
+        diffs.mapDiffs(gameToPlayerGames1_1)
+    ))
+}
+
+function getNewValue<T>(d: Diff<T>): Option<T> {
+    switch (d.kind) {
+        case "add":
+            return option.some(d.value)
+        case "delete":
+            return option.none()
+        case "replace":
+            return option.some(d.newValue)
+    }
+}
+
+// export async function getGameState(db : db.Database, rg: ReferenceGroup, [gameId]:Key): Promise<Option<Game>> {
+//     if (rg.kind === 'none') {
+//         return option.none()
+//     }
+//     if (rg.kind === 'collection') {
+//         throw new Error("Game is not a collection")
+//     }
+//     const {actionId} = rg;
+
+// }
 
 // export const REVISION: fw.Revision2<State> = {
 //     id: '1.1.1',
