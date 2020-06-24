@@ -174,6 +174,37 @@ function handleAction(action: AnyAction): Promise<Result<null, AnyError>> {
         const gamesByPlayer1_0Diffs = await logic1_1_1.getGameByPlayer1_0Diffs(db, action, parents);
         const gamesByPlayer1_1Diffs = await logic1_1_1.getGameByPlayer1_1Diffs(db, action, parents);
 
+        for (const diff of gamesByPlayer1_0Diffs) {
+            const [playerId, gameId] = diff.key;
+            const doc = db.db.doc(`players/${playerId}/games-1.0/${gameId}`)
+            switch (diff.kind) {
+                case 'add':
+                    db.tx.set(doc, diff.value)
+                    break
+                case 'delete':
+                    db.tx.delete(doc)
+                    break
+                case 'replace':
+                    db.tx.set(doc, diff.newValue)
+                    break
+            }
+        }
+        for (const diff of gamesByPlayer1_1Diffs) {
+            const [playerId, gameId] = diff.key;
+            const doc = db.db.doc(`players/${playerId}/games-1.1/${gameId}`)
+            switch (diff.kind) {
+                case 'add':
+                    db.tx.set(doc, diff.value)
+                    break
+                case 'delete':
+                    db.tx.delete(doc)
+                    break
+                case 'replace':
+                    db.tx.set(doc, diff.newValue)
+                    break
+            }
+        }
+
         console.log(JSON.stringify(gameDiffs, undefined, 2))
 
         const refsToUpdate = ix.concat(
@@ -200,6 +231,15 @@ function handleAction(action: AnyAction): Promise<Result<null, AnyError>> {
     })
 }
 
+type Producer<T> =
+    (db: db.Database, ref: ReferenceGroup, key: Key) => Promise<Option<T>>
+
+
+// function cachedProducer<T>(producer: Producer<T>): Producer<T> {
+//     return async (db: db.Database, ref: ReferenceGroup, key: Key):Promise<Option<T>> =>{
+
+//     }
+// }
 
 
 // await logic1_2_0.commitAction(db, action);
