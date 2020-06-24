@@ -152,3 +152,19 @@ class FSTable<T> {
         return res
     }
 }
+
+
+export function parseDocPath(docPath: string): { schema: Key, key: Key } {
+    const key: Key = []
+    const schema: string[] = []
+    while (docPath !== '.') {
+        key.push(basename(docPath))
+        docPath = dirname(docPath)
+
+        schema.push(basename(docPath))
+        docPath = dirname(docPath)
+    }
+    key.reverse()
+    schema.reverse()
+    return { schema, key }
+}

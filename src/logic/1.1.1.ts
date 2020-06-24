@@ -59,11 +59,11 @@ export function gameKeyToRefId([gameId]: Key): string {
 }
 
 export function gameByPlayer1_0KeyToRefId([, gameId]: Key): string {
-    return `games/${gameId}`
+    return gameKeyToRefId([gameId])
 }
 
 export function gameByPlayer1_1KeyToRefId([, gameId]: Key): string {
-    return `games/${gameId}`
+    return gameKeyToRefId([gameId])
 }
 
 export function getNeededReferenceIds(action: AnyAction): string[] {

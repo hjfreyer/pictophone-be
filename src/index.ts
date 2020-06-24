@@ -1,4 +1,4 @@
-import { CollectionReference, DocumentReference } from '@google-cloud/firestore'
+import { CollectionReference, DocumentReference, Firestore } from '@google-cloud/firestore'
 import { strict as assert } from 'assert'
 import cors from 'cors'
 import deepEqual from 'deep-equal'
@@ -38,7 +38,7 @@ import * as logic1_2_0 from './logic/1.2.0'
 import * as fw from './framework';
 import { OperatorAsyncFunction, OperatorFunction } from 'ix/interfaces'
 import { ResultData } from './util/result'
-import { dirname } from 'path'
+import { dirname, basename } from 'path'
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -677,6 +677,45 @@ function handleReexport(): Promise<void> {
     });
 }
 
+async function handleCheck(): Promise<void> {
+    for await (const docPath of listAllDocsExceptActions()) {
+        await db.runTransaction(fsDb)(async d => {
+            const { schema, key } = db.parseDocPath(docPath);
+            if (deepEqual(schema, ['players', 'games-1.0'])) {
+                const value = option.from(await d.getRaw(docPath)).unwrap();
+                const refId = logic1_1_1.gameByPlayer1_0KeyToRefId(key)
+                const ref = await getCurrentRefGroup(d, refId);
+
+                const pgs = logic1_1_1.getGamesByPlayer1_0State(d, ref);
+                const item = await ixa.find(pgs, ({ key: itemKey }) => deepEqual(itemKey, key))
+
+                if (item === undefined) {
+                    throw new Error(`unexpected row "${docPath}"`)
+                }
+                if (!deepEqual(item.value, value)) {
+                    throw new Error(`diff at row "${docPath}"`)
+                }
+            }
+            if (deepEqual(schema, ['players', 'games-1.1'])) {
+                const value = option.from(await d.getRaw(docPath)).unwrap();
+                const refId = logic1_1_1.gameByPlayer1_1KeyToRefId(key)
+                const ref = await getCurrentRefGroup(d, refId);
+
+                const pgs = logic1_1_1.getGamesByPlayer1_1State(d, ref);
+                const item = await ixa.find(pgs, ({ key: itemKey }) => deepEqual(itemKey, key))
+
+                if (item === undefined) {
+                    throw new Error(`unexpected row "${docPath}"`)
+                }
+
+                if (!deepEqual(item.value, value)) {
+                    throw new Error(`diff at row "${docPath}"`)
+                }
+            }
+        })
+    }
+}
+
 function getNextAction(tx: db.TxRunner, startAfter: string): Promise<([string, SavedAction] | null)> {
     return tx(async (db: db.Database): Promise<([string, SavedAction] | null)> => {
         const actions = openAll(db)["ACTIONS"];
@@ -725,23 +764,36 @@ type DeleteCollectionRequest = {
     collectionId: string
 }
 
-async function handlePurge(): Promise<void> {
-    for (const collection of await fsDb.listCollections()) {
-        await purgeCollection(collection)
+
+function listAllDocsExceptActions(): AsyncIterable<string> {
+    const expandDocRef = (docRef: Option<DocumentReference>): AsyncIterable<Option<DocumentReference>> => {
+        const collections = option.from<DocumentReference | Firestore>(
+            docRef).orElse(() => fsDb).listCollections()
+        return ixa.from(collections).pipe(
+            ixaop.flatMap(collections => ixa.from(collections)),
+            // Never purge the "actions" collection.
+            ixaop.filter(colRef => colRef.id !== 'actions'),
+            ixaop.map(colRef => colRef.listDocuments()),
+            ixaop.flatMap(docs => ixa.from(docs)),
+            ixaop.map(option.some),
+        )
     }
+
+    const allDocs: AsyncIterable<Option<DocumentReference>> =
+        ixa.of(option.none())
+
+    return ixa.from(allDocs).pipe(
+        ixaop.expand(expandDocRef),
+        util.filterNoneAsync(),
+        ixaop.map(docRef => docRef.path)
+    )
 }
 
-async function purgeCollection(cref: CollectionReference): Promise<void> {
-    // Never purge the "actions" collection.
-    if (cref.id === 'actions') {
-        return
-    }
-    for (const doc of await cref.listDocuments()) {
-        console.log("Deleting:", doc.path)
-        doc.delete()
-        for (const subC of await doc.listCollections()) {
-            await purgeCollection(subC)
-        }
+
+async function handlePurge(): Promise<void> {
+    for await (const docPath of listAllDocsExceptActions()) {
+        console.log("Deleting:", docPath)
+        fsDb.doc(docPath).delete()
     }
 }
 
@@ -762,6 +814,12 @@ function batch(): Router {
     })
     res.post('/reexport', function(_req: Request<{}>, res, next) {
         handleReexport().then(result => {
+            res.status(200)
+            res.json(result)
+        }).catch(next)
+    })
+    res.post('/check', function(_req: Request<{}>, res, next) {
+        handleCheck().then(result => {
             res.status(200)
             res.json(result)
         }).catch(next)
