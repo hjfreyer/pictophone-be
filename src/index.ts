@@ -664,25 +664,15 @@ async function handleRefacet(): Promise<void> {
 
 function handleReexport(): Promise<void> {
     return db.runTransaction(fsDb)(async (db): Promise<void> => {
-        const queue: { doc: DocumentReference, value: unknown }[] = []
         for await (const refId of listGameRefs(db)) {
             const ref = await getCurrentRefGroup(db, refId);
 
-            const pg1_0s = await ixa.toArray(logic1_1_1.getGamesByPlayer1_0State(db, ref))
-            const pg1_1s = await ixa.toArray(logic1_1_1.getGamesByPlayer1_1State(db, ref))
-
-            for await (const { key, value } of pg1_0s) {
-                const doc = db.db.doc(logic1_1_1.getGamesByPlayer1_0Placement(key))
-                queue.push({ doc, value })
+            for await (const { key, value } of logic1_1_1.getGamesByPlayer1_0State(db, ref)) {
+                db.setRaw(logic1_1_1.getGamesByPlayer1_0Placement(key), value)
             }
-            for await (const { key, value } of pg1_1s) {
-                const doc = db.db.doc(logic1_1_1.getGamesByPlayer1_1Placement(key))
-                queue.push({ doc, value })
+            for await (const { key, value } of logic1_1_1.getGamesByPlayer1_1State(db, ref)) {
+                db.setRaw(logic1_1_1.getGamesByPlayer1_1Placement(key), value)
             }
-        }
-
-        for (const { doc, value } of queue) {
-            db.tx.set(doc, value)
         }
     });
 }

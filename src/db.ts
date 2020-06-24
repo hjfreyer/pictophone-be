@@ -44,6 +44,14 @@ export class Database {
         }
     }
 
+    setRaw(path: string, value: DocumentData) {
+        this.committers.push(() => this.tx.set(this.db.doc(path), value))
+    }
+
+    deleteRaw(path: string) {
+        this.committers.push(() => this.tx.delete(this.db.doc(path)))
+    }
+
     open<T>(spec: TableSpec<T>): Table<T> {
         const res = new FSTable(this.db, this.tx, spec.schema, spec.validator);
         this.committers.push(() => res.commit());
