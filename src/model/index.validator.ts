@@ -10,166 +10,120 @@ export const Schema = {
     "$schema": "http://json-schema.org/draft-07/schema#",
     "definitions": {
         "AnyAction": {
-            "anyOf": [
-                {
-                    "$ref": "#/definitions/JoinGameAction"
-                },
-                {
-                    "$ref": "#/definitions/StartGameAction"
-                },
-                {
-                    "defaultProperties": [
-                    ],
+            "else": {
+                "else": {
                     "properties": {
-                        "gameId": {
-                            "maxLength": 1024,
-                            "minLength": 1,
-                            "pattern": "^[a-zA-Z0-9_-]*$",
-                            "type": "string"
-                        },
-                        "kind": {
-                            "enum": [
-                                "make_move"
-                            ],
-                            "type": "string"
-                        },
-                        "playerId": {
-                            "maxLength": 1024,
-                            "minLength": 1,
-                            "pattern": "^[a-zA-Z0-9_-]*$",
-                            "type": "string"
-                        },
-                        "submission": {
-                            "anyOf": [
-                                {
-                                    "defaultProperties": [
-                                    ],
-                                    "properties": {
-                                        "kind": {
-                                            "enum": [
-                                                "word"
-                                            ],
-                                            "type": "string"
-                                        },
-                                        "word": {
-                                            "maxLength": 1024,
-                                            "minLength": 1,
-                                            "type": "string"
-                                        }
-                                    },
-                                    "required": [
-                                        "kind",
-                                        "word"
-                                    ],
-                                    "type": "object"
-                                },
-                                {
-                                    "defaultProperties": [
-                                    ],
-                                    "properties": {
-                                        "drawingId": {
-                                            "type": "string"
-                                        },
-                                        "kind": {
-                                            "enum": [
-                                                "drawing"
-                                            ],
-                                            "type": "string"
-                                        }
-                                    },
-                                    "required": [
-                                        "drawingId",
-                                        "kind"
-                                    ],
-                                    "type": "object"
-                                }
-                            ]
-                        },
                         "version": {
                             "enum": [
-                                "1.0"
+                                "1.0",
+                                "1.1"
                             ],
                             "type": "string"
                         }
                     },
                     "required": [
-                        "gameId",
-                        "kind",
-                        "playerId",
-                        "submission",
                         "version"
-                    ],
-                    "type": "object"
+                    ]
                 },
-                {
-                    "$ref": "#/definitions/JoinGameAction_1"
+                "if": {
+                    "properties": {
+                        "version": {
+                            "enum": [
+                                "1.1"
+                            ],
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "version"
+                    ]
                 },
-                {
-                    "$ref": "#/definitions/StartGameAction_1"
-                },
-                {
+                "then": {
                     "defaultProperties": [
                     ],
                     "properties": {
-                        "gameId": {
-                            "maxLength": 1024,
-                            "minLength": 1,
-                            "pattern": "^[a-zA-Z0-9_-]*$",
-                            "type": "string"
-                        },
-                        "kind": {
-                            "enum": [
-                                "make_move"
-                            ],
-                            "type": "string"
-                        },
-                        "playerId": {
-                            "maxLength": 1024,
-                            "minLength": 1,
-                            "pattern": "^[a-zA-Z0-9_-]*$",
-                            "type": "string"
-                        },
-                        "submission": {
+                        "action": {
                             "anyOf": [
                                 {
-                                    "defaultProperties": [
-                                    ],
-                                    "properties": {
-                                        "kind": {
-                                            "enum": [
-                                                "word"
-                                            ],
-                                            "type": "string"
-                                        },
-                                        "word": {
-                                            "maxLength": 1024,
-                                            "minLength": 1,
-                                            "type": "string"
-                                        }
-                                    },
-                                    "required": [
-                                        "kind",
-                                        "word"
-                                    ],
-                                    "type": "object"
+                                    "$ref": "#/definitions/JoinGameAction_1"
+                                },
+                                {
+                                    "$ref": "#/definitions/StartGameAction_1"
                                 },
                                 {
                                     "defaultProperties": [
                                     ],
                                     "properties": {
-                                        "drawingId": {
+                                        "gameId": {
+                                            "maxLength": 1024,
+                                            "minLength": 1,
+                                            "pattern": "^[a-zA-Z0-9_-]*$",
                                             "type": "string"
                                         },
                                         "kind": {
                                             "enum": [
-                                                "drawing"
+                                                "make_move"
                                             ],
                                             "type": "string"
+                                        },
+                                        "playerId": {
+                                            "maxLength": 1024,
+                                            "minLength": 1,
+                                            "pattern": "^[a-zA-Z0-9_-]*$",
+                                            "type": "string"
+                                        },
+                                        "submission": {
+                                            "anyOf": [
+                                                {
+                                                    "defaultProperties": [
+                                                    ],
+                                                    "properties": {
+                                                        "kind": {
+                                                            "enum": [
+                                                                "word"
+                                                            ],
+                                                            "type": "string"
+                                                        },
+                                                        "word": {
+                                                            "maxLength": 1024,
+                                                            "minLength": 1,
+                                                            "type": "string"
+                                                        }
+                                                    },
+                                                    "required": [
+                                                        "kind",
+                                                        "word"
+                                                    ],
+                                                    "type": "object"
+                                                },
+                                                {
+                                                    "defaultProperties": [
+                                                    ],
+                                                    "properties": {
+                                                        "drawingId": {
+                                                            "type": "string"
+                                                        },
+                                                        "kind": {
+                                                            "enum": [
+                                                                "drawing"
+                                                            ],
+                                                            "type": "string"
+                                                        }
+                                                    },
+                                                    "required": [
+                                                        "drawingId",
+                                                        "kind"
+                                                    ],
+                                                    "type": "object"
+                                                }
+                                            ]
                                         }
                                     },
                                     "required": [
-                                        "drawingId",
-                                        "kind"
+                                        "gameId",
+                                        "kind",
+                                        "playerId",
+                                        "submission"
                                     ],
                                     "type": "object"
                                 }
@@ -183,15 +137,129 @@ export const Schema = {
                         }
                     },
                     "required": [
-                        "gameId",
-                        "kind",
-                        "playerId",
-                        "submission",
+                        "action",
                         "version"
                     ],
                     "type": "object"
                 }
-            ]
+            },
+            "if": {
+                "properties": {
+                    "version": {
+                        "enum": [
+                            "1.0"
+                        ],
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "version"
+                ]
+            },
+            "then": {
+                "defaultProperties": [
+                ],
+                "properties": {
+                    "action": {
+                        "anyOf": [
+                            {
+                                "$ref": "#/definitions/JoinGameAction"
+                            },
+                            {
+                                "$ref": "#/definitions/StartGameAction"
+                            },
+                            {
+                                "defaultProperties": [
+                                ],
+                                "properties": {
+                                    "gameId": {
+                                        "maxLength": 1024,
+                                        "minLength": 1,
+                                        "pattern": "^[a-zA-Z0-9_-]*$",
+                                        "type": "string"
+                                    },
+                                    "kind": {
+                                        "enum": [
+                                            "make_move"
+                                        ],
+                                        "type": "string"
+                                    },
+                                    "playerId": {
+                                        "maxLength": 1024,
+                                        "minLength": 1,
+                                        "pattern": "^[a-zA-Z0-9_-]*$",
+                                        "type": "string"
+                                    },
+                                    "submission": {
+                                        "anyOf": [
+                                            {
+                                                "defaultProperties": [
+                                                ],
+                                                "properties": {
+                                                    "kind": {
+                                                        "enum": [
+                                                            "word"
+                                                        ],
+                                                        "type": "string"
+                                                    },
+                                                    "word": {
+                                                        "maxLength": 1024,
+                                                        "minLength": 1,
+                                                        "type": "string"
+                                                    }
+                                                },
+                                                "required": [
+                                                    "kind",
+                                                    "word"
+                                                ],
+                                                "type": "object"
+                                            },
+                                            {
+                                                "defaultProperties": [
+                                                ],
+                                                "properties": {
+                                                    "drawingId": {
+                                                        "type": "string"
+                                                    },
+                                                    "kind": {
+                                                        "enum": [
+                                                            "drawing"
+                                                        ],
+                                                        "type": "string"
+                                                    }
+                                                },
+                                                "required": [
+                                                    "drawingId",
+                                                    "kind"
+                                                ],
+                                                "type": "object"
+                                            }
+                                        ]
+                                    }
+                                },
+                                "required": [
+                                    "gameId",
+                                    "kind",
+                                    "playerId",
+                                    "submission"
+                                ],
+                                "type": "object"
+                            }
+                        ]
+                    },
+                    "version": {
+                        "enum": [
+                            "1.0"
+                        ],
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "action",
+                    "version"
+                ],
+                "type": "object"
+            }
         },
         "AnyError": {
             "anyOf": [
@@ -213,19 +281,12 @@ export const Schema = {
                                 400
                             ],
                             "type": "number"
-                        },
-                        "version": {
-                            "enum": [
-                                "1.0"
-                            ],
-                            "type": "string"
                         }
                     },
                     "required": [
                         "gameId",
                         "status",
-                        "status_code",
-                        "version"
+                        "status_code"
                     ],
                     "type": "object"
                 },
@@ -250,20 +311,13 @@ export const Schema = {
                                 403
                             ],
                             "type": "number"
-                        },
-                        "version": {
-                            "enum": [
-                                "1.0"
-                            ],
-                            "type": "string"
                         }
                     },
                     "required": [
                         "gameId",
                         "playerId",
                         "status",
-                        "status_code",
-                        "version"
+                        "status_code"
                     ],
                     "type": "object"
                 },
@@ -288,20 +342,13 @@ export const Schema = {
                                 400
                             ],
                             "type": "number"
-                        },
-                        "version": {
-                            "enum": [
-                                "1.0"
-                            ],
-                            "type": "string"
                         }
                     },
                     "required": [
                         "gameId",
                         "playerId",
                         "status",
-                        "status_code",
-                        "version"
+                        "status_code"
                     ],
                     "type": "object"
                 },
@@ -323,19 +370,12 @@ export const Schema = {
                                 400
                             ],
                             "type": "number"
-                        },
-                        "version": {
-                            "enum": [
-                                "1.0"
-                            ],
-                            "type": "string"
                         }
                     },
                     "required": [
                         "gameId",
                         "status",
-                        "status_code",
-                        "version"
+                        "status_code"
                     ],
                     "type": "object"
                 },
@@ -362,12 +402,6 @@ export const Schema = {
                             ],
                             "type": "number"
                         },
-                        "version": {
-                            "enum": [
-                                "1.0"
-                            ],
-                            "type": "string"
-                        },
                         "wanted": {
                             "enum": [
                                 "drawing",
@@ -380,7 +414,6 @@ export const Schema = {
                         "got",
                         "status",
                         "status_code",
-                        "version",
                         "wanted"
                     ],
                     "type": "object"
@@ -403,19 +436,12 @@ export const Schema = {
                                 400
                             ],
                             "type": "number"
-                        },
-                        "version": {
-                            "enum": [
-                                "1.0"
-                            ],
-                            "type": "string"
                         }
                     },
                     "required": [
                         "gameId",
                         "status",
-                        "status_code",
-                        "version"
+                        "status_code"
                     ],
                     "type": "object"
                 },
@@ -423,27 +449,22 @@ export const Schema = {
                     "defaultProperties": [
                     ],
                     "properties": {
+                        "error": {
+                        },
                         "status": {
-                            "type": "string"
-                        },
-                        "status_code": {
-                            "type": "number"
-                        },
-                        "true_version": {
-                            "type": "string"
-                        },
-                        "version": {
                             "enum": [
                                 "UNKNOWN"
                             ],
                             "type": "string"
+                        },
+                        "status_code": {
+                            "type": "number"
                         }
                     },
                     "required": [
+                        "error",
                         "status",
-                        "status_code",
-                        "true_version",
-                        "version"
+                        "status_code"
                     ],
                     "type": "object"
                 },
@@ -465,19 +486,12 @@ export const Schema = {
                                 400
                             ],
                             "type": "number"
-                        },
-                        "version": {
-                            "enum": [
-                                "1.0"
-                            ],
-                            "type": "string"
                         }
                     },
                     "required": [
                         "gameId",
                         "status",
-                        "status_code",
-                        "version"
+                        "status_code"
                     ],
                     "type": "object"
                 },
@@ -502,20 +516,13 @@ export const Schema = {
                                 403
                             ],
                             "type": "number"
-                        },
-                        "version": {
-                            "enum": [
-                                "1.0"
-                            ],
-                            "type": "string"
                         }
                     },
                     "required": [
                         "gameId",
                         "playerId",
                         "status",
-                        "status_code",
-                        "version"
+                        "status_code"
                     ],
                     "type": "object"
                 },
@@ -540,20 +547,13 @@ export const Schema = {
                                 400
                             ],
                             "type": "number"
-                        },
-                        "version": {
-                            "enum": [
-                                "1.0"
-                            ],
-                            "type": "string"
                         }
                     },
                     "required": [
                         "gameId",
                         "playerId",
                         "status",
-                        "status_code",
-                        "version"
+                        "status_code"
                     ],
                     "type": "object"
                 },
@@ -575,19 +575,12 @@ export const Schema = {
                                 400
                             ],
                             "type": "number"
-                        },
-                        "version": {
-                            "enum": [
-                                "1.0"
-                            ],
-                            "type": "string"
                         }
                     },
                     "required": [
                         "gameId",
                         "status",
-                        "status_code",
-                        "version"
+                        "status_code"
                     ],
                     "type": "object"
                 },
@@ -614,12 +607,6 @@ export const Schema = {
                             ],
                             "type": "number"
                         },
-                        "version": {
-                            "enum": [
-                                "1.0"
-                            ],
-                            "type": "string"
-                        },
                         "wanted": {
                             "enum": [
                                 "drawing",
@@ -632,7 +619,6 @@ export const Schema = {
                         "got",
                         "status",
                         "status_code",
-                        "version",
                         "wanted"
                     ],
                     "type": "object"
@@ -655,19 +641,12 @@ export const Schema = {
                                 400
                             ],
                             "type": "number"
-                        },
-                        "version": {
-                            "enum": [
-                                "1.0"
-                            ],
-                            "type": "string"
                         }
                     },
                     "required": [
                         "gameId",
                         "status",
-                        "status_code",
-                        "version"
+                        "status_code"
                     ],
                     "type": "object"
                 },
@@ -675,27 +654,22 @@ export const Schema = {
                     "defaultProperties": [
                     ],
                     "properties": {
+                        "error": {
+                        },
                         "status": {
-                            "type": "string"
-                        },
-                        "status_code": {
-                            "type": "number"
-                        },
-                        "true_version": {
-                            "type": "string"
-                        },
-                        "version": {
                             "enum": [
                                 "UNKNOWN"
                             ],
                             "type": "string"
+                        },
+                        "status_code": {
+                            "type": "number"
                         }
                     },
                     "required": [
+                        "error",
                         "status",
-                        "status_code",
-                        "true_version",
-                        "version"
+                        "status_code"
                     ],
                     "type": "object"
                 }
@@ -722,19 +696,12 @@ export const Schema = {
                     "minLength": 1,
                     "pattern": "^[a-zA-Z0-9_-]*$",
                     "type": "string"
-                },
-                "version": {
-                    "enum": [
-                        "1.0"
-                    ],
-                    "type": "string"
                 }
             },
             "required": [
                 "gameId",
                 "kind",
-                "playerId",
-                "version"
+                "playerId"
             ],
             "type": "object"
         },
@@ -764,20 +731,13 @@ export const Schema = {
                     "minLength": 1,
                     "pattern": "^[a-zA-Z0-9_-]*$",
                     "type": "string"
-                },
-                "version": {
-                    "enum": [
-                        "1.1"
-                    ],
-                    "type": "string"
                 }
             },
             "required": [
                 "gameId",
                 "kind",
                 "playerDisplayName",
-                "playerId",
-                "version"
+                "playerId"
             ],
             "type": "object"
         },
@@ -921,202 +881,264 @@ export const Schema = {
             }
         },
         "SavedAction": {
-            "defaultProperties": [
-            ],
-            "properties": {
-                "action": {
-                    "anyOf": [
-                        {
-                            "$ref": "#/definitions/JoinGameAction"
-                        },
-                        {
-                            "$ref": "#/definitions/StartGameAction"
-                        },
-                        {
-                            "defaultProperties": [
+            "else": {
+                "else": {
+                    "properties": {
+                        "version": {
+                            "enum": [
+                                "1.0",
+                                "1.1"
                             ],
-                            "properties": {
-                                "gameId": {
-                                    "maxLength": 1024,
-                                    "minLength": 1,
-                                    "pattern": "^[a-zA-Z0-9_-]*$",
-                                    "type": "string"
-                                },
-                                "kind": {
-                                    "enum": [
-                                        "make_move"
-                                    ],
-                                    "type": "string"
-                                },
-                                "playerId": {
-                                    "maxLength": 1024,
-                                    "minLength": 1,
-                                    "pattern": "^[a-zA-Z0-9_-]*$",
-                                    "type": "string"
-                                },
-                                "submission": {
-                                    "anyOf": [
-                                        {
-                                            "defaultProperties": [
-                                            ],
-                                            "properties": {
-                                                "kind": {
-                                                    "enum": [
-                                                        "word"
-                                                    ],
-                                                    "type": "string"
-                                                },
-                                                "word": {
-                                                    "maxLength": 1024,
-                                                    "minLength": 1,
-                                                    "type": "string"
-                                                }
-                                            },
-                                            "required": [
-                                                "kind",
-                                                "word"
-                                            ],
-                                            "type": "object"
-                                        },
-                                        {
-                                            "defaultProperties": [
-                                            ],
-                                            "properties": {
-                                                "drawingId": {
-                                                    "type": "string"
-                                                },
-                                                "kind": {
-                                                    "enum": [
-                                                        "drawing"
-                                                    ],
-                                                    "type": "string"
-                                                }
-                                            },
-                                            "required": [
-                                                "drawingId",
-                                                "kind"
-                                            ],
-                                            "type": "object"
-                                        }
-                                    ]
-                                },
-                                "version": {
-                                    "enum": [
-                                        "1.0"
-                                    ],
-                                    "type": "string"
-                                }
-                            },
-                            "required": [
-                                "gameId",
-                                "kind",
-                                "playerId",
-                                "submission",
-                                "version"
-                            ],
-                            "type": "object"
-                        },
-                        {
-                            "$ref": "#/definitions/JoinGameAction_1"
-                        },
-                        {
-                            "$ref": "#/definitions/StartGameAction_1"
-                        },
-                        {
-                            "defaultProperties": [
-                            ],
-                            "properties": {
-                                "gameId": {
-                                    "maxLength": 1024,
-                                    "minLength": 1,
-                                    "pattern": "^[a-zA-Z0-9_-]*$",
-                                    "type": "string"
-                                },
-                                "kind": {
-                                    "enum": [
-                                        "make_move"
-                                    ],
-                                    "type": "string"
-                                },
-                                "playerId": {
-                                    "maxLength": 1024,
-                                    "minLength": 1,
-                                    "pattern": "^[a-zA-Z0-9_-]*$",
-                                    "type": "string"
-                                },
-                                "submission": {
-                                    "anyOf": [
-                                        {
-                                            "defaultProperties": [
-                                            ],
-                                            "properties": {
-                                                "kind": {
-                                                    "enum": [
-                                                        "word"
-                                                    ],
-                                                    "type": "string"
-                                                },
-                                                "word": {
-                                                    "maxLength": 1024,
-                                                    "minLength": 1,
-                                                    "type": "string"
-                                                }
-                                            },
-                                            "required": [
-                                                "kind",
-                                                "word"
-                                            ],
-                                            "type": "object"
-                                        },
-                                        {
-                                            "defaultProperties": [
-                                            ],
-                                            "properties": {
-                                                "drawingId": {
-                                                    "type": "string"
-                                                },
-                                                "kind": {
-                                                    "enum": [
-                                                        "drawing"
-                                                    ],
-                                                    "type": "string"
-                                                }
-                                            },
-                                            "required": [
-                                                "drawingId",
-                                                "kind"
-                                            ],
-                                            "type": "object"
-                                        }
-                                    ]
-                                },
-                                "version": {
-                                    "enum": [
-                                        "1.1"
-                                    ],
-                                    "type": "string"
-                                }
-                            },
-                            "required": [
-                                "gameId",
-                                "kind",
-                                "playerId",
-                                "submission",
-                                "version"
-                            ],
-                            "type": "object"
+                            "type": "string"
                         }
+                    },
+                    "required": [
+                        "version"
                     ]
                 },
-                "parents": {
-                    "$ref": "#/definitions/Record<string,ReferenceGroup>"
+                "if": {
+                    "properties": {
+                        "version": {
+                            "enum": [
+                                "1.1"
+                            ],
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "version"
+                    ]
+                },
+                "then": {
+                    "defaultProperties": [
+                    ],
+                    "properties": {
+                        "action": {
+                            "anyOf": [
+                                {
+                                    "$ref": "#/definitions/JoinGameAction_1"
+                                },
+                                {
+                                    "$ref": "#/definitions/StartGameAction_1"
+                                },
+                                {
+                                    "defaultProperties": [
+                                    ],
+                                    "properties": {
+                                        "gameId": {
+                                            "maxLength": 1024,
+                                            "minLength": 1,
+                                            "pattern": "^[a-zA-Z0-9_-]*$",
+                                            "type": "string"
+                                        },
+                                        "kind": {
+                                            "enum": [
+                                                "make_move"
+                                            ],
+                                            "type": "string"
+                                        },
+                                        "playerId": {
+                                            "maxLength": 1024,
+                                            "minLength": 1,
+                                            "pattern": "^[a-zA-Z0-9_-]*$",
+                                            "type": "string"
+                                        },
+                                        "submission": {
+                                            "anyOf": [
+                                                {
+                                                    "defaultProperties": [
+                                                    ],
+                                                    "properties": {
+                                                        "kind": {
+                                                            "enum": [
+                                                                "word"
+                                                            ],
+                                                            "type": "string"
+                                                        },
+                                                        "word": {
+                                                            "maxLength": 1024,
+                                                            "minLength": 1,
+                                                            "type": "string"
+                                                        }
+                                                    },
+                                                    "required": [
+                                                        "kind",
+                                                        "word"
+                                                    ],
+                                                    "type": "object"
+                                                },
+                                                {
+                                                    "defaultProperties": [
+                                                    ],
+                                                    "properties": {
+                                                        "drawingId": {
+                                                            "type": "string"
+                                                        },
+                                                        "kind": {
+                                                            "enum": [
+                                                                "drawing"
+                                                            ],
+                                                            "type": "string"
+                                                        }
+                                                    },
+                                                    "required": [
+                                                        "drawingId",
+                                                        "kind"
+                                                    ],
+                                                    "type": "object"
+                                                }
+                                            ]
+                                        }
+                                    },
+                                    "required": [
+                                        "gameId",
+                                        "kind",
+                                        "playerId",
+                                        "submission"
+                                    ],
+                                    "type": "object"
+                                }
+                            ]
+                        },
+                        "parents": {
+                            "$ref": "#/definitions/Record<string,ReferenceGroup>"
+                        },
+                        "version": {
+                            "enum": [
+                                "1.1"
+                            ],
+                            "type": "string"
+                        }
+                    },
+                    "required": [
+                        "action",
+                        "parents",
+                        "version"
+                    ],
+                    "type": "object"
                 }
             },
-            "required": [
-                "action",
-                "parents"
-            ],
-            "type": "object"
+            "if": {
+                "properties": {
+                    "version": {
+                        "enum": [
+                            "1.0"
+                        ],
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "version"
+                ]
+            },
+            "then": {
+                "defaultProperties": [
+                ],
+                "properties": {
+                    "action": {
+                        "anyOf": [
+                            {
+                                "$ref": "#/definitions/JoinGameAction"
+                            },
+                            {
+                                "$ref": "#/definitions/StartGameAction"
+                            },
+                            {
+                                "defaultProperties": [
+                                ],
+                                "properties": {
+                                    "gameId": {
+                                        "maxLength": 1024,
+                                        "minLength": 1,
+                                        "pattern": "^[a-zA-Z0-9_-]*$",
+                                        "type": "string"
+                                    },
+                                    "kind": {
+                                        "enum": [
+                                            "make_move"
+                                        ],
+                                        "type": "string"
+                                    },
+                                    "playerId": {
+                                        "maxLength": 1024,
+                                        "minLength": 1,
+                                        "pattern": "^[a-zA-Z0-9_-]*$",
+                                        "type": "string"
+                                    },
+                                    "submission": {
+                                        "anyOf": [
+                                            {
+                                                "defaultProperties": [
+                                                ],
+                                                "properties": {
+                                                    "kind": {
+                                                        "enum": [
+                                                            "word"
+                                                        ],
+                                                        "type": "string"
+                                                    },
+                                                    "word": {
+                                                        "maxLength": 1024,
+                                                        "minLength": 1,
+                                                        "type": "string"
+                                                    }
+                                                },
+                                                "required": [
+                                                    "kind",
+                                                    "word"
+                                                ],
+                                                "type": "object"
+                                            },
+                                            {
+                                                "defaultProperties": [
+                                                ],
+                                                "properties": {
+                                                    "drawingId": {
+                                                        "type": "string"
+                                                    },
+                                                    "kind": {
+                                                        "enum": [
+                                                            "drawing"
+                                                        ],
+                                                        "type": "string"
+                                                    }
+                                                },
+                                                "required": [
+                                                    "drawingId",
+                                                    "kind"
+                                                ],
+                                                "type": "object"
+                                            }
+                                        ]
+                                    }
+                                },
+                                "required": [
+                                    "gameId",
+                                    "kind",
+                                    "playerId",
+                                    "submission"
+                                ],
+                                "type": "object"
+                            }
+                        ]
+                    },
+                    "parents": {
+                        "$ref": "#/definitions/Record<string,ReferenceGroup>"
+                    },
+                    "version": {
+                        "enum": [
+                            "1.0"
+                        ],
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "action",
+                    "parents",
+                    "version"
+                ],
+                "type": "object"
+            }
         },
         "StartGameAction": {
             "defaultProperties": [
@@ -1139,19 +1161,12 @@ export const Schema = {
                     "minLength": 1,
                     "pattern": "^[a-zA-Z0-9_-]*$",
                     "type": "string"
-                },
-                "version": {
-                    "enum": [
-                        "1.0"
-                    ],
-                    "type": "string"
                 }
             },
             "required": [
                 "gameId",
                 "kind",
-                "playerId",
-                "version"
+                "playerId"
             ],
             "type": "object"
         },
@@ -1176,19 +1191,12 @@ export const Schema = {
                     "minLength": 1,
                     "pattern": "^[a-zA-Z0-9_-]*$",
                     "type": "string"
-                },
-                "version": {
-                    "enum": [
-                        "1.1"
-                    ],
-                    "type": "string"
                 }
             },
             "required": [
                 "gameId",
                 "kind",
-                "playerId",
-                "version"
+                "playerId"
             ],
             "type": "object"
         }

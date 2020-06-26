@@ -107,20 +107,13 @@ export const Schema = {
                                         "type": "object"
                                     }
                                 ]
-                            },
-                            "version": {
-                                "enum": [
-                                    "1.1"
-                                ],
-                                "type": "string"
                             }
                         },
                         "required": [
                             "gameId",
                             "kind",
                             "playerId",
-                            "submission",
-                            "version"
+                            "submission"
                         ],
                         "type": "object"
                     }
@@ -185,42 +178,262 @@ export const Schema = {
             "type": "object"
         },
         "Error": {
-            "anyOf": [
-                {
-                    "defaultProperties": [
-                    ],
-                    "properties": {
-                        "gameId": {
-                            "type": "string"
+            "else": {
+                "else": {
+                    "else": {
+                        "else": {
+                            "else": {
+                                "else": {
+                                    "else": {
+                                        "properties": {
+                                            "status": {
+                                                "enum": [
+                                                    "GAME_NOT_STARTED",
+                                                    "PLAYER_NOT_IN_GAME",
+                                                    "MOVE_PLAYED_OUT_OF_TURN",
+                                                    "GAME_IS_OVER",
+                                                    "INCORRECT_SUBMISSION_KIND",
+                                                    "GAME_ALREADY_STARTED",
+                                                    "UNKNOWN"
+                                                ],
+                                                "type": "string"
+                                            }
+                                        },
+                                        "required": [
+                                            "status"
+                                        ]
+                                    },
+                                    "if": {
+                                        "properties": {
+                                            "status": {
+                                                "enum": [
+                                                    "UNKNOWN"
+                                                ],
+                                                "type": "string"
+                                            }
+                                        },
+                                        "required": [
+                                            "status"
+                                        ]
+                                    },
+                                    "then": {
+                                        "defaultProperties": [
+                                        ],
+                                        "properties": {
+                                            "error": {
+                                            },
+                                            "status": {
+                                                "enum": [
+                                                    "UNKNOWN"
+                                                ],
+                                                "type": "string"
+                                            },
+                                            "status_code": {
+                                                "type": "number"
+                                            }
+                                        },
+                                        "required": [
+                                            "error",
+                                            "status",
+                                            "status_code"
+                                        ],
+                                        "type": "object"
+                                    }
+                                },
+                                "if": {
+                                    "properties": {
+                                        "status": {
+                                            "enum": [
+                                                "GAME_ALREADY_STARTED"
+                                            ],
+                                            "type": "string"
+                                        }
+                                    },
+                                    "required": [
+                                        "status"
+                                    ]
+                                },
+                                "then": {
+                                    "defaultProperties": [
+                                    ],
+                                    "properties": {
+                                        "gameId": {
+                                            "type": "string"
+                                        },
+                                        "status": {
+                                            "enum": [
+                                                "GAME_ALREADY_STARTED"
+                                            ],
+                                            "type": "string"
+                                        },
+                                        "status_code": {
+                                            "enum": [
+                                                400
+                                            ],
+                                            "type": "number"
+                                        }
+                                    },
+                                    "required": [
+                                        "gameId",
+                                        "status",
+                                        "status_code"
+                                    ],
+                                    "type": "object"
+                                }
+                            },
+                            "if": {
+                                "properties": {
+                                    "status": {
+                                        "enum": [
+                                            "INCORRECT_SUBMISSION_KIND"
+                                        ],
+                                        "type": "string"
+                                    }
+                                },
+                                "required": [
+                                    "status"
+                                ]
+                            },
+                            "then": {
+                                "defaultProperties": [
+                                ],
+                                "properties": {
+                                    "got": {
+                                        "enum": [
+                                            "drawing",
+                                            "word"
+                                        ],
+                                        "type": "string"
+                                    },
+                                    "status": {
+                                        "enum": [
+                                            "INCORRECT_SUBMISSION_KIND"
+                                        ],
+                                        "type": "string"
+                                    },
+                                    "status_code": {
+                                        "enum": [
+                                            400
+                                        ],
+                                        "type": "number"
+                                    },
+                                    "wanted": {
+                                        "enum": [
+                                            "drawing",
+                                            "word"
+                                        ],
+                                        "type": "string"
+                                    }
+                                },
+                                "required": [
+                                    "got",
+                                    "status",
+                                    "status_code",
+                                    "wanted"
+                                ],
+                                "type": "object"
+                            }
                         },
+                        "if": {
+                            "properties": {
+                                "status": {
+                                    "enum": [
+                                        "GAME_IS_OVER"
+                                    ],
+                                    "type": "string"
+                                }
+                            },
+                            "required": [
+                                "status"
+                            ]
+                        },
+                        "then": {
+                            "defaultProperties": [
+                            ],
+                            "properties": {
+                                "gameId": {
+                                    "type": "string"
+                                },
+                                "status": {
+                                    "enum": [
+                                        "GAME_IS_OVER"
+                                    ],
+                                    "type": "string"
+                                },
+                                "status_code": {
+                                    "enum": [
+                                        400
+                                    ],
+                                    "type": "number"
+                                }
+                            },
+                            "required": [
+                                "gameId",
+                                "status",
+                                "status_code"
+                            ],
+                            "type": "object"
+                        }
+                    },
+                    "if": {
+                        "properties": {
+                            "status": {
+                                "enum": [
+                                    "MOVE_PLAYED_OUT_OF_TURN"
+                                ],
+                                "type": "string"
+                            }
+                        },
+                        "required": [
+                            "status"
+                        ]
+                    },
+                    "then": {
+                        "defaultProperties": [
+                        ],
+                        "properties": {
+                            "gameId": {
+                                "type": "string"
+                            },
+                            "playerId": {
+                                "type": "string"
+                            },
+                            "status": {
+                                "enum": [
+                                    "MOVE_PLAYED_OUT_OF_TURN"
+                                ],
+                                "type": "string"
+                            },
+                            "status_code": {
+                                "enum": [
+                                    400
+                                ],
+                                "type": "number"
+                            }
+                        },
+                        "required": [
+                            "gameId",
+                            "playerId",
+                            "status",
+                            "status_code"
+                        ],
+                        "type": "object"
+                    }
+                },
+                "if": {
+                    "properties": {
                         "status": {
                             "enum": [
-                                "GAME_NOT_STARTED"
-                            ],
-                            "type": "string"
-                        },
-                        "status_code": {
-                            "enum": [
-                                400
-                            ],
-                            "type": "number"
-                        },
-                        "version": {
-                            "enum": [
-                                "1.0"
+                                "PLAYER_NOT_IN_GAME"
                             ],
                             "type": "string"
                         }
                     },
                     "required": [
-                        "gameId",
-                        "status",
-                        "status_code",
-                        "version"
-                    ],
-                    "type": "object"
+                        "status"
+                    ]
                 },
-                {
+                "then": {
                     "defaultProperties": [
                     ],
                     "properties": {
@@ -241,204 +454,57 @@ export const Schema = {
                                 403
                             ],
                             "type": "number"
-                        },
-                        "version": {
-                            "enum": [
-                                "1.0"
-                            ],
-                            "type": "string"
                         }
                     },
                     "required": [
                         "gameId",
                         "playerId",
                         "status",
-                        "status_code",
-                        "version"
-                    ],
-                    "type": "object"
-                },
-                {
-                    "defaultProperties": [
-                    ],
-                    "properties": {
-                        "gameId": {
-                            "type": "string"
-                        },
-                        "playerId": {
-                            "type": "string"
-                        },
-                        "status": {
-                            "enum": [
-                                "MOVE_PLAYED_OUT_OF_TURN"
-                            ],
-                            "type": "string"
-                        },
-                        "status_code": {
-                            "enum": [
-                                400
-                            ],
-                            "type": "number"
-                        },
-                        "version": {
-                            "enum": [
-                                "1.0"
-                            ],
-                            "type": "string"
-                        }
-                    },
-                    "required": [
-                        "gameId",
-                        "playerId",
-                        "status",
-                        "status_code",
-                        "version"
-                    ],
-                    "type": "object"
-                },
-                {
-                    "defaultProperties": [
-                    ],
-                    "properties": {
-                        "gameId": {
-                            "type": "string"
-                        },
-                        "status": {
-                            "enum": [
-                                "GAME_IS_OVER"
-                            ],
-                            "type": "string"
-                        },
-                        "status_code": {
-                            "enum": [
-                                400
-                            ],
-                            "type": "number"
-                        },
-                        "version": {
-                            "enum": [
-                                "1.0"
-                            ],
-                            "type": "string"
-                        }
-                    },
-                    "required": [
-                        "gameId",
-                        "status",
-                        "status_code",
-                        "version"
-                    ],
-                    "type": "object"
-                },
-                {
-                    "defaultProperties": [
-                    ],
-                    "properties": {
-                        "got": {
-                            "enum": [
-                                "drawing",
-                                "word"
-                            ],
-                            "type": "string"
-                        },
-                        "status": {
-                            "enum": [
-                                "INCORRECT_SUBMISSION_KIND"
-                            ],
-                            "type": "string"
-                        },
-                        "status_code": {
-                            "enum": [
-                                400
-                            ],
-                            "type": "number"
-                        },
-                        "version": {
-                            "enum": [
-                                "1.0"
-                            ],
-                            "type": "string"
-                        },
-                        "wanted": {
-                            "enum": [
-                                "drawing",
-                                "word"
-                            ],
-                            "type": "string"
-                        }
-                    },
-                    "required": [
-                        "got",
-                        "status",
-                        "status_code",
-                        "version",
-                        "wanted"
-                    ],
-                    "type": "object"
-                },
-                {
-                    "defaultProperties": [
-                    ],
-                    "properties": {
-                        "gameId": {
-                            "type": "string"
-                        },
-                        "status": {
-                            "enum": [
-                                "GAME_ALREADY_STARTED"
-                            ],
-                            "type": "string"
-                        },
-                        "status_code": {
-                            "enum": [
-                                400
-                            ],
-                            "type": "number"
-                        },
-                        "version": {
-                            "enum": [
-                                "1.0"
-                            ],
-                            "type": "string"
-                        }
-                    },
-                    "required": [
-                        "gameId",
-                        "status",
-                        "status_code",
-                        "version"
-                    ],
-                    "type": "object"
-                },
-                {
-                    "defaultProperties": [
-                    ],
-                    "properties": {
-                        "status": {
-                            "type": "string"
-                        },
-                        "status_code": {
-                            "type": "number"
-                        },
-                        "true_version": {
-                            "type": "string"
-                        },
-                        "version": {
-                            "enum": [
-                                "UNKNOWN"
-                            ],
-                            "type": "string"
-                        }
-                    },
-                    "required": [
-                        "status",
-                        "status_code",
-                        "true_version",
-                        "version"
+                        "status_code"
                     ],
                     "type": "object"
                 }
-            ]
+            },
+            "if": {
+                "properties": {
+                    "status": {
+                        "enum": [
+                            "GAME_NOT_STARTED"
+                        ],
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "status"
+                ]
+            },
+            "then": {
+                "defaultProperties": [
+                ],
+                "properties": {
+                    "gameId": {
+                        "type": "string"
+                    },
+                    "status": {
+                        "enum": [
+                            "GAME_NOT_STARTED"
+                        ],
+                        "type": "string"
+                    },
+                    "status_code": {
+                        "enum": [
+                            400
+                        ],
+                        "type": "number"
+                    }
+                },
+                "required": [
+                    "gameId",
+                    "status",
+                    "status_code"
+                ],
+                "type": "object"
+            }
         },
         "ExportedPlayer": {
             "defaultProperties": [
@@ -716,20 +782,13 @@ export const Schema = {
                     "minLength": 1,
                     "pattern": "^[a-zA-Z0-9_-]*$",
                     "type": "string"
-                },
-                "version": {
-                    "enum": [
-                        "1.1"
-                    ],
-                    "type": "string"
                 }
             },
             "required": [
                 "gameId",
                 "kind",
                 "playerDisplayName",
-                "playerId",
-                "version"
+                "playerId"
             ],
             "type": "object"
         },
@@ -800,20 +859,13 @@ export const Schema = {
                             "type": "object"
                         }
                     ]
-                },
-                "version": {
-                    "enum": [
-                        "1.1"
-                    ],
-                    "type": "string"
                 }
             },
             "required": [
                 "gameId",
                 "kind",
                 "playerId",
-                "submission",
-                "version"
+                "submission"
             ],
             "type": "object"
         },
@@ -1107,19 +1159,12 @@ export const Schema = {
                     "minLength": 1,
                     "pattern": "^[a-zA-Z0-9_-]*$",
                     "type": "string"
-                },
-                "version": {
-                    "enum": [
-                        "1.1"
-                    ],
-                    "type": "string"
                 }
             },
             "required": [
                 "gameId",
                 "kind",
-                "playerId",
-                "version"
+                "playerId"
             ],
             "type": "object"
         },

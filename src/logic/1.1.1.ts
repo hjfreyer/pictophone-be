@@ -91,7 +91,7 @@ export async function getResult(db: db.Database, savedAction: SavedAction): Prom
     const oldGameRef = option.of(deps[`games/${gameId}`]).unwrap()
     const oldGameItem = await getGameState(db, oldGameRef);
     const oldGame = option.from(oldGameItem).map(item => item.value)
-    const newGameResult = integrateHelper(convertAction(savedAction.action),
+    const newGameResult = integrateHelper(convertAction(savedAction),
         oldGame);
     return {
         '1.0': result.from(newGameResult).map(() => null),
@@ -105,7 +105,7 @@ export async function getGameDiffs(db: db.Database, savedAction: SavedAction): P
     const oldGameRef = option.of(deps[`games/${gameId}`]).unwrap()
     const oldGameItem = await getGameState(db, oldGameRef);
     const oldGame = option.from(oldGameItem).map(item => item.value)
-    const newGameResult = integrateHelper(convertAction(savedAction.action),
+    const newGameResult = integrateHelper(convertAction(savedAction),
         oldGame);
     return result.from(newGameResult)
         .map((newGame: Game): Diff<Game>[] =>
@@ -207,7 +207,7 @@ export type Errors = {
 
 export const REVISION: fw.Integrator<Errors> = {
     async getNeededReferenceIds(db: db.Database, anyAction: AnyAction): Promise<string[]> {
-        return [`games/${anyAction.gameId}`]
+        return [`games/${anyAction.action.gameId}`]
     },
 
     async integrate(db: db.Database, savedAction: SavedAction): Promise<fw.IntegrationResult<Errors>> {
@@ -297,18 +297,16 @@ function convertAction1_0(a: model1_0.Action): Action {
             }
         case 'start_game':
         case 'make_move':
-            return {
-                ...a,
-            }
+            return a
     }
 }
 
-function convertAction(a: AnyAction): Action {
+function convertAction(a: SavedAction): Action {
     switch (a.version) {
         case '1.0':
-            return convertAction1_0(a)
+            return convertAction1_0(a.action)
         case '1.1':
-            return a
+            return a.action
     }
 }
 

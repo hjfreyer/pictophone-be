@@ -39,47 +39,47 @@ type MaybeLiveAction = {
     actionId: string
 }
 
-export async function commitAction(db: db.Database, anyAction: AnyAction): Promise<SavedAction> {
-    const action = convertAction(anyAction)
-    const res = await getNewGameOrError(db, { kind: 'live', action: action })
+// export async function commitAction(db: db.Database, anyAction: AnyAction): Promise<SavedAction> {
+//     const action = convertAction(anyAction)
+//     const res = await getNewGameOrError(db, { kind: 'live', action: action })
 
-    console.log(JSON.stringify(res.newGame, undefined, 2))
+//     console.log(JSON.stringify(res.newGame, undefined, 2))
 
-    const affectedFacets = await getAffectedFacets(db, { kind: 'live', action })
+//     const affectedFacets = await getAffectedFacets(db, { kind: 'live', action })
 
-    const savedAction: SavedAction = { parents: res.parents, action: anyAction };
-    const actionId = getActionId(savedAction);
+//     const savedAction: SavedAction = { parents: res.parents, action: anyAction };
+//     const actionId = getActionId(savedAction);
 
-    db.tx.set(db.db.doc(actionId), savedAction)
+//     db.tx.set(db.db.doc(actionId), savedAction)
 
-    for (const facetId of affectedFacets) {
-        db.tx.set(db.db.doc(facetId), { actionId })
-        // if (facetId.length === 1) {
+//     for (const facetId of affectedFacets) {
+//         db.tx.set(db.db.doc(facetId), { actionId })
+//         // if (facetId.length === 1) {
 
-        //     const [facetId] = facetId;
-        //     const ref: ReferenceGroup = {
-        //         kind: 'single',
-        //         actionId,
-        //     }
-        //     const labelPath = `labels-1.2.0/${facetId}`
-        //     db.tx.set(db.db.doc(labelPath), ref)
-        // } else if (facetId.length === 2) {
-        //     const [first, second] = facetId;
-        //     const labelPath = `labels-1.2.0/${first}`
-        //     const ref: ReferenceGroup = {
-        //         kind: 'collection',
-        //         members: {
-        //             [second]: { kind: 'single', actionId }
-        //         }
-        //     }
-        //     db.tx.set(db.db.doc(labelPath), ref, { merge: true })
-        // } else {
-        //     throw new Error('wtf')
-        // }
-    }
+//         //     const [facetId] = facetId;
+//         //     const ref: ReferenceGroup = {
+//         //         kind: 'single',
+//         //         actionId,
+//         //     }
+//         //     const labelPath = `labels-1.2.0/${facetId}`
+//         //     db.tx.set(db.db.doc(labelPath), ref)
+//         // } else if (facetId.length === 2) {
+//         //     const [first, second] = facetId;
+//         //     const labelPath = `labels-1.2.0/${first}`
+//         //     const ref: ReferenceGroup = {
+//         //         kind: 'collection',
+//         //         members: {
+//         //             [second]: { kind: 'single', actionId }
+//         //         }
+//         //     }
+//         //     db.tx.set(db.db.doc(labelPath), ref, { merge: true })
+//         // } else {
+//         //     throw new Error('wtf')
+//         // }
+//     }
 
-    return savedAction
-}
+//     return savedAction
+// }
 
 
 export async function getAction(db: db.Database, actionId: string): Promise<Option<SavedAction>> {
@@ -136,7 +136,7 @@ export async function getParents(db: db.Database, action: MaybeLiveAction, facet
 export async function getNewGameOrError(db: db.Database, maybeAction: MaybeLiveAction): Promise<IntRes> {
     const action = maybeAction.kind === 'live'
         ? maybeAction.action
-        : convertAction(option.from(await getAction(db, maybeAction.actionId)).unwrap().action);
+        : convertAction(option.from(await getAction(db, maybeAction.actionId)).unwrap());
 
     const parents: Record<string, ReferenceGroup> = {}
     const gameFacetId = `games/${action.gameId}`
@@ -418,17 +418,18 @@ export async function getAffectedFacets(db: db.Database, action: MaybeLiveAction
 //     // }
 // }
 
-function convertError1_0(err: Error): model1_0.Error {
-    switch (err.version) {
-        case '1.0':
-            return err
-        case '1.2':
+function convertError1_0(error: Error): model1_0.Error {
+    switch (error.status) {
+        case 'GAME_NOT_FOUND':
+        case 'GAME_ALREADY_EXISTS':
+        case 'SHORT_CODE_IN_USE':
             return {
-                version: 'UNKNOWN',
-                true_version: err.version,
-                status: "UNKNOWN ERROR",
-                status_code: err.status_code,
+                status: "UNKNOWN",
+                status_code: error.status_code,
+                error,
             }
+        default:
+            return error
     }
 }
 
@@ -627,12 +628,12 @@ function convertAction1_2(a: model1_2.Action): Action {
     }
 }
 
-function convertAction(a: AnyAction): Action {
+function convertAction(a: SavedAction): Action {
     switch (a.version) {
         case '1.0':
-            return convertAction1_0(a)
+            return convertAction1_0(a.action)
         case '1.1':
-            return convertAction1_1(a)
+            return convertAction1_1(a.action)
         // case '1.2':
         //     return convertAction1_2(a)
     }

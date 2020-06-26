@@ -248,19 +248,12 @@ export const Schema = {
                                                             400
                                                         ],
                                                         "type": "number"
-                                                    },
-                                                    "version": {
-                                                        "enum": [
-                                                            "1.2"
-                                                        ],
-                                                        "type": "string"
                                                     }
                                                 },
                                                 "required": [
                                                     "shortCode",
                                                     "status",
-                                                    "status_code",
-                                                    "version"
+                                                    "status_code"
                                                 ],
                                                 "type": "object"
                                             }
@@ -296,19 +289,12 @@ export const Schema = {
                                                         400
                                                     ],
                                                     "type": "number"
-                                                },
-                                                "version": {
-                                                    "enum": [
-                                                        "1.2"
-                                                    ],
-                                                    "type": "string"
                                                 }
                                             },
                                             "required": [
                                                 "gameId",
                                                 "status",
-                                                "status_code",
-                                                "version"
+                                                "status_code"
                                             ],
                                             "type": "object"
                                         }
@@ -344,19 +330,12 @@ export const Schema = {
                                                     404
                                                 ],
                                                 "type": "number"
-                                            },
-                                            "version": {
-                                                "enum": [
-                                                    "1.2"
-                                                ],
-                                                "type": "string"
                                             }
                                         },
                                         "required": [
                                             "gameId",
                                             "status",
-                                            "status_code",
-                                            "version"
+                                            "status_code"
                                         ],
                                         "type": "object"
                                     }
@@ -392,19 +371,12 @@ export const Schema = {
                                                 400
                                             ],
                                             "type": "number"
-                                        },
-                                        "version": {
-                                            "enum": [
-                                                "1.0"
-                                            ],
-                                            "type": "string"
                                         }
                                     },
                                     "required": [
                                         "gameId",
                                         "status",
-                                        "status_code",
-                                        "version"
+                                        "status_code"
                                     ],
                                     "type": "object"
                                 }
@@ -445,12 +417,6 @@ export const Schema = {
                                         ],
                                         "type": "number"
                                     },
-                                    "version": {
-                                        "enum": [
-                                            "1.0"
-                                        ],
-                                        "type": "string"
-                                    },
                                     "wanted": {
                                         "enum": [
                                             "drawing",
@@ -463,7 +429,6 @@ export const Schema = {
                                     "got",
                                     "status",
                                     "status_code",
-                                    "version",
                                     "wanted"
                                 ],
                                 "type": "object"
@@ -500,19 +465,12 @@ export const Schema = {
                                         400
                                     ],
                                     "type": "number"
-                                },
-                                "version": {
-                                    "enum": [
-                                        "1.0"
-                                    ],
-                                    "type": "string"
                                 }
                             },
                             "required": [
                                 "gameId",
                                 "status",
-                                "status_code",
-                                "version"
+                                "status_code"
                             ],
                             "type": "object"
                         }
@@ -551,20 +509,13 @@ export const Schema = {
                                     400
                                 ],
                                 "type": "number"
-                            },
-                            "version": {
-                                "enum": [
-                                    "1.0"
-                                ],
-                                "type": "string"
                             }
                         },
                         "required": [
                             "gameId",
                             "playerId",
                             "status",
-                            "status_code",
-                            "version"
+                            "status_code"
                         ],
                         "type": "object"
                     }
@@ -603,20 +554,13 @@ export const Schema = {
                                 403
                             ],
                             "type": "number"
-                        },
-                        "version": {
-                            "enum": [
-                                "1.0"
-                            ],
-                            "type": "string"
                         }
                     },
                     "required": [
                         "gameId",
                         "playerId",
                         "status",
-                        "status_code",
-                        "version"
+                        "status_code"
                     ],
                     "type": "object"
                 }
@@ -652,19 +596,12 @@ export const Schema = {
                             400
                         ],
                         "type": "number"
-                    },
-                    "version": {
-                        "enum": [
-                            "1.0"
-                        ],
-                        "type": "string"
                     }
                 },
                 "required": [
                     "gameId",
                     "status",
-                    "status_code",
-                    "version"
+                    "status_code"
                 ],
                 "type": "object"
             }

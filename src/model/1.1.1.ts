@@ -62,35 +62,29 @@ export type MakeMoveAction = {
 export type Action = JoinGameAction | StartGameAction | MakeMoveAction
 
 export type Error = {
-    version: '1.0'
     status: 'GAME_NOT_STARTED'
     status_code: 400
     gameId: string
 } | {
-    version: '1.0'
     status: 'PLAYER_NOT_IN_GAME'
     status_code: 403
     gameId: string
     playerId: string
 } | {
-    version: '1.0'
     status: 'MOVE_PLAYED_OUT_OF_TURN'
     status_code: 400
     gameId: string
     playerId: string
 } | {
-    version: '1.0'
     status: 'GAME_IS_OVER'
     status_code: 400
     gameId: string
 } | {
-    version: '1.0'
     status: 'INCORRECT_SUBMISSION_KIND'
     status_code: 400
     wanted: 'word' | 'drawing'
     got: 'word' | 'drawing'
 } | {
-    version: '1.0'
     status: 'GAME_ALREADY_STARTED'
     status_code: 400
     gameId: string

@@ -216,9 +216,15 @@ function handleAction(action: AnyAction): Promise<Result<null, AnyError>> {
         //     ixop.distinct()
         // )
 
-        const savedAction: SavedAction = { parents, action };
+        const savedAction: SavedAction = (() => {
+            switch (action.version) {
+                case '1.0':
+                    return { parents, version: action.version, action: action.action }
+                case '1.1':
+                    return { parents, version: action.version, action: action.action }
+            }
+        })();
         const actionId = getActionId(savedAction);
-
 
         const res = await logic1_1_1.REVISION.integrate(db, savedAction)
 
@@ -763,21 +769,45 @@ async function handleCrossCheck(): Promise<void> {
 //     })
 // }
 
+function v1_0(): Router {
+    const res = Router()
 
-app.options('/action', cors())
-app.post('/action', cors(), function(req: Request<Dictionary<string>>, res, next) {
-    handleAction(validateSchema('AnyAction')(req.body)).then((resp) => {
-        if (resp.data.status === 'err') {
-            res.status(resp.data.error.status_code)
-            res.json(resp.data.error)
-        } else {
-            res.status(200)
-            res.json()
-        }
-    }).catch(next)
-})
+    res.options('/action', cors())
+    res.post('/action', cors(), function(req: Request<{}>, res, next) {
+        const action = validate1_0('Action')(req.body);
+        handleAction({ version: "1.0", action }).then((resp) => {
+            if (resp.data.status === 'err') {
+                res.status(resp.data.error.status_code)
+                res.json(resp.data.error)
+            } else {
+                res.status(200)
+                res.json()
+            }
+        }).catch(next)
+    })
 
+    return res
+}
 
+function v1_1(): Router {
+    const res = Router()
+
+    res.options('/action', cors())
+    res.post('/action', cors(), function(req: Request<{}>, res, next) {
+        const action = validate1_1('Action')(req.body);
+        handleAction({ version: "1.1", action }).then((resp) => {
+            if (resp.data.status === 'err') {
+                res.status(resp.data.error.status_code)
+                res.json(resp.data.error)
+            } else {
+                res.status(200)
+                res.json()
+            }
+        }).catch(next)
+    })
+
+    return res
+}
 
 
 app.get('/debug', cors(), function(req: Request<Dictionary<string>>, res, next) {
@@ -796,6 +826,8 @@ app.get('/debug', cors(), function(req: Request<Dictionary<string>>, res, next) 
     // }).catch(next)
 })
 
+app.use('/1.0', v1_0())
+app.use('/1.1', v1_1())
 app.use('/batch', batch())
 
 type DeleteCollectionRequest = {
