@@ -1,6 +1,6 @@
 
 import * as db from './db'
-import { Live, Diff, Change } from './interfaces'
+import { Live, Diff, Change, Key, ItemIterable } from './interfaces'
 // import { validate } from './schema/interfaces.validator'
 import { AnyAction, AnyError, SavedAction, ReferenceGroup } from './model';
 import { sha256 } from 'js-sha256';
@@ -93,6 +93,11 @@ export function diffToChange<T>(d: Diff<T>): Change<T> {
     }
 }
 
+export async function findItem<T>(items: ItemIterable<T>, key: Key): Promise<util.Option<T>> {
+    return util.option.of(await ixa.find(items, item => util.lexCompare(item.key, key) === 0)).map(
+        item => item.value
+    )
+}
 
 const HASH_HEX_CHARS_LEN = (32 / 8) * 2;  // 32 bits of hash
 const PREFIX = '0';

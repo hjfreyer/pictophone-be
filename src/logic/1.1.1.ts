@@ -4,7 +4,7 @@ import * as ix from "ix/iterable";
 import * as ixop from "ix/iterable/operators";
 import * as ixa from "ix/asynciterable";
 import * as ixaop from "ix/asynciterable/operators";
-import { applyChangesSimple, diffToChange } from '../base';
+import { applyChangesSimple, diffToChange, findItem } from '../base';
 import * as db from '../db';
 import * as diffs from '../diffs';
 import * as fw from '../framework';
@@ -138,6 +138,52 @@ export async function getGamesForPlayerDiffs(
     ))
 }
 
+function getGamesForPlayerShardState(db: db.Database, ref: ReferenceGroup): ItemIterable<{}> {
+    return ixa.from(getGameState(db, ref)).pipe(
+        util.filterNoneAsync(),
+        ixaop.flatMap(({ key, value }) => ixa.from(gameToGamesForPlayer(key, value)))
+    )
+}
+
+export function getGamesForPlayerState(db: db.Database, refGroup: ReferenceGroup): ItemIterable<string[]> {
+    if (refGroup.kind === 'none') {
+        return ixa.empty()
+    }
+    if (refGroup.kind === 'single') {
+        throw new Error("GamesForPlayer is a collection")
+    }
+
+    return ixa.from(Object.values(refGroup.members)).pipe(
+        ixaop.flatMap(ref => getGamesForPlayerShardState(db, ref)),
+        ixaop.groupBy(({ key: [playerId,] }) => playerId,
+            ({ key: [, gameId] }) => gameId,
+            (key: string, values: Iterable<string>) => item([key],
+                Array.from(ix.from(values).pipe(ixop.orderBy(gameId => gameId))))
+        )
+    )
+}
+
+export async function handleGetGamesForPlayerRequest(
+    db: db.Database, playerId: string): Promise<model1_1.GameList> {
+    const ref = await getCurrentRefGroup(db, `players/${playerId}/games/*`)
+
+    return {
+        gameIds: option.from(await findItem(getGamesForPlayerState(db, ref), [playerId])).orElse(() => [])
+    }
+}
+
+export async function getPlayerGame1_1(db: db.Database, playerId: string, gameId: string): Promise<Option<model1_1.PlayerGame>> {
+    const ref = await getCurrentRefGroup(db, gameKeyToRefId([gameId]))
+
+    const pgs = ixa.from(getGameState(db, ref)).pipe(
+        util.filterNoneAsync(),
+        ixaop.flatMap(({ key, value }) => ixa.from(gameToPlayerGames1_1(key, value)))
+    )
+
+    return await findItem(pgs, [playerId, gameId])
+}
+
+
 // export async function getGameByPlayer1_0Diffs(
 //     db: db.Database, action: AnyAction,
 //     deps: Record<string, ReferenceGroup>): Promise<Diff<model1_0.PlayerGame>[]> {
@@ -222,6 +268,8 @@ export const REVISION: fw.Integrator<Errors> = {
         }
     }
 }
+
+
 //     id: '1.1.1',
 //     validateAnnotation: validate('Annotation2'),
 

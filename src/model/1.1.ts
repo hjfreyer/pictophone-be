@@ -140,3 +140,7 @@ export interface ExportedPlayer {
 }
 
 export type PlayerGame = BoringPlayerGame | RespondToPromptPlayerGame | FinishedPlayerGame
+
+export interface GameList {
+    gameIds: string[]
+}

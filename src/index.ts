@@ -39,6 +39,7 @@ import * as fw from './framework';
 import { OperatorAsyncFunction, OperatorFunction } from 'ix/interfaces'
 import { ResultData } from './util/result'
 import { dirname, basename } from 'path'
+import asyncHandler from 'express-async-handler';
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -230,8 +231,33 @@ function v1_1(): Router {
         }).catch(next)
     })
 
+    res.options('/players/:playerId/games', cors())
+    res.get('/players/:playerId/games', cors(), asyncHandler(async (req, res, next) => {
+        const pg = await db.runTransaction(fsDb)(db =>
+            logic1_1_1.handleGetGamesForPlayerRequest(db, req.params['playerId']))
+        res.status(200)
+        res.json(pg)
+    }))
+
+    res.options('/players/:playerId/games/:gameId', cors())
+    res.get('/players/:playerId/games/:gameId', cors(), asyncHandler(async (req, res, next) => {
+        const pg = await db.runTransaction(fsDb)(db =>
+            logic1_1_1.getPlayerGame1_1(db, req.params['playerId'], req.params['gameId']))
+        option.from(pg).split({
+            onSome: (pg) => {
+                res.status(200)
+                res.json(pg)
+            },
+            onNone: () => {
+                res.status(404)
+                res.json(pg)
+            }
+        })
+    }))
+
     return res
 }
+
 
 app.use('/1.0', v1_0())
 app.use('/1.1', v1_1())
