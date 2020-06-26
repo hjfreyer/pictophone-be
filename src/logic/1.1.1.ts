@@ -24,6 +24,13 @@ import { UnifiedInterface } from '..';
 import { validate as validateSchema } from '../model/index.validator'
 import { dirname } from 'path';
 
+
+
+export interface IntegrationResult<TResult> {
+    result: TResult
+    impactedReferenceIds: string[]
+}
+
 export async function getAction(db: db.Database, actionId: string): Promise<Option<SavedAction>> {
     const data = await db.getRaw(actionId);
     return option.from(data).map(validateSchema('SavedAction'))
@@ -54,8 +61,12 @@ export async function getCurrentRefGroup(db: db.Database, refId: string): Promis
     }
 }
 
-export function gameKeyToRefId([gameId]: Key): string {
-    return `games/${gameId}`
+export function gameKeyToRefId(key: Key): string {
+    return db.serializeDocPath(['games'], key)
+}
+
+export function gameForPlayerKeyToRefId(key: Key): string {
+    return db.serializeDocPath(['players', 'games'], key)
 }
 
 export function gameByPlayer1_0KeyToRefId([, gameId]: Key): string {
@@ -66,10 +77,6 @@ export function gameByPlayer1_1KeyToRefId([, gameId]: Key): string {
     return gameKeyToRefId([gameId])
 }
 
-export function getNeededReferenceIds(action: AnyAction): string[] {
-    return [`games/${action.gameId}`]
-}
-
 // export function gameByPlayer1_0NeededReferenceIds(action: AnyAction): string[] {
 //     return [`games/${action.gameId}`]
 // }
@@ -78,12 +85,27 @@ export function getNeededReferenceIds(action: AnyAction): string[] {
 //     return [`games/${action.gameId}`]
 // }
 
-export async function getGameDiffs(db: db.Database, action: AnyAction, deps: Record<string, ReferenceGroup>): Promise<Diff<Game>[]> {
-    const { gameId } = action;
+export async function getResult(db: db.Database, savedAction: SavedAction): Promise<Errors> {
+    const { gameId } = savedAction.action;
+    const deps = savedAction.parents;
     const oldGameRef = option.of(deps[`games/${gameId}`]).unwrap()
     const oldGameItem = await getGameState(db, oldGameRef);
     const oldGame = option.from(oldGameItem).map(item => item.value)
-    const newGameResult = integrateHelper(convertAction(action),
+    const newGameResult = integrateHelper(convertAction(savedAction.action),
+        oldGame);
+    return {
+        '1.0': result.from(newGameResult).map(() => null),
+        '1.1': result.from(newGameResult).map(() => null),
+    }
+}
+
+export async function getGameDiffs(db: db.Database, savedAction: SavedAction): Promise<Diff<Game>[]> {
+    const { gameId } = savedAction.action;
+    const deps = savedAction.parents;
+    const oldGameRef = option.of(deps[`games/${gameId}`]).unwrap()
+    const oldGameItem = await getGameState(db, oldGameRef);
+    const oldGame = option.from(oldGameItem).map(item => item.value)
+    const newGameResult = integrateHelper(convertAction(savedAction.action),
         oldGame);
     return result.from(newGameResult)
         .map((newGame: Game): Diff<Game>[] =>
@@ -101,7 +123,7 @@ export async function getGameState(db: db.Database, ref: ReferenceGroup): Promis
 
     const savedAction = option.from(await getAction(db, ref.actionId)).unwrap();
 
-    const gameDiffs = await getGameDiffs(db, savedAction.action, savedAction.parents);
+    const gameDiffs = await getGameDiffs(db, savedAction);
     if (gameDiffs.length !== 1) {
         throw new Error("weird output from getGameDiffs: " + JSON.stringify(gameDiffs))
     }
@@ -109,46 +131,52 @@ export async function getGameState(db: db.Database, ref: ReferenceGroup): Promis
     return getNewValue(gameDiffs[0])
 }
 
-
-export async function getGameByPlayer1_0Diffs(
-    db: db.Database, action: AnyAction,
-    deps: Record<string, ReferenceGroup>): Promise<Diff<model1_0.PlayerGame>[]> {
-    return Array.from(ix.from(await getGameDiffs(db, action, deps)).pipe(
-        diffs.mapDiffs(gameToPlayerGames1_0)
+export async function getGamesForPlayerDiffs(
+    db: db.Database, savedAction: SavedAction): Promise<Diff<{}>[]> {
+    return Array.from(ix.from(await getGameDiffs(db, savedAction)).pipe(
+        diffs.mapDiffs(gameToGamesForPlayer)
     ))
 }
 
-export function getGamesByPlayer1_0State(db: db.Database, ref: ReferenceGroup): ItemIterable<model1_0.PlayerGame> {
-    return ixa.from(getGameState(db, ref)).pipe(
-        util.filterNoneAsync(),
-        ixaop.flatMap(({ key, value }) => ixa.from(gameToPlayerGames1_0(key, value)))
-    )
-}
+// export async function getGameByPlayer1_0Diffs(
+//     db: db.Database, action: AnyAction,
+//     deps: Record<string, ReferenceGroup>): Promise<Diff<model1_0.PlayerGame>[]> {
+//     return Array.from(ix.from(await getGameDiffs(db, action, deps)).pipe(
+//         diffs.mapDiffs(gameToPlayerGames1_0)
+//     ))
+// }
+
+// export function getGamesByPlayer1_0State(db: db.Database, ref: ReferenceGroup): ItemIterable<model1_0.PlayerGame> {
+//     return ixa.from(getGameState(db, ref)).pipe(
+//         util.filterNoneAsync(),
+//         ixaop.flatMap(({ key, value }) => ixa.from(gameToPlayerGames1_0(key, value)))
+//     )
+// }
 
 
-export function getGamesByPlayer1_0Placement([playerId, gameId]: Key): string {
-    return `players/${playerId}/games-1.0/${gameId}`
-}
+// export function getGamesByPlayer1_0Placement([playerId, gameId]: Key): string {
+//     return `players/${playerId}/games-1.0/${gameId}`
+// }
 
 
-export function getGamesByPlayer1_1State(db: db.Database, ref: ReferenceGroup): ItemIterable<model1_1.PlayerGame> {
-    return ixa.from(getGameState(db, ref)).pipe(
-        util.filterNoneAsync(),
-        ixaop.flatMap(({ key, value }) => ixa.from(gameToPlayerGames1_1(key, value)))
-    )
-}
+// export function getGamesByPlayer1_1State(db: db.Database, ref: ReferenceGroup): ItemIterable<model1_1.PlayerGame> {
+//     return ixa.from(getGameState(db, ref)).pipe(
+//         util.filterNoneAsync(),
+//         ixaop.flatMap(({ key, value }) => ixa.from(gameToPlayerGames1_1(key, value)))
+//     )
+// }
 
-export function getGamesByPlayer1_1Placement([playerId, gameId]: Key): string {
-    return `players/${playerId}/games-1.1/${gameId}`
-}
+// export function getGamesByPlayer1_1Placement([playerId, gameId]: Key): string {
+//     return `players/${playerId}/games-1.1/${gameId}`
+// }
 
-export async function getGameByPlayer1_1Diffs(
-    db: db.Database, action: AnyAction,
-    deps: Record<string, ReferenceGroup>): Promise<Diff<model1_1.PlayerGame>[]> {
-    return Array.from(ix.from(await getGameDiffs(db, action, deps)).pipe(
-        diffs.mapDiffs(gameToPlayerGames1_1)
-    ))
-}
+// export async function getGameByPlayer1_1Diffs(
+//     db: db.Database, action: AnyAction,
+//     deps: Record<string, ReferenceGroup>): Promise<Diff<model1_1.PlayerGame>[]> {
+//     return Array.from(ix.from(await getGameDiffs(db, action, deps)).pipe(
+//         diffs.mapDiffs(gameToPlayerGames1_1)
+//     ))
+// }
 
 function getNewValue<T>(d: Diff<T>): Option<Item<T>> {
     switch (d.kind) {
@@ -172,7 +200,28 @@ function getNewValue<T>(d: Diff<T>): Option<Item<T>> {
 
 // }
 
-// export const REVISION: fw.Revision2<State> = {
+export type Errors = {
+    '1.0': Result<null, model1_0.Error>,
+    '1.1': Result<null, model1_1.Error>,
+}
+
+export const REVISION: fw.Integrator<Errors> = {
+    async getNeededReferenceIds(db: db.Database, anyAction: AnyAction): Promise<string[]> {
+        return [`games/${anyAction.gameId}`]
+    },
+
+    async integrate(db: db.Database, savedAction: SavedAction): Promise<fw.IntegrationResult<Errors>> {
+        const gameDiffs = await getGameDiffs(db, savedAction);
+        const gamesForPlayerDiffs = await getGamesForPlayerDiffs(db, savedAction);
+        const result = await getResult(db, savedAction);
+        return {
+            result,
+            impactedReferenceIds: [...gameDiffs.map(({ key }) => gameKeyToRefId(key)),
+            ...gamesForPlayerDiffs.map(({ key }) => gameForPlayerKeyToRefId(key)),
+            ]
+        }
+    }
+}
 //     id: '1.1.1',
 //     validateAnnotation: validate('Annotation2'),
 
@@ -460,5 +509,11 @@ function gameToPlayerGames1_0(key: Key, value: Game): Iterable<Item<model1_0.Pla
                 players: pg.players.map(p => p.id)
             })
         }),
+    );
+}
+
+function gameToGamesForPlayer([gameId]: Key, value: Game): Iterable<Item<{}>> {
+    return ix.from(value.players).pipe(
+        ixop.map(player => item([player.id, gameId], {}))
     );
 }

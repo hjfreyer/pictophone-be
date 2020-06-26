@@ -204,6 +204,15 @@ function gameToShortCodeFragments([gameId]: Key, game: Game): Item<{}>[] {
     return [{ key: [game.shortCode, gameId], value: {} }]
 }
 
+
+export async function getGameByPlayer1_0Diffs(
+    db: db.Database, actionId: string): Promise<Diff<model1_0.PlayerGame>[]> {
+    return Array.from(ix.from(await getGameDiffs(db, { kind: 'replay', actionId })).pipe(
+        diffs.mapDiffs(gameToPlayerGames1_0)
+    ))
+}
+
+
 function aggregateShortCodeFragments(fragments: Iterable<Item<{}>>): Iterable<Item<{}>> {
     return ix.from(fragments).pipe(
         ixop.groupBy(

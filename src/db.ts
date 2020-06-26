@@ -6,6 +6,8 @@ import * as ranges from './ranges';
 
 import * as ixaop from 'ix/asynciterable/operators';
 import * as ixa from "ix/asynciterable";
+import * as ixop from 'ix/iterable/operators';
+import * as ix from "ix/iterable";
 import { AsyncIterableX } from 'ix/asynciterable';
 import { Option, option } from './util';
 
@@ -167,4 +169,13 @@ export function parseDocPath(docPath: string): { schema: Key, key: Key } {
     key.reverse()
     schema.reverse()
     return { schema, key }
+}
+
+
+export function serializeDocPath(schema: Key, key: Key): string {
+    assert.equal(schema.length, key.length);
+    const interlaced = ix.zip(schema, key).pipe(
+        ixop.flatMap(segs => segs)
+    )
+    return join(...interlaced)
 }

@@ -1,6 +1,6 @@
 import * as db from './db'
 import {
-    AnyAction,
+    AnyAction, SavedAction,
 } from './model'
 import { Option } from './util'
 import { OptionData } from './util/option'
@@ -30,4 +30,14 @@ export interface Revision2<TState> {
 export interface IntegrationResult2<TState> {
     labels: string[]
     state: TState
+}
+
+export interface IntegrationResult<TResult> {
+    result: TResult
+    impactedReferenceIds: string[]
+}
+
+export interface Integrator<TResult> {
+    getNeededReferenceIds(db: db.Database, action: AnyAction): Promise<string[]>
+    integrate(db: db.Database, savedAction: SavedAction): Promise<IntegrationResult<TResult>>
 }

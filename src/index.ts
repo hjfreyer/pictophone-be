@@ -163,69 +163,71 @@ export async function getCurrentRefGroup(db: db.Database, refId: string): Promis
 
 function handleAction(action: AnyAction): Promise<Result<null, AnyError>> {
     return db.runTransaction(fsDb)(async (db: db.Database): Promise<Result<null, AnyError>> => {
-        const refIds = logic1_1_1.getNeededReferenceIds(action)
+        const refIds = await logic1_1_1.REVISION.getNeededReferenceIds(db, action)
 
         const parents: Record<string, ReferenceGroup> = {}
         for (const refId of refIds) {
             parents[refId] = await getCurrentRefGroup(db, refId)
         }
 
-        const gameDiffs = await logic1_1_1.getGameDiffs(db, action, parents);
-        const gamesByPlayer1_0Diffs = await logic1_1_1.getGameByPlayer1_0Diffs(db, action, parents);
-        const gamesByPlayer1_1Diffs = await logic1_1_1.getGameByPlayer1_1Diffs(db, action, parents);
+        // const gameDiffs = await logic1_1_1.getGameDiffs(db, action, parents);
+        // const gamesByPlayer1_0Diffs = await logic1_1_1.getGameByPlayer1_0Diffs(db, action, parents);
+        // const gamesByPlayer1_1Diffs = await logic1_1_1.getGameByPlayer1_1Diffs(db, action, parents);
 
-        for (const diff of gamesByPlayer1_0Diffs) {
-            const doc = db.db.doc(logic1_1_1.getGamesByPlayer1_0Placement(diff.key))
-            switch (diff.kind) {
-                case 'add':
-                    db.tx.set(doc, diff.value)
-                    break
-                case 'delete':
-                    db.tx.delete(doc)
-                    break
-                case 'replace':
-                    db.tx.set(doc, diff.newValue)
-                    break
-            }
-        }
-        for (const diff of gamesByPlayer1_1Diffs) {
-            const doc = db.db.doc(logic1_1_1.getGamesByPlayer1_1Placement(diff.key))
-            switch (diff.kind) {
-                case 'add':
-                    db.tx.set(doc, diff.value)
-                    break
-                case 'delete':
-                    db.tx.delete(doc)
-                    break
-                case 'replace':
-                    db.tx.set(doc, diff.newValue)
-                    break
-            }
-        }
+        // for (const diff of gamesByPlayer1_0Diffs) {
+        //     const doc = db.db.doc(logic1_1_1.getGamesByPlayer1_0Placement(diff.key))
+        //     switch (diff.kind) {
+        //         case 'add':
+        //             db.tx.set(doc, diff.value)
+        //             break
+        //         case 'delete':
+        //             db.tx.delete(doc)
+        //             break
+        //         case 'replace':
+        //             db.tx.set(doc, diff.newValue)
+        //             break
+        //     }
+        // }
+        // for (const diff of gamesByPlayer1_1Diffs) {
+        //     const doc = db.db.doc(logic1_1_1.getGamesByPlayer1_1Placement(diff.key))
+        //     switch (diff.kind) {
+        //         case 'add':
+        //             db.tx.set(doc, diff.value)
+        //             break
+        //         case 'delete':
+        //             db.tx.delete(doc)
+        //             break
+        //         case 'replace':
+        //             db.tx.set(doc, diff.newValue)
+        //             break
+        //     }
+        // }
 
-        console.log(JSON.stringify(gameDiffs, undefined, 2))
+        // console.log(JSON.stringify(gameDiffs, undefined, 2))
 
-        const refsToUpdate = ix.concat(
-            ix.from(gameDiffs).pipe(
-                ixop.map(({ key }) => logic1_1_1.gameKeyToRefId(key))),
-            ix.from(gamesByPlayer1_0Diffs).pipe(
-                ixop.map(({ key }) => logic1_1_1.gameByPlayer1_0KeyToRefId(key))),
-            ix.from(gamesByPlayer1_1Diffs).pipe(
-                ixop.map(({ key }) => logic1_1_1.gameByPlayer1_1KeyToRefId(key))),
-        ).pipe(
-            ixop.distinct()
-        )
+        // const refsToUpdate = ix.concat(
+        //     ix.from(gameDiffs).pipe(
+        //         ixop.map(({ key }) => logic1_1_1.gameKeyToRefId(key))),
+        //     ix.from(gamesByPlayer1_0Diffs).pipe(
+        //         ixop.map(({ key }) => logic1_1_1.gameByPlayer1_0KeyToRefId(key))),
+        //     ix.from(gamesByPlayer1_1Diffs).pipe(
+        //         ixop.map(({ key }) => logic1_1_1.gameByPlayer1_1KeyToRefId(key))),
+        // ).pipe(
+        //     ixop.distinct()
+        // )
 
         const savedAction: SavedAction = { parents, action };
         const actionId = getActionId(savedAction);
 
-        db.tx.set(db.db.doc(actionId), savedAction)
 
-        for (const refId of refsToUpdate) {
+        const res = await logic1_1_1.REVISION.integrate(db, savedAction)
+
+        db.tx.set(db.db.doc(actionId), savedAction)
+        for (const refId of res.impactedReferenceIds) {
             db.tx.set(db.db.doc(refId), { actionId })
         }
 
-        return result.ok(null)
+        return res.result[action.version]
     })
 }
 
@@ -647,86 +649,120 @@ function listGameRefs(db: db.Database): AsyncIterable<string> {
 }
 
 async function handleRefacet(): Promise<void> {
-    let cursor: string = '';
+    // let cursor: string = '';
+    // console.log('REPLAY')
+    // while (true) {
+    //     const nextActionOrNull = await getNextAction(db.runTransaction(fsDb), cursor);
+    //     if (nextActionOrNull === null) {
+    //         break;
+    //     }
+    //     const [actionId, savedAction] = nextActionOrNull;
+    //     await handleRefacetForAction(`actions/${actionId}`)
+
+    //     cursor = actionId;
+    // }
+    // console.log('DONE')
+}
+
+// function handleReexport(): Promise<void> {
+//     return db.runTransaction(fsDb)(async (db): Promise<void> => {
+//         for await (const refId of listGameRefs(db)) {
+//             const ref = await getCurrentRefGroup(db, refId);
+
+//             for await (const { key, value } of logic1_1_1.getGamesByPlayer1_0State(db, ref)) {
+//                 db.setRaw(logic1_1_1.getGamesByPlayer1_0Placement(key), value)
+//             }
+//             for await (const { key, value } of logic1_1_1.getGamesByPlayer1_1State(db, ref)) {
+//                 db.setRaw(logic1_1_1.getGamesByPlayer1_1Placement(key), value)
+//             }
+//         }
+//     });
+// }
+
+// async function handleCheck(): Promise<void> {
+//     for await (const docPath of listAllDocsExceptActions()) {
+//         await db.runTransaction(fsDb)(async d => {
+//             const { schema, key } = db.parseDocPath(docPath);
+//             if (deepEqual(schema, ['players', 'games-1.0'])) {
+//                 const value = option.from(await d.getRaw(docPath)).unwrap();
+//                 const refId = logic1_1_1.gameByPlayer1_0KeyToRefId(key)
+//                 const ref = await getCurrentRefGroup(d, refId);
+
+//                 const pgs = logic1_1_1.getGamesByPlayer1_0State(d, ref);
+//                 const item = await ixa.find(pgs, ({ key: itemKey }) => deepEqual(itemKey, key))
+
+//                 if (item === undefined) {
+//                     throw new Error(`unexpected row "${docPath}"`)
+//                 }
+//                 if (!deepEqual(item.value, value)) {
+//                     throw new Error(`diff at row "${docPath}"`)
+//                 }
+//             }
+//             if (deepEqual(schema, ['players', 'games-1.1'])) {
+//                 const value = option.from(await d.getRaw(docPath)).unwrap();
+//                 const refId = logic1_1_1.gameByPlayer1_1KeyToRefId(key)
+//                 const ref = await getCurrentRefGroup(d, refId);
+
+//                 const pgs = logic1_1_1.getGamesByPlayer1_1State(d, ref);
+//                 const item = await ixa.find(pgs, ({ key: itemKey }) => deepEqual(itemKey, key))
+
+//                 if (item === undefined) {
+//                     throw new Error(`unexpected row "${docPath}"`)
+//                 }
+
+//                 if (!deepEqual(item.value, value)) {
+//                     throw new Error(`diff at row "${docPath}"`)
+//                 }
+//             }
+//         })
+//     }
+// }
+
+async function getNextAction(startAfter: Option<string>): Promise<Option<[string, SavedAction]>> {
+    const snapshot = await option.from(startAfter)
+        .map(startAfter => fsDb
+            .collectionGroup('actions')
+            .orderBy(admin.firestore.FieldPath.documentId())
+            .startAfter(fsDb.doc(startAfter)))
+        .orElse(() => fsDb.collectionGroup('actions')
+            .orderBy(admin.firestore.FieldPath.documentId()))
+        .limit(1)
+        .get();
+
+    return snapshot.empty
+        ? option.none()
+        : option.some([snapshot.docs[0].ref.path,
+        validateSchema('SavedAction')(snapshot.docs[0].data())]);
+}
+
+async function handleCrossCheck(): Promise<void> {
+    let cursor: Option<string> = option.none();
     console.log('REPLAY')
     while (true) {
-        const nextActionOrNull = await getNextAction(db.runTransaction(fsDb), cursor);
-        if (nextActionOrNull === null) {
+        const maybeNextAction = await getNextAction(cursor);
+        if (!maybeNextAction.data.some) {
             break;
         }
-        const [actionId, savedAction] = nextActionOrNull;
-        await handleRefacetForAction(`actions/${actionId}`)
+        const [actionId, savedAction] = maybeNextAction.data.value;
+        // await handleCrossCheckForAction(actionId, savedAction)
 
-        cursor = actionId;
+        cursor = option.some(actionId);
     }
     console.log('DONE')
 }
 
-function handleReexport(): Promise<void> {
-    return db.runTransaction(fsDb)(async (db): Promise<void> => {
-        for await (const refId of listGameRefs(db)) {
-            const ref = await getCurrentRefGroup(db, refId);
+// function handleCrossCheckForAction(actionId: string, savedAction: SavedAction): Promise<void> {
+//     return db.runTransaction(fsDb)(async db => {
+//         const pg1_1_1_1_0 = await logic1_1_1.getGameByPlayer1_0Diffs(
+//             db, savedAction.action, savedAction.parents)
+//         const pg1_2_0_1_0 = await logic1_2_0.getGameByPlayer1_0Diffs(
+//             db, actionId)
+//         if (!deepEqual(pg1_1_1_1_0, pg1_2_0_1_0)) {
+//             throw new Error(`Diff at ${actionId}`)
+//         }
+//     })
+// }
 
-            for await (const { key, value } of logic1_1_1.getGamesByPlayer1_0State(db, ref)) {
-                db.setRaw(logic1_1_1.getGamesByPlayer1_0Placement(key), value)
-            }
-            for await (const { key, value } of logic1_1_1.getGamesByPlayer1_1State(db, ref)) {
-                db.setRaw(logic1_1_1.getGamesByPlayer1_1Placement(key), value)
-            }
-        }
-    });
-}
-
-async function handleCheck(): Promise<void> {
-    for await (const docPath of listAllDocsExceptActions()) {
-        await db.runTransaction(fsDb)(async d => {
-            const { schema, key } = db.parseDocPath(docPath);
-            if (deepEqual(schema, ['players', 'games-1.0'])) {
-                const value = option.from(await d.getRaw(docPath)).unwrap();
-                const refId = logic1_1_1.gameByPlayer1_0KeyToRefId(key)
-                const ref = await getCurrentRefGroup(d, refId);
-
-                const pgs = logic1_1_1.getGamesByPlayer1_0State(d, ref);
-                const item = await ixa.find(pgs, ({ key: itemKey }) => deepEqual(itemKey, key))
-
-                if (item === undefined) {
-                    throw new Error(`unexpected row "${docPath}"`)
-                }
-                if (!deepEqual(item.value, value)) {
-                    throw new Error(`diff at row "${docPath}"`)
-                }
-            }
-            if (deepEqual(schema, ['players', 'games-1.1'])) {
-                const value = option.from(await d.getRaw(docPath)).unwrap();
-                const refId = logic1_1_1.gameByPlayer1_1KeyToRefId(key)
-                const ref = await getCurrentRefGroup(d, refId);
-
-                const pgs = logic1_1_1.getGamesByPlayer1_1State(d, ref);
-                const item = await ixa.find(pgs, ({ key: itemKey }) => deepEqual(itemKey, key))
-
-                if (item === undefined) {
-                    throw new Error(`unexpected row "${docPath}"`)
-                }
-
-                if (!deepEqual(item.value, value)) {
-                    throw new Error(`diff at row "${docPath}"`)
-                }
-            }
-        })
-    }
-}
-
-function getNextAction(tx: db.TxRunner, startAfter: string): Promise<([string, SavedAction] | null)> {
-    return tx(async (db: db.Database): Promise<([string, SavedAction] | null)> => {
-        const actions = openAll(db)["ACTIONS"];
-        const first = await ixa.first(ixa.from(readables.readAllAfter(actions, [startAfter])));
-        if (first === undefined) {
-            return null;
-        }
-        const { key: [actionId], value: savedAction } = first;
-        return [actionId, savedAction];
-    });
-}
 
 app.options('/action', cors())
 app.post('/action', cors(), function(req: Request<Dictionary<string>>, res, next) {
@@ -740,6 +776,8 @@ app.post('/action', cors(), function(req: Request<Dictionary<string>>, res, next
         }
     }).catch(next)
 })
+
+
 
 
 app.get('/debug', cors(), function(req: Request<Dictionary<string>>, res, next) {
@@ -812,14 +850,21 @@ function batch(): Router {
             res.json(result)
         }).catch(next)
     })
-    res.post('/reexport', function(_req: Request<{}>, res, next) {
-        handleReexport().then(result => {
-            res.status(200)
-            res.json(result)
-        }).catch(next)
-    })
-    res.post('/check', function(_req: Request<{}>, res, next) {
-        handleCheck().then(result => {
+    // res.post('/reexport', function(_req: Request<{}>, res, next) {
+    //     handleReexport().then(result => {
+    //         res.status(200)
+    //         res.json(result)
+    //     }).catch(next)
+    // })
+    // res.post('/check', function(_req: Request<{}>, res, next) {
+    //     handleCheck().then(result => {
+    //         res.status(200)
+    //         res.json(result)
+    //     }).catch(next)
+    // })
+
+    res.post('/cross-check', function(_req: Request<{}>, res, next) {
+        handleCrossCheck().then(result => {
             res.status(200)
             res.json(result)
         }).catch(next)
