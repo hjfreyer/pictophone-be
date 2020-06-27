@@ -121,7 +121,6 @@ export const GAME: Table<Game> = {
 export const PLAYER_GAME1_1: Table<model1_1.PlayerGame> = {
     async getState(d: db.Database, key: Key, version: VersionSpec): Promise<Option<Item<model1_1.PlayerGame>>> {
         const preimageKey = GAME_TO_PLAYER_GAMES1_1.preimage(key)
-
         const pgs = ixa.from(GAME.getState(d, preimageKey, version)).pipe(
             util.filterNoneAsync(),
             diffs.mapItemsAsync(GAME_TO_PLAYER_GAMES1_1)
@@ -530,7 +529,7 @@ const GAME_TO_PLAYER_GAMES1_1: diffs.Mapper<Game, model1_1.PlayerGame> = {
         )
     },
 
-    preimage([gameId, playerId]: Key): Key {
+    preimage([playerId, gameId]: Key): Key {
         return [gameId]
     }
 }
