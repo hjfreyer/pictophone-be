@@ -114,8 +114,55 @@ export class OptionView<T> implements Option<T> {
         }
     }
 
-
     and<O>(other: Option<O>): OptionView<[T, O]> {
         return this.andThen(a => from(other).map(b => [a, b]))
     }
+
+    filter(pred: (t: T) => boolean): OptionView<T> {
+        return this.split({
+            onNone: () => none(),
+            onSome: (t) => {
+                if (pred(t)) {
+                    return some(t)
+                } else {
+                    return none()
+                }
+            }
+        })
+    }
+
+    narrow<U extends T>(pred: (t: T) => t is U): OptionView<U> {
+        return this.split({
+            onNone: () => none(),
+            onSome: (t) => {
+                if (pred(t)) {
+                    return some(t)
+                } else {
+                    return none()
+                }
+            }
+        })
+    }
+}
+
+export function fromIterable<T>(iter: Iterable<T>): Option<T> {
+    let res = none<T>();
+    for (const item of iter) {
+        if (res.data.some) {
+            throw new Error("Iterable had more than 1 item")
+        }
+        res = some(item)
+    }
+    return res
+}
+
+export async function fromAsyncIterable<T>(iter: AsyncIterable<T>): Promise<Option<T>> {
+    let res = none<T>();
+    for await (const item of iter) {
+        if (res.data.some) {
+            throw new Error("Iterable had more than 1 item")
+        }
+        res = some(item)
+    }
+    return res
 }

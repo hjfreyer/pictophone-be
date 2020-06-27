@@ -1,9 +1,9 @@
 
 import * as db from './db'
-import { Live, Diff, Change, Key, ItemIterable } from './interfaces'
+import { Live, Diff, Change, Key, ItemIterable, Item } from './interfaces'
 // import { validate } from './schema/interfaces.validator'
 import { AnyAction, AnyError, SavedAction } from './model';
-import { ReferenceGroup} from './model/base'
+import { VersionSpec } from './model/base'
 import { sha256 } from 'js-sha256';
 import _ from 'lodash';
 // import { Tables } from './schema';
@@ -94,10 +94,8 @@ export function diffToChange<T>(d: Diff<T>): Change<T> {
     }
 }
 
-export async function findItem<T>(items: ItemIterable<T>, key: Key): Promise<util.Option<T>> {
-    return util.option.of(await ixa.find(items, item => util.lexCompare(item.key, key) === 0)).map(
-        item => item.value
-    )
+export async function findItem<T>(items: ItemIterable<T>, key: Key): Promise<util.Option<Item<T>>> {
+    return util.option.of(await ixa.find(items, item => util.lexCompare(item.key, key) === 0))
 }
 
 const HASH_HEX_CHARS_LEN = (32 / 8) * 2;  // 32 bits of hash
@@ -141,20 +139,10 @@ function dateCmp(a: Date, b: Date): number {
     return 0
 }
 
-function* collectLeafs(rg: ReferenceGroup): Iterable<string> {
-    switch (rg.kind) {
-        case 'none':
-            return
-        case 'single':
-            yield rg.actionId
-            return
-        case 'collection':
-            for (const rg2 of Object.values(rg.members)) {
-                yield* collectLeafs(rg2)
-
-            }
-            return
-    }
+function collectLeafs(spec: VersionSpec): Iterable<string> {
+    return ix.from(Object.values(spec.docs)).pipe(
+        ixop.flatMap(doc => doc.exists ? [doc.actionId] : [])
+    )
 }
 
 export function getActionId(action: SavedAction): string {
@@ -162,8 +150,7 @@ export function getActionId(action: SavedAction): string {
     // should really be a particular serialization, but I'm not worrying
     // about that at the moment.
     const hashHex = sha256.hex(JSON.stringify(action));
-    const maxDate = maxBy(ix.from(Object.entries(action.parents)).pipe(
-        ixop.flatMap(([label, refGroup]) => collectLeafs(refGroup)),
+    const maxDate = maxBy(ix.from(collectLeafs(action.parents)).pipe(
         ixop.map(actionId => parseActionId(actionId)[0]),
     ), dateCmp)
 

@@ -38,6 +38,6 @@ export interface IntegrationResult<TResult> {
 }
 
 export interface Integrator<TResult> {
-    getNeededReferenceIds(db: db.Database, action: AnyAction): Promise<string[]>
+    getNeededReferenceIds(db: db.Database, action: AnyAction): Promise<{ docs: string[], collections: string[] }>
     integrate(db: db.Database, savedAction: SavedAction): Promise<IntegrationResult<TResult>>
 }

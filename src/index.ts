@@ -2,8 +2,8 @@ import { CollectionReference, DocumentReference, Firestore } from '@google-cloud
 import { strict as assert } from 'assert'
 import cors from 'cors'
 import deepEqual from 'deep-equal'
-import express, { Router } from 'express'
-import { Dictionary, Request } from 'express-serve-static-core'
+import express, { Router, NextFunction, Response } from 'express'
+import { Dictionary, Request, ParamsDictionary, Params, Query } from 'express-serve-static-core'
 import admin from 'firebase-admin'
 import produce from 'immer'
 import * as ixa from "ix/asynciterable"
@@ -27,7 +27,7 @@ import * as readables from './readables'
 //     // Reference
 // } from './schema'
 import { SavedAction, AnyAction, AnyError } from './model'
-import {ReferenceGroup,Pointer} from './model/base'
+import { VersionSpec, Pointer, DocVersionSpec, VersionSpecRequest } from './model/base'
 
 import { validate as validateSchema } from './model/index.validator'
 import * as util from './util'
@@ -41,7 +41,7 @@ import * as fw from './framework';
 import { OperatorAsyncFunction, OperatorFunction } from 'ix/interfaces'
 import { ResultData } from './util/result'
 import { dirname, basename } from 'path'
-import asyncHandler from 'express-async-handler';
+// import asyncHandler from 'express-async-handler';
 import { validate as validateBase } from './model/base.validator'
 
 
@@ -80,45 +80,69 @@ export interface Interface1_1 {
     playerGames: Item<model1_1.PlayerGame>[]
 }
 
+function asyncHandler<P extends Params = ParamsDictionary, ResBody = any, ReqBody = any, ReqQuery = Query>(
+    handler: express.RequestHandler<P, ResBody, ReqBody, ReqQuery>): express.RequestHandler<P, ResBody, ReqBody, ReqQuery> {
+    return (req: Request<P, ResBody, ReqBody, ReqQuery>, res: Response<ResBody>, next: NextFunction): any => {
+        const fnReturn = handler(req, res, next)
+        return Promise.resolve(fnReturn).catch(next)
+    }
+}
+
+function optionHandler<P extends Params = ParamsDictionary, ResBody = any, ReqBody = any, ReqQuery = Query>(
+    handler: (req: Request<P, ResBody, ReqBody, ReqQuery>) => Promise<Option<ResBody>>): express.RequestHandler<P, ResBody, ReqBody, ReqQuery> {
+    return asyncHandler(async (req, res, next): Promise<void> => {
+        const output = await handler(req);
+        option.from(output).split({
+            onSome: (output) => {
+                res.status(200)
+                res.json(output)
+            },
+            onNone: () => {
+                res.status(404)
+                res.json()
+            }
+        })
+    })
+}
+
+
 function compareInterfaces(expected: UnifiedInterface, actual: UnifiedInterface) {
     if (!deepEqual(expected, actual)) {
         console.log("skew between implementation versions: ", expected, actual)
     }
 }
 
-export async function getCurrentRefGroup(db: db.Database, refId: string): Promise<ReferenceGroup> {
-    if (refId.endsWith("/*")) {
-        const res: ReferenceGroup = {
-            kind: 'collection',
-            id: dirname(refId),
-            members: {},
-        }
 
-        const collection = await db.tx.get(db.db.collection(dirname(refId)));
+export async function getAction(db: db.Database, actionId: string): Promise<Option<SavedAction>> {
+    const data = await db.getRaw(actionId);
+    return option.from(data).map(validateSchema('SavedAction'))
+}
+
+export async function resolveVersionSpec(db: db.Database, { docs, collections }: VersionSpecRequest): Promise<VersionSpec> {
+    const res: VersionSpec = { docs: {}, collections: collections }
+    for (const docId of docs) {
+        res.docs[docId] = option.from(await db.getRaw(docId))
+            .map(validateBase('Pointer'))
+            .map<DocVersionSpec>(p => ({ exists: true, actionId: p.actionId }))
+            .orElse(() => ({ exists: false }))
+    }
+    for (const collectionId of collections) {
+        const collection = await db.tx.get(db.db.collection(collectionId));
         for (const doc of collection.docs) {
             const ptr = validateBase('Pointer')(doc.data())
-            res.members[doc.id] = {
-                kind: 'single',
+            res.docs[doc.ref.path] = {
+                exists: true,
                 actionId: ptr.actionId,
             }
         }
-        return res;
-    } else {
-        return option.from(await db.getRaw(refId))
-            .map(validateBase('Pointer'))
-            .map((p): ReferenceGroup => ({ kind: 'single', actionId: p.actionId }))
-            .orElse(() => ({ kind: 'none' }))
     }
+    return res;
 }
+
 
 function handleAction(action: AnyAction): Promise<Result<null, AnyError>> {
     return db.runTransaction(fsDb)(async (db: db.Database): Promise<Result<null, AnyError>> => {
-        const refIds = await logic1_1_1.REVISION.getNeededReferenceIds(db, action)
-
-        const parents: Record<string, ReferenceGroup> = {}
-        for (const refId of refIds) {
-            parents[refId] = await getCurrentRefGroup(db, refId)
-        }
+        const parents = await resolveVersionSpec(db, await logic1_1_1.REVISION.getNeededReferenceIds(db, action))
 
         const savedAction: SavedAction = (() => {
             switch (action.version) {
@@ -141,22 +165,22 @@ function handleAction(action: AnyAction): Promise<Result<null, AnyError>> {
     })
 }
 
-async function handleRefacetForAction(actionId: string): Promise<void> {
-    await db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
+// async function handleRefacetForAction(actionId: string): Promise<void> {
+//     await db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
 
-        const facetIds = await logic1_2_0.getAffectedFacets(db, { kind: 'replay', actionId })
-        for (const facetId of facetIds) {
-            const newPointer: Pointer = option.from(await db.getRaw(facetId))
-                .map(validateBase('Pointer'))
-                .map(ptr => ({
-                    actionId: ptr.actionId < actionId ? actionId : ptr.actionId
-                }))
-                .orElse(() => ({ actionId }))
+//         const facetIds = await logic1_2_0.getAffectedFacets(db, { kind: 'replay', actionId })
+//         for (const facetId of facetIds) {
+//             const newPointer: Pointer = option.from(await db.getRaw(facetId))
+//                 .map(validateBase('Pointer'))
+//                 .map(ptr => ({
+//                     actionId: ptr.actionId < actionId ? actionId : ptr.actionId
+//                 }))
+//                 .orElse(() => ({ actionId }))
 
-            db.tx.set(db.db.doc(facetId), newPointer);
-        }
-    })
-}
+//             db.tx.set(db.db.doc(facetId), newPointer);
+//         }
+//     })
+// }
 
 function listGameRefs(db: db.Database): AsyncIterable<string> {
     return ixa.from(db.tx.get(db.db.collection('games'))).pipe(
@@ -238,25 +262,16 @@ function v1_1(): Router {
     res.options('/players/:playerId/games', cors())
     res.get('/players/:playerId/games', cors(), asyncHandler(async (req, res, next) => {
         const pg = await db.runTransaction(fsDb)(db =>
-            logic1_1_1.handleGetGamesForPlayerRequest(db, req.params['playerId']))
+            logic1_1_1.handleGetGamesForPlayerRequest(db, [req.params['playerId']]))
         res.status(200)
         res.json(pg)
     }))
 
     res.options('/players/:playerId/games/:gameId', cors())
-    res.get('/players/:playerId/games/:gameId', cors(), asyncHandler(async (req, res, next) => {
-        const pg = await db.runTransaction(fsDb)(db =>
-            logic1_1_1.getPlayerGame1_1(db, req.params['playerId'], req.params['gameId']))
-        option.from(pg).split({
-            onSome: (pg) => {
-                res.status(200)
-                res.json(pg)
-            },
-            onNone: () => {
-                res.status(404)
-                res.json(pg)
-            }
-        })
+    res.get('/players/:playerId/games/:gameId', cors(), optionHandler(req => {
+        return db.runTransaction(fsDb)(
+            db => logic1_1_1.getLatestValue(
+                db, logic1_1_1.PLAYER_GAME1_1, [req.params['playerId'], req.params['gameId']]))
     }))
 
     return res

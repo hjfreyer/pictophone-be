@@ -1,13 +1,19 @@
 
-export type ReferenceGroup = {
-    kind: 'single'
+export interface VersionSpec {
+    docs: Record<string, DocVersionSpec>
+    collections: string[]
+}
+
+export type DocVersionSpec = {
+    exists: true
     actionId: string
 } | {
-    kind: 'collection'
-    id: string
-    members: Record<string, ReferenceGroup>
-} | {
-    kind: 'none'
+    exists: false
+}
+
+export interface VersionSpecRequest {
+    docs: string[]
+    collections: string[]
 }
 
 export interface Pointer {

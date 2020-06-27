@@ -741,7 +741,7 @@ export const Schema = {
             ],
             "type": "object"
         },
-        "Record<string,ReferenceGroup>": {
+        "Record<string,DocVersionSpec>": {
             "defaultProperties": [
             ],
             "description": "Construct a type with a set of properties K of type T",
@@ -868,7 +868,7 @@ export const Schema = {
                             ]
                         },
                         "parents": {
-                            "$ref": "#/definitions/Record<string,ReferenceGroup>"
+                            "$ref": "#/definitions/VersionSpec"
                         },
                         "version": {
                             "enum": [
@@ -990,7 +990,7 @@ export const Schema = {
                         ]
                     },
                     "parents": {
-                        "$ref": "#/definitions/Record<string,ReferenceGroup>"
+                        "$ref": "#/definitions/VersionSpec"
                     },
                     "version": {
                         "enum": [
@@ -1064,6 +1064,26 @@ export const Schema = {
                 "gameId",
                 "kind",
                 "playerId"
+            ],
+            "type": "object"
+        },
+        "VersionSpec": {
+            "defaultProperties": [
+            ],
+            "properties": {
+                "collections": {
+                    "items": {
+                        "type": "string"
+                    },
+                    "type": "array"
+                },
+                "docs": {
+                    "$ref": "#/definitions/Record<string,DocVersionSpec>"
+                }
+            },
+            "required": [
+                "collections",
+                "docs"
             ],
             "type": "object"
         }

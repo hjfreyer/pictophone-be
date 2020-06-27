@@ -172,10 +172,64 @@ export function parseDocPath(docPath: string): { schema: Key, key: Key } {
 }
 
 
+export interface CollectionPath {
+    schema: Key
+    key: Key
+    collectionId: string
+}
+export interface DocumentPath {
+    schema: Key
+    key: Key
+}
+
+export type ParsedPath = {
+    kind: 'collection',
+    schema: Key
+    key: Key
+    collectionId: string
+} | {
+    kind: 'doc'
+    schema: Key
+    key: Key
+}
+
+export function parsePath(path: string): ParsedPath {
+    const segments: Key = []
+    while (path !== '.') {
+        segments.push(basename(path))
+        path = dirname(path)
+    }
+    segments.reverse()
+    if (segments.length % 2 === 0) {
+        return {
+            kind: 'doc',
+            schema: segments.filter((_, idx) => idx % 2 === 0),
+            key: segments.filter((_, idx) => idx % 2 === 1),
+        }
+    } else {
+        return {
+            kind: 'collection',
+            schema: segments.slice(0, segments.length - 1).filter((_, idx) => idx % 2 === 0),
+            key: segments.filter((_, idx) => idx % 2 === 1),
+            collectionId: segments[segments.length - 1],
+        }
+    }
+}
+
+
 export function serializeDocPath(schema: Key, key: Key): string {
     assert.equal(schema.length, key.length);
     const interlaced = ix.zip(schema, key).pipe(
         ixop.flatMap(segs => segs)
     )
     return join(...interlaced)
+}
+
+
+export function serializeCollectionPath({ schema, key, collectionId }: CollectionPath): string {
+    assert.equal(schema.length, key.length);
+    const interlaced = ix.zip(schema, key).pipe(
+        ixop.flatMap(segs => segs)
+    )
+    return join(...interlaced, collectionId)
 }

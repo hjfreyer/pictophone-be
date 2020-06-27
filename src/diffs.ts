@@ -1,10 +1,12 @@
 
 import * as ix from "ix/iterable";
 import * as ixop from "ix/iterable/operators";
+import * as ixa from "ix/asynciterable";
+import * as ixaop from "ix/asynciterable/operators";
 import { Diff, Item, Key } from './interfaces';
 import * as util from './util';
 import deepEqual from "deep-equal";
-import { OperatorFunction } from "ix/interfaces";
+import * as ixi from "ix/interfaces";
 
 export class Diffs<T> {
     constructor(public diffs: Diff<T>[]) { }
@@ -87,18 +89,21 @@ export function from<T>(diffs: Iterable<Diff<T>>): Diffs<T> {
 export interface Mapper<I, O> {
     // Must be injective: input items with different keys must never produce 
     // output items with the same key.
-    (key: Key, value: I): Iterable<Item<O>>
+    map(key: Key, value: I): Iterable<Item<O>>
+
+    // Return the input key which could possibly produce outputKey. 
+    preimage(outputKey: Key): Key
 }
 
 function singleMap<I, O>(mapper: Mapper<I, O>, diff: Diff<I>): Iterable<Diff<O>> {
     const [oldMapped, newMapped] = (() => {
         switch (diff.kind) {
             case 'add':
-                return [[], mapper(diff.key, diff.value)]
+                return [[], mapper.map(diff.key, diff.value)]
             case 'delete':
-                return [mapper(diff.key, diff.value), []]
+                return [mapper.map(diff.key, diff.value), []]
             case 'replace':
-                return [mapper(diff.key, diff.oldValue), mapper(diff.key, diff.newValue)]
+                return [mapper.map(diff.key, diff.oldValue), mapper.map(diff.key, diff.newValue)]
         }
     })()
     type AgedItem = { age: 'old' | 'new', key: Key, value: O };
@@ -144,6 +149,29 @@ function singleMap<I, O>(mapper: Mapper<I, O>, diff: Diff<I>): Iterable<Diff<O>>
     )
 }
 
-export function mapDiffs<I, O>(mapper: Mapper<I, O>): OperatorFunction<Diff<I>, Diff<O>> {
+export function mapDiffs<I, O>(mapper: Mapper<I, O>): ixi.OperatorFunction<Diff<I>, Diff<O>> {
     return ixop.flatMap(d => ix.from(singleMap(mapper, d)))
 }
+
+export function mapItems<I, O>(mapper: Mapper<I, O>): ixi.OperatorFunction<Item<I>, Item<O>> {
+    return ixop.flatMap(({ key, value }) => mapper.map(key, value))
+}
+
+export function mapItemsAsync<I, O>(mapper: Mapper<I, O>): ixi.OperatorAsyncFunction<Item<I>, Item<O>> {
+    return ixaop.flatMap(({ key, value }) => ixa.from(mapper.map(key, value)))
+}
+
+export function composeMappers<A, B, C>(f: Mapper<A, B>, g: Mapper<B, C>): Mapper<A, C> {
+    return {
+        map(key: Key, value: A): Iterable<Item<C>> {
+            return ix.from(f.map(key, value)).pipe(
+                ixop.flatMap(({ key, value }) => g.map(key, value))
+            )
+        },
+
+        preimage(outputKey: Key): Key {
+            return f.preimage(g.preimage(outputKey))
+        }
+    }
+}
+
