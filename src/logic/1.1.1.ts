@@ -162,13 +162,13 @@ export const PLAYER_AND_GAME_TO_IN: Table<{}> = {
 
         return maybeGame
             .filter(({ value }) => value.players.some(p => p.id === playerId))
-            .map(({ key }) => item(key, {}))
+            .map(({ key: [itemGameId] }) => item([playerId, itemGameId], {}))
     }
 }
 
 async function PLAYER_AND_GAME_TO_IN_getDiffs(d: db.Database, savedAction: SavedAction): Promise<Diff<{}>[]> {
     return Array.from(ix.from(await getGameDiffs(d, savedAction)).pipe(
-        diffs.mapDiffs(GAME_TO_PLAYER_AND_GAME)
+        diffs.mapDiffs(GAME_TO_PLAYER_AND_GAME),
     ))
 }
 
@@ -183,7 +183,6 @@ export const PLAYER_TO_GAMES: Table<model1_1.GameList> = {
     },
     getState(d: db.Database, [playerId]: Key, version: VersionSpec): Promise<Option<Item<model1_1.GameList>>> {
         const playerGameVersions = getDocsInCollection(version, { schema: ['players'], key: [playerId], collectionId: 'games' })
-
         const gamesByPlayer = ixa.from(playerGameVersions).pipe(
             ixaop.map(([pgKey,]) => PLAYER_AND_GAME_TO_IN.getState(d, pgKey, version)),
             util.filterNoneAsync(),
