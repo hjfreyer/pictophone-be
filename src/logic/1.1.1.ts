@@ -15,7 +15,8 @@ import * as model1_1 from '../model/1.1';
 import { Error, Game, Action, MakeMoveAction } from '../model/1.1.1';
 import { validate } from '../model/1.1.1.validator';
 import { validate as validate1_1 } from '../model/1.1.validator';
-import { AnyAction, ReferenceGroup, SavedAction } from '../model';
+import { AnyAction, SavedAction } from '../model';
+import {ReferenceGroup} from '../model/base'
 import * as util from '../util';
 import { Defaultable, Option, option, Result, result } from '../util';
 import { OptionData } from '../util/option';
@@ -23,6 +24,7 @@ import deepEqual from 'deep-equal';
 import { UnifiedInterface } from '..';
 import { validate as validateSchema } from '../model/index.validator'
 import { dirname } from 'path';
+import { validate as validateBase } from '../model/base.validator'
 
 
 
@@ -46,7 +48,7 @@ export async function getCurrentRefGroup(db: db.Database, refId: string): Promis
 
         const collection = await db.tx.get(db.db.collection(dirname(refId)));
         for (const doc of collection.docs) {
-            const ptr = validateSchema('Pointer')(doc.data())
+            const ptr = validateBase('Pointer')(doc.data())
             res.members[doc.id] = {
                 kind: 'single',
                 actionId: ptr.actionId,
@@ -55,7 +57,7 @@ export async function getCurrentRefGroup(db: db.Database, refId: string): Promis
         return res;
     } else {
         return option.from(await db.getRaw(refId))
-            .map(validateSchema('Pointer'))
+            .map(validateBase('Pointer'))
             .map((p): ReferenceGroup => ({ kind: 'single', actionId: p.actionId }))
             .orElse(() => ({ kind: 'none' }))
     }

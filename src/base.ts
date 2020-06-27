@@ -2,7 +2,8 @@
 import * as db from './db'
 import { Live, Diff, Change, Key, ItemIterable } from './interfaces'
 // import { validate } from './schema/interfaces.validator'
-import { AnyAction, AnyError, SavedAction, ReferenceGroup } from './model';
+import { AnyAction, AnyError, SavedAction } from './model';
+import { ReferenceGroup} from './model/base'
 import { sha256 } from 'js-sha256';
 import _ from 'lodash';
 // import { Tables } from './schema';

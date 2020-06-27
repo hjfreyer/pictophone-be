@@ -1,5 +1,6 @@
 // Base
 
+import {ReferenceGroup} from './base';
 import { Action as Action1_0, Error as Error1_0 } from './1.0'
 import { Action as Action1_1, Error as Error1_1 } from './1.1'
 import { Action as Action1_2, Error as Error1_2 } from './1.2'
@@ -25,19 +26,4 @@ export type SavedAction = {
     //     version: '1.2'
     //     action: Action1_2
     //     parents: Record<string, ReferenceGroup>    
-}
-
-export type ReferenceGroup = {
-    kind: 'single'
-    actionId: string
-} | {
-    kind: 'collection'
-    id: string
-    members: Record<string, ReferenceGroup>
-} | {
-    kind: 'none'
-}
-
-export interface Pointer {
-    actionId: string
 }

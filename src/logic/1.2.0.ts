@@ -23,12 +23,13 @@ import { OptionData, OptionView } from '../util/option';
 import { ResultView } from '../util/result';
 import deepEqual from 'deep-equal';
 import { UnifiedInterface } from '..';
-import { ReferenceGroup } from '../model';
+import { validate as validateBase } from '../model/base.validator'
 import { validate as validateSchema } from '../model/index.validator'
 import * as readables from '../readables';
 import admin from 'firebase-admin'
 import { strict as assert } from 'assert';
 import { dirname } from 'path';
+import {ReferenceGroup} from '../model/base'
 
 
 type MaybeLiveAction = {
@@ -98,7 +99,7 @@ export async function getParents(db: db.Database, action: MaybeLiveAction, facet
 
             const collection = await db.tx.get(db.db.collection(dirname(facetId)));
             for (const doc of collection.docs) {
-                const ptr = validateSchema('Pointer')(doc.data())
+                const ptr = validateBase('Pointer')(doc.data())
                 res.members[doc.id] = {
                     kind: 'single',
                     actionId: ptr.actionId,
@@ -107,7 +108,7 @@ export async function getParents(db: db.Database, action: MaybeLiveAction, facet
             return res;
         } else {
             return option.from(await db.getRaw(facetId))
-                .map(validateSchema('Pointer'))
+                .map(validateBase('Pointer'))
                 .map((p): ReferenceGroup => ({ kind: 'single', actionId: p.actionId }))
                 .orElse(() => ({ kind: 'none' }))
         }

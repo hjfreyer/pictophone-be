@@ -26,7 +26,9 @@ import * as readables from './readables'
 //     // deleteTable,
 //     // Reference
 // } from './schema'
-import { SavedAction, AnyAction, AnyError, ReferenceGroup, Pointer } from './model'
+import { SavedAction, AnyAction, AnyError } from './model'
+import {ReferenceGroup,Pointer} from './model/base'
+
 import { validate as validateSchema } from './model/index.validator'
 import * as util from './util'
 import { Defaultable, defaultable, Option, option, Result, result } from './util'
@@ -40,6 +42,8 @@ import { OperatorAsyncFunction, OperatorFunction } from 'ix/interfaces'
 import { ResultData } from './util/result'
 import { dirname, basename } from 'path'
 import asyncHandler from 'express-async-handler';
+import { validate as validateBase } from './model/base.validator'
+
 
 admin.initializeApp({
     credential: admin.credential.applicationDefault()
@@ -92,7 +96,7 @@ export async function getCurrentRefGroup(db: db.Database, refId: string): Promis
 
         const collection = await db.tx.get(db.db.collection(dirname(refId)));
         for (const doc of collection.docs) {
-            const ptr = validateSchema('Pointer')(doc.data())
+            const ptr = validateBase('Pointer')(doc.data())
             res.members[doc.id] = {
                 kind: 'single',
                 actionId: ptr.actionId,
@@ -101,7 +105,7 @@ export async function getCurrentRefGroup(db: db.Database, refId: string): Promis
         return res;
     } else {
         return option.from(await db.getRaw(refId))
-            .map(validateSchema('Pointer'))
+            .map(validateBase('Pointer'))
             .map((p): ReferenceGroup => ({ kind: 'single', actionId: p.actionId }))
             .orElse(() => ({ kind: 'none' }))
     }
@@ -143,7 +147,7 @@ async function handleRefacetForAction(actionId: string): Promise<void> {
         const facetIds = await logic1_2_0.getAffectedFacets(db, { kind: 'replay', actionId })
         for (const facetId of facetIds) {
             const newPointer: Pointer = option.from(await db.getRaw(facetId))
-                .map(validateSchema('Pointer'))
+                .map(validateBase('Pointer'))
                 .map(ptr => ({
                     actionId: ptr.actionId < actionId ? actionId : ptr.actionId
                 }))
