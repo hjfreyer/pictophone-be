@@ -1,48 +1,28 @@
-import { CollectionReference, DocumentReference, Firestore } from '@google-cloud/firestore'
-import { strict as assert } from 'assert'
+import { DocumentReference, Firestore } from '@google-cloud/firestore'
 import cors from 'cors'
 import deepEqual from 'deep-equal'
-import express, { Router, NextFunction, Response } from 'express'
-import { Dictionary, Request, ParamsDictionary, Params, Query } from 'express-serve-static-core'
+import express, { NextFunction, Response, Router } from 'express'
+import { Params, ParamsDictionary, Query, Request } from 'express-serve-static-core'
 import admin from 'firebase-admin'
-import produce from 'immer'
 import * as ixa from "ix/asynciterable"
-import * as ix from "ix/iterable"
-import * as ixop from "ix/iterable/operators"
 import * as ixaop from "ix/asynciterable/operators"
-import { applyChangesSimple, diffToChange, getActionId } from './base'
+import { getActionId } from './base'
 import * as db from './db'
-import * as diffs from './diffs'
-import { Change, Diff, Item, item, Key } from './interfaces'
+import { Item, Key } from './interfaces'
+import * as logic1_1_1 from './logic/1.1.1'
+import { AnyAction, AnyError, SavedAction } from './model'
 import * as model1_0 from './model/1.0'
 import { validate as validate1_0 } from './model/1.0.validator'
 import * as model1_1 from './model/1.1'
-import * as state1_1_1 from './model/1.1.1'
 import { validate as validate1_1_1 } from './model/1.1.1.validator'
 import { validate as validate1_1 } from './model/1.1.validator'
-import * as readables from './readables'
-// import {
-//     //AnyAction, AnyError, CollectionId,
-//     // deleteTable,
-//     // Reference
-// } from './schema'
-import { SavedAction, AnyAction, AnyError } from './model'
-import { VersionSpec, Pointer, DocVersionSpec, VersionSpecRequest } from './model/base'
-
+import { DocVersionSpec, VersionSpec, VersionSpecRequest } from './model/base'
+import { validate as validateBase } from './model/base.validator'
 import { validate as validateSchema } from './model/index.validator'
 import * as util from './util'
-import { Defaultable, defaultable, Option, option, Result, result } from './util'
-import { OptionData } from './util/option'
-// import { REVISION as REVISION1_1_1 } from './logic/1.1.1'
-// import { REVISION as REVISION1_2_0 } from './logic/1.2.0'
-import * as logic1_1_1 from './logic/1.1.1'
-import * as logic1_2_0 from './logic/1.2.0'
-import * as fw from './framework';
-import { OperatorAsyncFunction, OperatorFunction } from 'ix/interfaces'
+import { Option, option, Result } from './util'
 import { ResultData } from './util/result'
-import { dirname, basename } from 'path'
-// import asyncHandler from 'express-async-handler';
-import { validate as validateBase } from './model/base.validator'
+
 
 
 admin.initializeApp({
@@ -139,6 +119,15 @@ export async function resolveVersionSpec(db: db.Database, { docs, collections }:
     return res;
 }
 
+export interface Table<T> {
+    getLatestVersionRequest(d: db.Database, key: Key): Promise<VersionSpecRequest>
+    getState(d: db.Database, key: Key, version: VersionSpec): Promise<Option<Item<T>>>
+}
+
+export async function getLatestValue<T>(d: db.Database, table: Table<T>, key: Key): Promise<Option<T>> {
+    const version = await resolveVersionSpec(d, await table.getLatestVersionRequest(d, key))
+    return option.from(await table.getState(d, key, version)).map(item => item.value)
+}
 
 function handleAction(action: AnyAction): Promise<Result<null, AnyError>> {
     return db.runTransaction(fsDb)(async (db: db.Database): Promise<Result<null, AnyError>> => {
@@ -239,6 +228,20 @@ function v1_0(): Router {
         }).catch(next)
     })
 
+    res.options('/players/:playerId/games', cors())
+    res.get('/players/:playerId/games', cors(), optionHandler(req => {
+        return db.runTransaction(fsDb)(
+            db => getLatestValue(
+                db, logic1_1_1.PLAYER_TO_GAMES, [req.params['playerId']]))
+    }))
+
+    res.options('/players/:playerId/games/:gameId', cors())
+    res.get('/players/:playerId/games/:gameId', cors(), optionHandler(req => {
+        return db.runTransaction(fsDb)(
+            db => getLatestValue(
+                db, logic1_1_1.PLAYER_GAME1_1, [req.params['playerId'], req.params['gameId']]))
+    }))
+
     return res
 }
 
@@ -260,17 +263,16 @@ function v1_1(): Router {
     })
 
     res.options('/players/:playerId/games', cors())
-    res.get('/players/:playerId/games', cors(), asyncHandler(async (req, res, next) => {
-        const pg = await db.runTransaction(fsDb)(db =>
-            logic1_1_1.handleGetGamesForPlayerRequest(db, [req.params['playerId']]))
-        res.status(200)
-        res.json(pg)
+    res.get('/players/:playerId/games', cors(), optionHandler(req => {
+        return db.runTransaction(fsDb)(
+            db => getLatestValue(
+                db, logic1_1_1.PLAYER_TO_GAMES, [req.params['playerId']]))
     }))
 
     res.options('/players/:playerId/games/:gameId', cors())
     res.get('/players/:playerId/games/:gameId', cors(), optionHandler(req => {
         return db.runTransaction(fsDb)(
-            db => logic1_1_1.getLatestValue(
+            db => getLatestValue(
                 db, logic1_1_1.PLAYER_GAME1_1, [req.params['playerId'], req.params['gameId']]))
     }))
 
@@ -285,7 +287,6 @@ app.use('/batch', batch())
 type DeleteCollectionRequest = {
     collectionId: string
 }
-
 
 function listAllDocsExceptActions(): AsyncIterable<string> {
     const expandDocRef = (docRef: Option<DocumentReference>): AsyncIterable<Option<DocumentReference>> => {
@@ -310,7 +311,6 @@ function listAllDocsExceptActions(): AsyncIterable<string> {
         ixaop.map(docRef => docRef.path)
     )
 }
-
 
 async function handlePurge(): Promise<void> {
     for await (const docPath of listAllDocsExceptActions()) {

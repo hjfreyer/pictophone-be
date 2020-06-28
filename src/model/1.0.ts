@@ -128,3 +128,7 @@ export type ExportedSeriesEntry = {
 }
 
 export type PlayerGame = BoringPlayerGame | RespondToPromptPlayerGame | FinishedPlayerGame
+
+export interface GameList {
+    gameIds: string[]
+}
