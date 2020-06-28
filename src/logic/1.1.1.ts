@@ -4,8 +4,8 @@ import * as ixa from "ix/asynciterable";
 import * as ixaop from "ix/asynciterable/operators";
 import * as ix from "ix/iterable";
 import * as ixop from "ix/iterable/operators";
-import { getAction, Table } from '..';
-import { findItem } from '../base';
+import { getAction, Table, Errors } from '..';
+import { findItemAsync, getNewValue, getDocsInCollection } from '../base';
 import * as db from '../db';
 import * as diffs from '../diffs';
 import * as fw from '../framework';
@@ -31,7 +31,7 @@ async function getResult(db: db.Database, savedAction: SavedAction): Promise<Err
     }
 }
 
- async function getGameDiffs(db: db.Database, savedAction: SavedAction): Promise<Diff<Game>[]> {
+async function getGameDiffs(db: db.Database, savedAction: SavedAction): Promise<Diff<Game>[]> {
     const { gameId } = savedAction.action;
     const oldGameItem = await GAME.getState(db, [gameId], savedAction.parents);
     const oldGame = option.from(oldGameItem).map(item => item.value)
@@ -45,7 +45,7 @@ async function getResult(db: db.Database, savedAction: SavedAction): Promise<Err
 
 
 
- const GAME: Table<Game> = {
+const GAME: Table<Game> = {
     async getState(d: db.Database, [gameId]: Key, version: VersionSpec): Promise<Option<Item<Game>>> {
         const docVersion = option.of(version.docs[db.serializeDocPath(['games'], [gameId])]).unwrap();
         if (!docVersion.exists) {
@@ -77,7 +77,7 @@ export const PLAYER_GAME1_1: Table<model1_1.PlayerGame> = {
             diffs.mapItemsAsync(GAME_TO_PLAYER_GAMES1_1)
         )
 
-        return await findItem(pgs, key)
+        return await findItemAsync(pgs, key)
     },
 
     async getLatestVersionRequest(_d: db.Database, key: Key): Promise<VersionSpecRequest> {
@@ -90,7 +90,7 @@ export const PLAYER_GAME1_1: Table<model1_1.PlayerGame> = {
     }
 }
 
- const PLAYER_AND_GAME_TO_IN: Table<{}> = {
+const PLAYER_AND_GAME_TO_IN: Table<{}> = {
     async getLatestVersionRequest(_d: db.Database, key: Key): Promise<VersionSpecRequest> {
         return {
             docs: [
@@ -164,18 +164,6 @@ export const PLAYER_TO_GAMES: Table<model1_1.GameList> = {
 //     )
 // }
 
-function getDocsInCollection(version: VersionSpec, collection: db.CollectionPath): Iterable<[Key, DocVersionSpec]> {
-    const collectionPath = db.serializeCollectionPath(collection);
-    if (version.collections.indexOf(collectionPath) === -1) {
-        throw new Error("bad version")
-    }
-
-    return ix.from(Object.entries(version.docs)).pipe(
-        // TODO: brittle
-        ixop.filter(([docId,]) => docId.startsWith(collectionPath + '/')),
-        ixop.map(([docId, version]) => [db.parseDocPath(docId).key, version])
-    )
-}
 
 
 //  async function getGameByPlayer1_0Diffs(
@@ -218,16 +206,6 @@ function getDocsInCollection(version: VersionSpec, collection: db.CollectionPath
 //     ))
 // }
 
-function getNewValue<T>(d: Diff<T>): Option<Item<T>> {
-    switch (d.kind) {
-        case "add":
-            return option.some(item(d.key, d.value))
-        case "delete":
-            return option.none()
-        case "replace":
-            return option.some(item(d.key, d.newValue))
-    }
-}
 
 //  async function GAME.getState(db : db.Database, rg: ReferenceGroup, [gameId]:Key): Promise<Option<Game>> {
 //     if (rg.kind === 'none') {
@@ -240,14 +218,12 @@ function getNewValue<T>(d: Diff<T>): Option<Item<T>> {
 
 // }
 
-export type Errors = {
-    '1.0': Result<null, model1_0.Error>,
-    '1.1': Result<null, model1_1.Error>,
-}
-
 export const REVISION: fw.Integrator<Errors> = {
     async getNeededReferenceIds(_db: db.Database, anyAction: AnyAction): Promise<VersionSpecRequest> {
-        return { docs: [`games/${anyAction.action.gameId}`], collections: [] }
+        return {
+            docs: [db.serializeDocPath(['games'], [anyAction.action.gameId])],
+            collections: []
+        }
     },
 
     async integrate(d: db.Database, savedAction: SavedAction): Promise<fw.IntegrationResult<Errors>> {

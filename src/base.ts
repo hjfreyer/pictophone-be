@@ -1,9 +1,9 @@
 
 import * as db from './db'
-import { Live, Diff, Change, Key, ItemIterable, Item } from './interfaces'
+import { Live, Diff, Change, Key, ItemIterable, Item, item } from './interfaces'
 // import { validate } from './schema/interfaces.validator'
 import { AnyAction, AnyError, SavedAction } from './model';
-import { VersionSpec } from './model/base'
+import { VersionSpec, DocVersionSpec } from './model/base'
 import { sha256 } from 'js-sha256';
 import _ from 'lodash';
 // import { Tables } from './schema';
@@ -14,7 +14,7 @@ import * as ix from "ix/iterable"
 import * as ixop from "ix/iterable/operators"
 import * as readables from './readables'
 import { basename } from 'path';
-
+import { Option, option } from './util'
 
 // export function validateLive<T>(validator: (u: unknown) => T): (u: unknown) => Live<T> {
 //     return (outerUnknown: unknown): Live<T> => {
@@ -94,7 +94,11 @@ export function diffToChange<T>(d: Diff<T>): Change<T> {
     }
 }
 
-export async function findItem<T>(items: ItemIterable<T>, key: Key): Promise<util.Option<Item<T>>> {
+export function findItem<T>(items: Iterable<Item<T>>, key: Key): Option<Item<T>> {
+    return option.of(ix.find(items, item => util.lexCompare(item.key, key) === 0))
+}
+
+export async function findItemAsync<T>(items: ItemIterable<T>, key: Key): Promise<util.Option<Item<T>>> {
     return util.option.of(await ixa.find(items, item => util.lexCompare(item.key, key) === 0))
 }
 
@@ -161,4 +165,28 @@ export function getActionId(action: SavedAction): string {
         now = new Date();
     }
     return `games/${action.action.gameId}/actions/${serializeActionId(now, hashHex)}`;
+}
+
+export function getNewValue<T>(d: Diff<T>): Option<Item<T>> {
+    switch (d.kind) {
+        case "add":
+            return option.some(item(d.key, d.value))
+        case "delete":
+            return option.none()
+        case "replace":
+            return option.some(item(d.key, d.newValue))
+    }
+}
+
+export function getDocsInCollection(version: VersionSpec, collection: db.CollectionPath): Iterable<[Key, DocVersionSpec]> {
+    const collectionPath = db.serializeCollectionPath(collection);
+    if (version.collections.indexOf(collectionPath) === -1) {
+        throw new Error("bad version")
+    }
+
+    return ix.from(Object.entries(version.docs)).pipe(
+        // TODO: brittle
+        ixop.filter(([docId,]) => docId.startsWith(collectionPath + '/')),
+        ixop.map(([docId, version]) => [db.parseDocPath(docId).key, version])
+    )
 }

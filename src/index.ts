@@ -129,6 +129,11 @@ export async function getLatestValue<T>(d: db.Database, table: Table<T>, key: Ke
     return option.from(await table.getState(d, key, version)).map(item => item.value)
 }
 
+export type Errors = {
+    '1.0': Result<null, model1_0.Error>,
+    '1.1': Result<null, model1_1.Error>,
+}
+
 function handleAction(action: AnyAction): Promise<Result<null, AnyError>> {
     return db.runTransaction(fsDb)(async (db: db.Database): Promise<Result<null, AnyError>> => {
         const parents = await resolveVersionSpec(db, await logic1_1_1.REVISION.getNeededReferenceIds(db, action))
