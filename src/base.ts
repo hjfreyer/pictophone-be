@@ -149,6 +149,12 @@ function collectLeafs(spec: VersionSpec): Iterable<string> {
     )
 }
 
+export function compareActionIds(a: string, b: string): number {
+    const dateA = parseActionId(a)[0];
+    const dateB = parseActionId(b)[0];
+    return dateCmp(dateA, dateB);
+}
+
 export function getActionId(action: SavedAction): string {
     // TODO: JSON.stringify isn't deterministic, so what's saved in the DB
     // should really be a particular serialization, but I'm not worrying

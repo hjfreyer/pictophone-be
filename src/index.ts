@@ -6,7 +6,7 @@ import { Params, ParamsDictionary, Query, Request } from 'express-serve-static-c
 import admin from 'firebase-admin'
 import * as ixa from "ix/asynciterable"
 import * as ixaop from "ix/asynciterable/operators"
-import { getActionId, findItemAsync } from './base'
+import { getActionId, findItemAsync, compareActionIds } from './base'
 import * as db from './db'
 import { Item, Key, ItemIterable } from './interfaces'
 import * as logic1_1_1 from './logic/1.1.1'
@@ -16,7 +16,7 @@ import { validate as validate1_0 } from './model/1.0.validator'
 import * as model1_1 from './model/1.1'
 import { validate as validate1_1_1 } from './model/1.1.1.validator'
 import { validate as validate1_1 } from './model/1.1.validator'
-import { DocVersionSpec, VersionSpec, VersionSpecRequest } from './model/base'
+import { DocVersionSpec, VersionSpec, VersionSpecRequest, Pointer } from './model/base'
 import { validate as validateBase } from './model/base.validator'
 import { validate as validateSchema } from './model/index.validator'
 import * as util from './util'
@@ -174,22 +174,95 @@ function handleAction(action: AnyAction): Promise<Result<null, AnyError>> {
     })
 }
 
-// async function handleRefacetForAction(actionId: string): Promise<void> {
-//     await db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
+async function handleBackfillDocs(): Promise<void> {
+    let cursor: Option<string> = option.none();
+    console.log('BACKFILL DOCS')
+    while (true) {
+        const maybeNextAction = await getNextAction(cursor);
+        if (!maybeNextAction.data.some) {
+            break;
+        }
+        const [actionId, savedAction] = maybeNextAction.data.value;
+        await backfillDocsForAction(actionId, savedAction)
 
-//         const facetIds = await logic1_2_0.getAffectedFacets(db, { kind: 'replay', actionId })
-//         for (const facetId of facetIds) {
-//             const newPointer: Pointer = option.from(await db.getRaw(facetId))
-//                 .map(validateBase('Pointer'))
-//                 .map(ptr => ({
-//                     actionId: ptr.actionId < actionId ? actionId : ptr.actionId
-//                 }))
-//                 .orElse(() => ({ actionId }))
+        cursor = option.some(actionId);
+    }
+    console.log('DONE')
+}
 
-//             db.tx.set(db.db.doc(facetId), newPointer);
-//         }
-//     })
-// }
+async function backfillDocsForAction(actionId: string, savedAction: SavedAction): Promise<void> {
+    await db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
+        const { impactedReferenceIds } = await logic1_1_1.REVISION.integrate(db, savedAction)
+
+        for (const refId of impactedReferenceIds) {
+            const newPointer: Pointer = option.from(await db.getRaw(refId))
+                .map(validateBase('Pointer'))
+                .map(ptr => ({
+                    actionId: compareActionIds(ptr.actionId, actionId) < 0 ? actionId : ptr.actionId
+                }))
+                .orElse(() => ({ actionId }))
+
+            db.tx.set(db.db.doc(refId), newPointer);
+        }
+    })
+}
+
+
+async function handleCheck(): Promise<void> {
+    console.log('CHECK')
+    for await (const docPath of listAllDocsExceptActions()) {
+        console.log('CHECKING', docPath)
+        await checkDoc(docPath)
+    }
+}
+
+async function checkDoc(docPath: string): Promise<void> {
+    const { schema } = db.parseDocPath(docPath)
+    if (util.lexCompare(schema, ['games']) === 0) {
+        await db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
+            const maybeDoc = option.from(await db.getRaw(docPath))
+                .map(validateBase('Pointer'));
+            if (!maybeDoc.data.some) {
+                return
+            }
+            const { actionId } = maybeDoc.data.value;
+            const savedAction = option.from(await getAction(db, actionId)).unwrap()
+            const { impactedReferenceIds } = await logic1_1_1.REVISION.integrate(db, savedAction)
+            if (!impactedReferenceIds.includes(docPath)) {
+                throw new Error(`Incorrect pointer at ${JSON.stringify(docPath)}`)
+            }
+
+            const collections = (await logic1_1_1.getCollections(db, savedAction))[docPath];
+            for (const collectionPath of collections) {
+                db.tx.set(db.db.doc(collectionPath), {
+                    members: admin.firestore.FieldValue.arrayUnion(docPath)
+                }, { merge: true })
+            }
+        })
+    }
+    if (util.lexCompare(schema, ['players-to-games']) === 0) {
+        await db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
+            const maybeDoc = option.from(await db.getRaw(docPath))
+                .map(validateBase('Kollection'))
+            if (!maybeDoc.data.some) {
+                return
+            }
+            const { members } = maybeDoc.data.value;
+            for (const memberDocPath of members) {
+                const { actionId } = option.from(await db.getRaw(memberDocPath))
+                    .map(validateBase('Pointer'))
+                    .unwrap()
+
+                const savedAction = option.from(await getAction(db, actionId)).unwrap()
+                const collections = (await logic1_1_1.getCollections(db, savedAction))[memberDocPath];
+                if (!collections.includes(docPath)) {
+                    throw new Error(`Doc ${JSON.stringify(memberDocPath)} is incorrectly marked as a member of ${docPath}`)
+                }
+            }
+        })
+    }
+}
+
 
 function listGameRefs(db: db.Database): AsyncIterable<string> {
     return ixa.from(db.tx.get(db.db.collection('games'))).pipe(
@@ -316,8 +389,7 @@ function listAllDocsExceptActions(): AsyncIterable<string> {
             ixaop.flatMap(collections => ixa.from(collections)),
             // Never purge the "actions" collection.
             ixaop.filter(colRef => colRef.id !== 'actions'),
-            ixaop.map(colRef => colRef.listDocuments()),
-            ixaop.flatMap(docs => ixa.from(docs)),
+            ixaop.flatMap(async colRef => ixa.from(await colRef.listDocuments())),
             ixaop.map(option.some),
         )
     }
@@ -349,18 +421,18 @@ function batch(): Router {
         }).catch(next)
     })
 
-    // res.post('/reexport', function(req: Request<{}>, res, next) {
-    //     FRAMEWORK.handleReexport().then(result => {
-    //         res.status(200)
-    //         res.json(result)
-    //     }).catch(next)
-    // })
-    // res.post('/check', function(req: Request<{}>, res, next) {
-    //     FRAMEWORK.handleCheck().then(result => {
-    //         res.status(200)
-    //         res.json(result)
-    //     }).catch(next)
-    // })
+    res.post('/backfill-docs', function(req: Request<{}>, res, next) {
+        handleBackfillDocs().then(result => {
+            res.status(200)
+            res.json(result)
+        }).catch(next)
+    })
+    res.post('/check', function(req: Request<{}>, res, next) {
+        handleCheck().then(result => {
+            res.status(200)
+            res.json(result)
+        }).catch(next)
+    })
     res.post('/purge', function(_req: Request<{}>, res, next) {
         handlePurge().then(result => {
             res.status(200)

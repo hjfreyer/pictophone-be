@@ -300,6 +300,27 @@ export const REVISION: fw.Integrator<Errors> = {
     }
 }
 
+export async function getCollections(d: db.Database, savedAction: SavedAction): Promise<Record<string, string[]>> {
+    const gameDiffs = await getGameDiffs(d, savedAction);
+    if (gameDiffs.length === 0) {
+        return {}
+    }
+    if (1 < gameDiffs.length) {
+        throw new Error("shouldn't happen")
+    }
+
+    const gameDoc = db.serializeDocPath(['games'], gameDiffs[0].key);
+    const newGame = getNewValue(gameDiffs[0])
+    if (!newGame.data.some) {
+        return { [gameDoc]: [] }
+    }
+    const collections: string[] = [];
+    for (const player of newGame.data.value.value.players) {
+        collections.push(db.serializeDocPath(['players-to-games'], [player.id]));
+    }
+    return { [gameDoc]: collections }
+}
+
 function defaultGame1_1(): Game {
     return {
         state: 'UNSTARTED',
