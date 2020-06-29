@@ -4,11 +4,11 @@ import * as ix from "ix/iterable";
 import * as ixop from "ix/iterable/operators";
 import * as ixa from "ix/asynciterable";
 import * as ixaop from "ix/asynciterable/operators";
-import { applyChangesSimple, diffToChange, getActionId } from '../base';
+import { applyChangesSimple, diffToChange, getActionId, getNewValue, getDocsInCollection, findItem, findItemAsync } from '../base';
 import * as db from '../db';
 import * as diffs from '../diffs';
 import * as fw from '../framework';
-import { Item, item, Key, Change, Diff } from '../interfaces';
+import { Item, item, Key, Change, Diff, ItemIterable } from '../interfaces';
 import * as model1_0 from '../model/1.0';
 import { validate as validate1_0 } from '../model/1.0.validator';
 import * as model1_1 from '../model/1.1';
@@ -22,142 +22,297 @@ import { Defaultable, Option, option, Result, result } from '../util';
 import { OptionData, OptionView } from '../util/option';
 import { ResultView } from '../util/result';
 import deepEqual from 'deep-equal';
-import { UnifiedInterface } from '..';
+import { UnifiedInterface, Errors, Table, getAction, resolveVersionSpec, getActionIdsForSchema } from '..';
 import { validate as validateBase } from '../model/base.validator'
 import { validate as validateSchema } from '../model/index.validator'
 import * as readables from '../readables';
 import admin from 'firebase-admin'
 import { strict as assert } from 'assert';
 import { dirname } from 'path';
-import { VersionSpec } from '../model/base'
+import { VersionSpec, VersionSpecRequest } from '../model/base'
+import { group } from 'console';
 
+const GAME_SCHEMA = ['games']
+const SHORT_CODE_SCHEMA = ['shortCodes']
+const GAME_SHORT_CODE_SCHEMA = ['games', 'shortCodes']
+const PLAYER_GAME_SCHEMA = ['players', 'games']
 
-type MaybeLiveAction = {
-    kind: 'live'
-    action: Action
-} | {
-    kind: 'replay'
-    actionId: string
+const SHORT_CODES_TO_GAME_SCHEMA = ['short-codes-to-games']
+const PLAYERS_TO_GAMES_SCHEMA = ['players-to-games']
+
+// interface SecondaryTable<TSource, TResult> {
+//     getLatestVersionRequest(d: db.Database, key: Key): Promise<VersionSpecRequest>
+//     getState(d: db.Database, version: VersionSpec): ItemIterable<T>
+
+// }
+
+export const REVISION: fw.Integrator<Errors> = {
+    async getNeededReferenceIds(_db: db.Database, anyAction: AnyAction): Promise<VersionSpecRequest> {
+        const action = convertAction(anyAction)
+        const docs = [db.serializeDocPath(GAME_SCHEMA, [action.gameId])];
+        if (action.kind === 'create_game' && action.shortCode !== '') {
+            return {
+                docs,
+                collections: [
+                    db.serializeDocPath(
+                        SHORT_CODE.collectionSchema,
+                        [action.shortCode])]
+            }
+        } else {
+            return { docs, collections: [] }
+        }
+    },
+
+    async integrate(d: db.Database, savedAction: SavedAction): Promise<fw.IntegrationResult<Errors>> {
+        const gameDiffOrError = result.from(await getGameDiffOrError(d, savedAction));
+
+        if (gameDiffOrError.data.status === 'err') {
+            return {
+                result: toResult(gameDiffOrError),
+                impactedReferenceIds: [],
+                impactedCollections: {},
+            }
+        }
+        const maybeDiff = gameDiffOrError.data.value;
+        if (!maybeDiff.data.some) {
+            return {
+                result: {
+                    '1.0': result.ok(null),
+                    '1.1': result.ok(null),
+                },
+                impactedReferenceIds: [],
+                impactedCollections: {},
+            }
+        }
+        const diff = maybeDiff.data.value;
+        const gameDocPath = db.serializeDocPath(GAME_SCHEMA, diff.key)
+        const impactedReferenceIds = [gameDocPath]
+        const impactedCollections: Record<string, fw.CollectionDiff> = {}
+
+        const shortCodeShareDiffs = ix.of(diff).pipe(diffs.mapDiffs(SHORT_CODE_SHARE_MAPPER));
+        for (const diff of shortCodeShareDiffs) {
+            const collectionKey = SHORT_CODE.getGroupKeyFromShareKey(diff.key)
+            const collectionPath = db.serializeDocPath(SHORT_CODE.collectionSchema, collectionKey)
+
+            switch (diff.kind) {
+                case "add":
+                    impactedCollections[collectionPath].addedMembers.push(gameDocPath)
+                    break
+                case "delete":
+                    impactedCollections[collectionPath].deletedMembers.push(gameDocPath)
+                    break
+                case "replace":
+                    break
+            }
+        }
+        return {
+            result: toResult(gameDiffOrError),
+            impactedReferenceIds,
+            impactedCollections
+        }
+        // const gamesForPlayerDiffs = await PLAYER_AND_GAME_TO_IN_getDiffs(d, savedAction);
+        // const result = await getResult(d, savedAction);
+        // return {
+        //     result,
+        //     impactedReferenceIds: [
+        //         ...gameDiffs.map(({ key }) => db.serializeDocPath(['games'], key)),
+        //         ...gamesForPlayerDiffs.map(({ key }) => db.serializeDocPath(['players', 'games'], key)),
+        //     ]
+        // }
+    }
 }
 
-// // export async function commitAction(db: db.Database, anyAction: AnyAction): Promise<SavedAction> {
-// //     const action = convertAction(anyAction)
-// //     const res = await getNewGameOrError(db, { kind: 'live', action: action })
+function getLatestAggregatedVersionRequest<TShare, TResult>(
+    agg: AggregationTable<TShare, TResult>, key: Key): VersionSpecRequest {
+    const collectionPath = db.serializeDocPath(agg.collectionSchema, key);
+    return {
+        docs: [],
+        collections: [collectionPath]
+    }
+}
 
-// //     console.log(JSON.stringify(res.newGame, undefined, 2))
+async function getAggregatedState<TSource, TShare, TResult>(
+    d: db.Database,
+    source: Table<TSource>,
+    mapper: diffs.Mapper<TSource, TShare>,
+    agg: AggregationTable<TShare, TResult>, key: Key,
+    version: VersionSpec): Promise<Option<TResult>> {
+    const collectionPath = db.serializeDocPath(agg.collectionSchema, key);
+    if (!version.collections.includes(collectionPath)) {
+        throw new Error("bad version")
+    }
+    const primaryRecords = source.getState(d, version)
+    const shareRecords = ixa.from(primaryRecords).pipe(
+        diffs.mapItemsAsync(mapper)
+    )
+    const aggregated = shareRecords.pipe(
+        ixaop.groupBy(({ key }) => {
+            const groupKey = agg.getGroupKeyFromShareKey(key)
+            return db.serializeDocPath(agg.collectionSchema, groupKey)
+        },
+            item => item,
+            (groupPath: string, shares: Iterable<Item<TShare>>): Item<TResult> => {
+                const { key: groupKey } = db.parseDocPath(groupPath);
+                return item(groupKey, agg.groupValues(groupKey, shares))
+            }
+        )
+    )
+    return option.from(await findItemAsync(aggregated, key)).map(item => item.value)
+}
 
-// //     const affectedFacets = await getAffectedFacets(db, { kind: 'live', action })
+function toResult<T>(newGameResult: Result<T, Error>): Errors {
+    return {
+        '1.0': result.from(newGameResult).map(() => null).mapErr(convertError1_0),
+        '1.1': result.from(newGameResult).map(() => null).mapErr(convertError1_0),
+    }
+}
 
-// //     const savedAction: SavedAction = { parents: res.parents, action: anyAction };
-// //     const actionId = getActionId(savedAction);
+export async function getGameDiffOrError(d: db.Database, savedAction: SavedAction):
+    Promise<Result<Option<Diff<Game>>, Error>> {
+    const action = convertAction(savedAction);
+    const { gameId } = action;
+    const oldGameItem = await findItemAsync(GAME.getState(d, savedAction.parents), [gameId]);
+    const oldGame = option.from(oldGameItem).map(item => item.value)
 
-// //     db.tx.set(db.db.doc(actionId), savedAction)
+    const internalIsShortCodeUsed = async (sc: string): Promise<boolean> => {
+        const scState = await getAggregatedState(
+            d, GAME, SHORT_CODE_SHARE_MAPPER, SHORT_CODE, [sc], savedAction.parents)
 
-// //     for (const facetId of affectedFacets) {
-// //         db.tx.set(db.db.doc(facetId), { actionId })
-// //         // if (facetId.length === 1) {
+        return scState.data.some
+    }
 
-// //         //     const [facetId] = facetId;
-// //         //     const ref: ReferenceGroup = {
-// //         //         kind: 'single',
-// //         //         actionId,
-// //         //     }
-// //         //     const labelPath = `labels-1.2.0/${facetId}`
-// //         //     db.tx.set(db.db.doc(labelPath), ref)
-// //         // } else if (facetId.length === 2) {
-// //         //     const [first, second] = facetId;
-// //         //     const labelPath = `labels-1.2.0/${first}`
-// //         //     const ref: ReferenceGroup = {
-// //         //         kind: 'collection',
-// //         //         members: {
-// //         //             [second]: { kind: 'single', actionId }
-// //         //         }
-// //         //     }
-// //         //     db.tx.set(db.db.doc(labelPath), ref, { merge: true })
-// //         // } else {
-// //         //     throw new Error('wtf')
-// //         // }
-// //     }
+    const res = await helper(action, oldGame, internalIsShortCodeUsed);
 
-// //     return savedAction
-// // }
+    return result.from(res)
+        .map(newGame => diffs.newDiff([gameId], oldGame, option.some(newGame)))
+}
+
+// function getCollectionsForGame(game : Game): Iterable<string> {
+//     const playersToGames = ix.from(game.players).pipe(
+//             ixop.map(p => db.serializeDocPath(PLAYERS_TO_GAMES_SCHEMA, [p.id]))
+//         );
+//         const shortCodesToGames = game.
+//     return ix.concat(
 
 
-// export async function getAction(db: db.Database, actionId: string): Promise<Option<SavedAction>> {
-//     const data = await db.getRaw(actionId);
-//     return option.from(data).map(validateSchema('SavedAction'))
+//     )
+//         ...game.players.map(p => p.id)
+//     ]
 // }
 
-// export async function getParents(d: db.Database, action: MaybeLiveAction, facetId: string): Promise<VersionSpec> {
-//     const parsed = db.parsePath(facetId)
-//     if (action.kind === 'live') {
-//         if (facetId.endsWith("/*")) {
-//             const res: VersionSpec = {
-//                 kind: 'collection',
-//                 id: dirname(facetId),
-//                 members: {},
-//             }
+const GAME: Table<Game> = {
+    getState(d: db.Database, version: VersionSpec): ItemIterable<Game> {
+        return ixa.from(Object.entries(version.docs)).pipe(
+            getActionIdsForSchema(GAME_SCHEMA),
+            ixaop.map(async ({ key, value: actionId }) => {
+                const savedAction = option.from(await getAction(d, actionId)).unwrap();
 
-//             const collection = await d.tx.get(d.db.collection(dirname(facetId)));
-//             for (const doc of collection.docs) {
-//                 const ptr = validateBase('Pointer')(doc.data())
-//                 res.members[doc.id] = {
-//                     kind: 'single',
-//                     actionId: ptr.actionId,
-//                 }
-//             }
-//             return res;
-//         } else {
-//             return option.from(await d.getRaw(facetId))
-//                 .map(validateBase('Pointer'))
-//                 .map((p): VersionSpec => ({ kind: 'single', actionId: p.actionId }))
-//                 .orElse(() => ({ kind: 'none' }))
-//         }
-//     } else {
-//         const savedAction = option.from(await getAction(d, action.actionId)).unwrap();
-//         return option.of(savedAction.parents[facetId]).expect("Illegal parent get");
+                const maybeGameDiff = result.from(await getGameDiffOrError(d, savedAction)).unwrap();
+                const gameDiff = option.from(maybeGameDiff).unwrap()
+                return option.from(getNewValue(gameDiff))
+            }),
+            util.filterNoneAsync()
+        );
+    },
+    async getLatestVersionRequest(_d: db.Database, key: Key): Promise<VersionSpecRequest> {
+        return {
+            docs: [db.serializeDocPath(GAME_SCHEMA, key)],
+            collections: []
+        }
+    }
+}
+
+interface MappedTable<TSource, TResult> {
+    getPrimaryTableKey(d: db.Database, key: Key): Promise<Key>
+    mapState(primaryKey: Key, primaryValue: TSource): ItemIterable<TResult>
+}
+
+interface AggregationTable<TShare, TResult> {
+    collectionSchema: Key
+
+    getGroupKeyFromShareKey(key: Key): Key
+    groupValues(groupKey: Key, values: Iterable<Item<TShare>>): TResult
+}
+
+const SHORT_CODE_SHARE_MAPPER: diffs.Mapper<Game, ShortCode> = {
+    map([gameId]: Key, game: Game): Iterable<Item<ShortCode>> {
+        if (game.state !== 'UNSTARTED' || game.shortCode === '') {
+            return []
+        }
+        return [{ key: [gameId, game.shortCode], value: { usedBy: gameId } }]
+
+    },
+    preimage([gameId, shortCodeId]: Key): Key {
+        return [gameId]
+    }
+}
+
+// function SHORT_CODE_SHARE_getState(d : Database, gameKey: Key, version: VersionSpec)
+
+// const SHORT_CODE_SHARE: MappedTable<Game, ShortCode> = {
+// async getPrimaryTableKey(d: db.Database, [gameId, shortCodeId]: Key): Promise<Key> {
+//     return [gameId]
+// }
+//     mapState([gameId] : Key, game : Game): ItemIterable<ShortCode> {
+
 //     }
+
 // }
 
-// export async function getNewGameOrError(db: db.Database, maybeAction: MaybeLiveAction): Promise<IntRes> {
-//     const action = maybeAction.kind === 'live'
-//         ? maybeAction.action
-//         : convertAction(option.from(await getAction(db, maybeAction.actionId)).unwrap());
 
-//     const parents: Record<string, VersionSpec> = {}
-//     const gameFacetId = `games/${action.gameId}`
-//     parents[gameFacetId] = await getParents(db, maybeAction, gameFacetId)
+// diffs.mappedTable(GAME,SHORT_CODE_SHARE_MAPPER )
 
-//     const oldGame = await getGameState(db, parents[gameFacetId], action.gameId);
-
-//     const internalIsShortCodeUsed = async (sc: string): Promise<boolean> => {
-//         const scFacetId = `shortCodes/${sc}/games/*`
-//         parents[scFacetId] = await getParents(db, maybeAction, scFacetId)
-//         return (await getShortCodeState(db, parents[scFacetId], sc)).data.some
-//     }
-
-//     const res = await helper(action, oldGame, internalIsShortCodeUsed);
-
+// async getLatestVersionRequest(d: db.Database, key: Key): Promise<VersionSpecRequest> {
 //     return {
-//         parents,
-//         gameId: action.gameId,
-//         oldGame,
-//         newGame: res
-//     };
+//         docs: [],
+//         collections: [
+//             db.serializeDocPath(SHORT_CODE_SCHEMA, key)
+//         ]
+//     }
 // }
 
-// export interface IntRes {
-//     parents: Record<string, VersionSpec>,
-//     gameId: string
-//     oldGame: Option<Game>
-//     newGame: Result<Game, Error>
+
+const SHORT_CODE: AggregationTable<ShortCode, ShortCode> = {
+    collectionSchema: ['short-codes-to-games'],
+
+    getGroupKeyFromShareKey([, shortCodeId]: Key): Key {
+        return [shortCodeId]
+    },
+
+    groupValues([shortCodeId]: Key, values: Iterable<Item<ShortCode>>): ShortCode {
+        const maybeValue = option.fromIterable(values);
+        return maybeValue.unwrap().value
+    }
+
+
+    //  getState(d: db.Database, version: VersionSpec): ItemIterable<{}> {
+    //     const gamesAndShortCodes = SHORT_CODE_SHARE.getState(d, version);
+
+    //     return ixa.from(gamesAndShortCodes).pipe(
+    //         ixaop.map(({ key: [gameId, shortCodeId] }) => shortCodeId),
+    //         ixaop.distinct(),
+    //         ixaop.map(shortCodeId => item([shortCodeId], {}))
+    //     )
+    // },
+    // async getLatestVersionRequest(d: db.Database, key: Key): Promise<VersionSpecRequest> {
+    //     return {
+    //         docs: [],
+    //         collections: [
+    //             db.serializeDocPath(SHORT_CODE_SCHEMA, key)
+    //         ]
+    //     }
+    // }
+}
+
+function shortCodeShareDiffs(diff: Diff<Game>): Iterable<Diff<ShortCode>> {
+    return ix.of(diff).pipe(
+        diffs.mapDiffs(SHORT_CODE_SHARE_MAPPER)
+    )
+}
+// function getCollectionForShortCodeShare([, shortCodeId]: Key): string {
+//     return db.serializeDocPath(SHORT_CODES_TO_GAME_SCHEMA, [shortCodeId])
 // }
 
-// export async function getGameDiffs(db: db.Database, maybeAction: MaybeLiveAction): Promise<Diff<Game>[]> {
-//     const { gameId, oldGame, newGame } = await getNewGameOrError(db, maybeAction)
-
-//     return result.from(newGame).map(newGame => diffs.newDiff2([gameId], oldGame, option.some(newGame)).diffs).orElse(() => [])
-// }
 
 // export async function getGameState(db: db.Database, ref: VersionSpec, gameId: string): Promise<Option<Game>> {
 //     if (ref.kind === "none") {
@@ -389,24 +544,24 @@ type MaybeLiveAction = {
 // //     // }
 // // }
 
-// function convertError1_0(error: Error): model1_0.Error {
-//     switch (error.status) {
-//         case 'GAME_NOT_FOUND':
-//         case 'GAME_ALREADY_EXISTS':
-//         case 'SHORT_CODE_IN_USE':
-//             return {
-//                 status: "UNKNOWN",
-//                 status_code: error.status_code,
-//                 error,
-//             }
-//         default:
-//             return error
-//     }
-// }
+function convertError1_0(error: Error): model1_0.Error {
+    switch (error.status) {
+        case 'GAME_NOT_FOUND':
+        case 'GAME_ALREADY_EXISTS':
+        case 'SHORT_CODE_IN_USE':
+            return {
+                status: "UNKNOWN",
+                status_code: error.status_code,
+                error,
+            }
+        default:
+            return error
+    }
+}
 
-// function convertError1_1(err: Error): model1_1.Error {
-//     return convertError1_0(err)
-// }
+function convertError1_1(err: Error): model1_1.Error {
+    return convertError1_0(err)
+}
 
 // // export function getUnifiedInterface(gameId: string, state: State): UnifiedInterface {
 // //     return {
@@ -420,122 +575,178 @@ type MaybeLiveAction = {
 // // }
 
 
-// async function helper(a: Action, maybeOldGame: Option<Game>, isShortCodeUsed: (shortCode: string) => Promise<boolean>): Promise<ResultView<Game, Error>> {
+async function helper(a: Action, maybeOldGame: Option<Game>, isShortCodeUsed: (shortCode: string) => Promise<boolean>): Promise<Result<Game, Error>> {
+    switch (a.kind) {
+        case 'create_game': {
+            if (maybeOldGame.data.some) {
+                return result.err({
+                    status: 'GAME_ALREADY_EXISTS',
+                    status_code: 400,
+                    gameId: a.gameId,
+                })
+            }
+            if (await isShortCodeUsed(a.shortCode)) {
+                return result.err({
+                    status: 'SHORT_CODE_IN_USE',
+                    status_code: 400,
+                    shortCode: a.shortCode,
+                })
+            }
 
-//     switch (a.kind) {
-//         case 'create_game': {
-//             if (maybeOldGame.data.some) {
-//                 return result.err({
-//                     version: '1.2',
-//                     status: 'GAME_ALREADY_EXISTS',
-//                     status_code: 400,
-//                     gameId: a.gameId,
-//                 })
-//             }
-//             if (await isShortCodeUsed(a.shortCode)) {
-//                 return result.err({
-//                     version: '1.2',
-//                     status: 'SHORT_CODE_IN_USE',
-//                     status_code: 400,
-//                     shortCode: a.shortCode,
-//                 })
-//             }
+            // Game doesn't exist, short code is free. We're golden!
+            return result.ok({
+                state: 'UNSTARTED',
+                players: [],
+                shortCode: a.shortCode,
+            })
+        }
+        case 'join_game': {
+            if (!maybeOldGame.data.some) {
+                if (a.createIfNecessary) {
+                    return result.ok({
+                        state: 'UNSTARTED',
+                        players: [{
+                            id: a.playerId,
+                            displayName: a.playerDisplayName,
+                        }],
+                        shortCode: '',
+                    });
 
-//             // Game doesn't exist, short code is free. We're golden!
-//             return result.ok({
-//                 state: 'UNSTARTED',
-//                 players: [],
-//                 shortCode: a.shortCode,
-//             })
-//         }
-//         case 'join_game': {
-//             if (!maybeOldGame.data.some) {
-//                 if (a.createIfNecessary) {
-//                     return result.ok({
-//                         state: 'UNSTARTED',
-//                         players: [{
-//                             id: a.playerId,
-//                             displayName: a.playerDisplayName,
-//                         }],
-//                         shortCode: '',
-//                     });
+                } else {
+                    return result.err({
+                        status: 'GAME_NOT_FOUND',
+                        status_code: 404,
+                        gameId: a.gameId,
+                    })
+                }
+            }
+            const game = maybeOldGame.data.value;
 
-//                 } else {
-//                     return result.err({
-//                         version: '1.2',
-//                         status: 'GAME_NOT_FOUND',
-//                         status_code: 404,
-//                         gameId: a.gameId,
-//                     })
-//                 }
-//             }
-//             const game = maybeOldGame.data.value;
+            if (game.state !== 'UNSTARTED') {
+                return result.err({
+                    version: '1.0',
+                    status: 'GAME_ALREADY_STARTED',
+                    status_code: 400,
+                    gameId: a.gameId,
+                })
+            }
 
-//             if (game.state !== 'UNSTARTED') {
-//                 return result.err({
-//                     version: '1.0',
-//                     status: 'GAME_ALREADY_STARTED',
-//                     status_code: 400,
-//                     gameId: a.gameId,
-//                 })
-//             }
+            if (game.players.some(p => p.id === a.playerId)) {
+                return result.ok(game)
+            }
+            return result.ok({
+                ...game,
+                players: [...game.players, {
+                    id: a.playerId,
+                    displayName: a.playerDisplayName,
+                }]
+            });
+        }
+        case 'start_game':
+            if (!maybeOldGame.data.some) {
+                return result.err({
+                    version: '1.2',
+                    status: 'GAME_NOT_FOUND',
+                    status_code: 404,
+                    gameId: a.gameId,
+                })
+            }
+            const game = maybeOldGame.data.value;
 
-//             if (game.players.some(p => p.id === a.playerId)) {
-//                 return result.ok(game)
-//             }
-//             return result.ok({
-//                 ...game,
-//                 players: [...game.players, {
-//                     id: a.playerId,
-//                     displayName: a.playerDisplayName,
-//                 }]
-//             });
-//         }
-//         case 'start_game':
-//             if (!maybeOldGame.data.some) {
-//                 return result.err({
-//                     version: '1.2',
-//                     status: 'GAME_NOT_FOUND',
-//                     status_code: 404,
-//                     gameId: a.gameId,
-//                 })
-//             }
-//             const game = maybeOldGame.data.value;
+            if (!game.players.some(p => p.id === a.playerId)) {
+                return result.err({
+                    version: '1.0',
+                    status: 'PLAYER_NOT_IN_GAME',
+                    status_code: 403,
+                    gameId: a.gameId,
+                    playerId: a.playerId,
+                })
+            }
 
-//             if (!game.players.some(p => p.id === a.playerId)) {
-//                 return result.err({
-//                     version: '1.0',
-//                     status: 'PLAYER_NOT_IN_GAME',
-//                     status_code: 403,
-//                     gameId: a.gameId,
-//                     playerId: a.playerId,
-//                 })
-//             }
+            if (game.state === 'STARTED') {
+                return result.ok(game)
+            }
 
-//             if (game.state === 'STARTED') {
-//                 return result.ok(game)
-//             }
+            return result.ok({
+                state: 'STARTED',
+                players: game.players.map(p => ({
+                    ...p,
+                    submissions: [],
+                })),
+            })
+        case 'make_move':
+            if (!maybeOldGame.data.some || maybeOldGame.data.value.state !== 'STARTED') {
+                return result.err({
+                    version: '1.0',
+                    status: 'GAME_NOT_STARTED',
+                    status_code: 400,
+                    gameId: a.gameId,
+                })
+            }
 
-//             return result.ok({
-//                 state: 'STARTED',
-//                 players: game.players.map(p => ({
-//                     ...p,
-//                     submissions: [],
-//                 })),
-//             })
-//         case 'make_move':
-//             if (!maybeOldGame.data.some || maybeOldGame.data.value.state !== 'STARTED') {
-//                 return result.err({
-//                     version: '1.0',
-//                     status: 'GAME_NOT_STARTED',
-//                     status_code: 400,
-//                     gameId: a.gameId,
-//                 })
-//             }
+            return makeMove(maybeOldGame.data.value, a)
+    }
+}
 
-//             return makeMove(maybeOldGame.data.value, a)
-//     }
-// }
+
+function makeMove(game: StartedGame, action: MakeMoveAction): ResultView<Game, Error> {
+    const playerId = action.playerId
+
+    const player = findById(game.players, playerId)
+
+    if (player === null) {
+        return result.err({
+            version: '1.0',
+            status: 'PLAYER_NOT_IN_GAME',
+            status_code: 403,
+            gameId: action.gameId,
+            playerId: action.playerId,
+        })
+    }
+
+    const roundNum = Math.min(...game.players.map(p => p.submissions.length))
+    if (player.submissions.length !== roundNum) {
+        return result.err({
+            version: '1.0',
+            status: 'MOVE_PLAYED_OUT_OF_TURN',
+            status_code: 400,
+            gameId: action.gameId,
+            playerId: action.playerId,
+        })
+    }
+
+    if (roundNum === game.players.length) {
+        return result.err({
+            version: '1.0',
+            status: 'GAME_IS_OVER',
+            status_code: 400,
+            gameId: action.gameId,
+        })
+    }
+
+    if (roundNum % 2 === 0 && action.submission.kind === 'drawing') {
+        return result.err({
+            version: '1.0',
+            status: 'INCORRECT_SUBMISSION_KIND',
+            status_code: 400,
+            wanted: 'word',
+            got: 'drawing',
+        })
+    }
+    if (roundNum % 2 === 1 && action.submission.kind === 'word') {
+        return result.err({
+            version: '1.0',
+            status: 'INCORRECT_SUBMISSION_KIND',
+            status_code: 400,
+            wanted: 'word',
+            got: 'drawing',
+        })
+    }
+
+    return result.ok(produce(game, game => {
+        findById(game.players, playerId)!.submissions.push(action.submission)
+    }))
+}
 
 // // function defaultGame1_1(): Game {
 // //     return {
@@ -544,41 +755,41 @@ type MaybeLiveAction = {
 // //     }
 // // }
 
-// function convertAction1_0(a: model1_0.Action): Action {
-//     switch (a.kind) {
-//         case 'join_game':
-//             return {
-//                 kind: 'join_game',
-//                 gameId: a.gameId,
-//                 playerId: a.playerId,
-//                 playerDisplayName: a.playerId,
-//                 createIfNecessary: true
-//             }
-//         case 'start_game':
-//         case 'make_move':
-//             return {
-//                 ...a,
-//             }
-//     }
-// }
+function convertAction1_0(a: model1_0.Action): Action {
+    switch (a.kind) {
+        case 'join_game':
+            return {
+                kind: 'join_game',
+                gameId: a.gameId,
+                playerId: a.playerId,
+                playerDisplayName: a.playerId,
+                createIfNecessary: true
+            }
+        case 'start_game':
+        case 'make_move':
+            return {
+                ...a,
+            }
+    }
+}
 
-// function convertAction1_1(a: model1_1.Action): Action {
-//     switch (a.kind) {
-//         case 'join_game':
-//             return {
-//                 kind: 'join_game',
-//                 gameId: a.gameId,
-//                 playerId: a.playerId,
-//                 playerDisplayName: a.playerDisplayName,
-//                 createIfNecessary: true
-//             }
-//         case 'start_game':
-//         case 'make_move':
-//             return {
-//                 ...a,
-//             }
-//     }
-// }
+function convertAction1_1(a: model1_1.Action): Action {
+    switch (a.kind) {
+        case 'join_game':
+            return {
+                kind: 'join_game',
+                gameId: a.gameId,
+                playerId: a.playerId,
+                playerDisplayName: a.playerDisplayName,
+                createIfNecessary: true
+            }
+        case 'start_game':
+        case 'make_move':
+            return {
+                ...a,
+            }
+    }
+}
 
 // function convertAction1_2(a: model1_2.Action): Action {
 //     switch (a.kind) {
@@ -599,79 +810,21 @@ type MaybeLiveAction = {
 //     }
 // }
 
-// function convertAction(a: SavedAction): Action {
-//     switch (a.version) {
-//         case '1.0':
-//             return convertAction1_0(a.action)
-//         case '1.1':
-//             return convertAction1_1(a.action)
-//         // case '1.2':
-//         //     return convertAction1_2(a)
-//     }
-// }
+function convertAction(a: SavedAction | AnyAction): Action {
+    switch (a.version) {
+        case '1.0':
+            return convertAction1_0(a.action)
+        case '1.1':
+            return convertAction1_1(a.action)
+        // case '1.2':
+        //     return convertAction1_2(a)
+    }
+}
 
-// function makeMove(game: StartedGame, action: MakeMoveAction): ResultView<Game, Error> {
-//     const playerId = action.playerId
 
-//     const player = findById(game.players, playerId)
-
-//     if (player === null) {
-//         return result.err({
-//             version: '1.0',
-//             status: 'PLAYER_NOT_IN_GAME',
-//             status_code: 403,
-//             gameId: action.gameId,
-//             playerId: action.playerId,
-//         })
-//     }
-
-//     const roundNum = Math.min(...game.players.map(p => p.submissions.length))
-//     if (player.submissions.length !== roundNum) {
-//         return result.err({
-//             version: '1.0',
-//             status: 'MOVE_PLAYED_OUT_OF_TURN',
-//             status_code: 400,
-//             gameId: action.gameId,
-//             playerId: action.playerId,
-//         })
-//     }
-
-//     if (roundNum === game.players.length) {
-//         return result.err({
-//             version: '1.0',
-//             status: 'GAME_IS_OVER',
-//             status_code: 400,
-//             gameId: action.gameId,
-//         })
-//     }
-
-//     if (roundNum % 2 === 0 && action.submission.kind === 'drawing') {
-//         return result.err({
-//             version: '1.0',
-//             status: 'INCORRECT_SUBMISSION_KIND',
-//             status_code: 400,
-//             wanted: 'word',
-//             got: 'drawing',
-//         })
-//     }
-//     if (roundNum % 2 === 1 && action.submission.kind === 'word') {
-//         return result.err({
-//             version: '1.0',
-//             status: 'INCORRECT_SUBMISSION_KIND',
-//             status_code: 400,
-//             wanted: 'word',
-//             got: 'drawing',
-//         })
-//     }
-
-//     return result.ok(produce(game, game => {
-//         findById(game.players, playerId)!.submissions.push(action.submission)
-//     }))
-// }
-
-// function findById<T extends { id: string }>(ts: T[], id: string): T | null {
-//     return ts.find(t => t.id === id) || null
-// }
+function findById<T extends { id: string }>(ts: T[], id: string): T | null {
+    return ts.find(t => t.id === id) || null
+}
 
 // function gameToPlayerGames1_1([gameId]: Key, game: Game): Iterable<Item<model1_1.PlayerGame>> {
 //     return ix.from(game.players).pipe(

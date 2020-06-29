@@ -102,4 +102,6 @@ export type Submission = {
 
 export type Game = UnstartedGame | StartedGame
 
-export type ShortCode = {}
+export type ShortCode = {
+    usedBy: string
+}
