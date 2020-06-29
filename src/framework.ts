@@ -32,9 +32,15 @@ export interface IntegrationResult2<TState> {
     state: TState
 }
 
+export interface CollectionDiff {
+    addedMembers: string[]
+    deletedMembers: string[]
+}
+
 export interface IntegrationResult<TResult> {
     result: TResult
     impactedReferenceIds: string[]
+    impactedCollections: Record<string, CollectionDiff>
 }
 
 export interface Integrator<TResult> {

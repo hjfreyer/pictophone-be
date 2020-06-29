@@ -9,7 +9,7 @@ import { findItemAsync, getNewValue, getDocsInCollection } from '../base';
 import * as db from '../db';
 import * as diffs from '../diffs';
 import * as fw from '../framework';
-import { Diff, Item, item, Key } from '../interfaces';
+import { Diff, Item, item, Key, ItemIterable } from '../interfaces';
 import { AnyAction, SavedAction } from '../model';
 import * as model1_0 from '../model/1.0';
 import * as model1_1 from '../model/1.1';
@@ -17,11 +17,12 @@ import { Action, Error, Game, MakeMoveAction } from '../model/1.1.1';
 import { DocVersionSpec, VersionSpec, VersionSpecRequest } from '../model/base';
 import * as util from '../util';
 import { Option, option, Result, result } from '../util';
+import { OperatorAsyncFunction } from 'ix/interfaces';
 
 
 async function getResult(db: db.Database, savedAction: SavedAction): Promise<Errors> {
     const { gameId } = savedAction.action;
-    const oldGameItem = await GAME.getState(db, [gameId], savedAction.parents);
+    const oldGameItem = await findItemAsync(GAME.getState(db, savedAction.parents), [gameId]);
     const oldGame = option.from(oldGameItem).map(item => item.value)
     const newGameResult = integrateHelper(convertAction(savedAction),
         oldGame);
@@ -33,7 +34,7 @@ async function getResult(db: db.Database, savedAction: SavedAction): Promise<Err
 
 async function getGameDiffs(db: db.Database, savedAction: SavedAction): Promise<Diff<Game>[]> {
     const { gameId } = savedAction.action;
-    const oldGameItem = await GAME.getState(db, [gameId], savedAction.parents);
+    const oldGameItem = await findItemAsync(GAME.getState(db, savedAction.parents), [gameId]);
     const oldGame = option.from(oldGameItem).map(item => item.value)
     const newGameResult = integrateHelper(convertAction(savedAction),
         oldGame);
@@ -43,23 +44,32 @@ async function getGameDiffs(db: db.Database, savedAction: SavedAction): Promise<
         .orElse(() => [])
 }
 
-
+function getActionIdsForSchema(targetSchema: Key): OperatorAsyncFunction<[string, DocVersionSpec], Item<string>> {
+    return ixaop.flatMap(([docId, docVersion]): ItemIterable<string> => {
+        const { schema, key } = db.parseDocPath(docId);
+        if (util.lexCompare(schema, targetSchema) === 0 && docVersion.exists) {
+            return ixa.of(item(key, docVersion.actionId))
+        } else {
+            return ixa.empty()
+        }
+    })
+}
 
 const GAME: Table<Game> = {
-    async getState(d: db.Database, [gameId]: Key, version: VersionSpec): Promise<Option<Item<Game>>> {
-        const docVersion = option.of(version.docs[db.serializeDocPath(['games'], [gameId])]).unwrap();
-        if (!docVersion.exists) {
-            return option.none()
-        }
+    getState(d: db.Database, version: VersionSpec): ItemIterable<Game> {
+        return ixa.from(Object.entries(version.docs)).pipe(
+            getActionIdsForSchema(['games']),
+            ixaop.map(async ({ key, value: actionId }) => {
+                const savedAction = option.from(await getAction(d, actionId)).unwrap();
+                const gameDiffs = await getGameDiffs(d, savedAction);
+                if (gameDiffs.length !== 1) {
+                    throw new Error("weird output from getGameDiffs: " + JSON.stringify(gameDiffs))
+                }
 
-        const savedAction = option.from(await getAction(d, docVersion.actionId)).unwrap();
-
-        const gameDiffs = await getGameDiffs(d, savedAction);
-        if (gameDiffs.length !== 1) {
-            throw new Error("weird output from getGameDiffs: " + JSON.stringify(gameDiffs))
-        }
-
-        return option.from(getNewValue(gameDiffs[0]))
+                return option.from(getNewValue(gameDiffs[0]))
+            }),
+            util.filterNoneAsync()
+        );
     },
     async getLatestVersionRequest(_d: db.Database, key: Key): Promise<VersionSpecRequest> {
         return {
@@ -70,14 +80,10 @@ const GAME: Table<Game> = {
 }
 
 export const PLAYER_GAME1_1: Table<model1_1.PlayerGame> = {
-    async getState(d: db.Database, key: Key, version: VersionSpec): Promise<Option<Item<model1_1.PlayerGame>>> {
-        const preimageKey = GAME_TO_PLAYER_GAMES1_1.preimage(key)
-        const pgs = ixa.from(GAME.getState(d, preimageKey, version)).pipe(
-            util.filterNoneAsync(),
+    getState(d: db.Database, version: VersionSpec): ItemIterable<model1_1.PlayerGame> {
+        return ixa.from(GAME.getState(d, version)).pipe(
             diffs.mapItemsAsync(GAME_TO_PLAYER_GAMES1_1)
         )
-
-        return await findItemAsync(pgs, key)
     },
 
     async getLatestVersionRequest(_d: db.Database, key: Key): Promise<VersionSpecRequest> {
@@ -90,61 +96,90 @@ export const PLAYER_GAME1_1: Table<model1_1.PlayerGame> = {
     }
 }
 
-const PLAYER_AND_GAME_TO_IN: Table<{}> = {
-    async getLatestVersionRequest(_d: db.Database, key: Key): Promise<VersionSpecRequest> {
-        return {
-            docs: [
-                db.serializeDocPath(['players', 'games'], key)
-            ],
-            collections: []
-        }
+const GAME_TO_GAME_AND_PLAYER_LIST: diffs.Mapper<Game, {}> = {
+    map([gameId]: Key, game: Game): Iterable<Item<{}>> {
+        return ix.from(game.players).pipe(ixop.map(p => item([gameId, p.id], {})))
     },
-    async getState(d: db.Database, [playerId, gameId]: Key, version: VersionSpec): Promise<Option<Item<{}>>> {
-        // NOTE: messing with the VersionSpec is weird, but I'm not sure what the right thing is yet.
-        const transposedVersion: VersionSpec = {
-            docs: {
-                [db.serializeDocPath(['games'], [gameId])]: version.docs[db.serializeDocPath(['players', 'games'], [playerId, gameId])]
-            },
-            collections: [],
-        }
-
-        const maybeGame = option.from(await GAME.getState(d, [gameId], transposedVersion))
-
-        return maybeGame
-            .filter(({ value }) => value.players.some(p => p.id === playerId))
-            .map(({ key: [itemGameId] }) => item([playerId, itemGameId], {}))
+    preimage([gameId, playerId]: Key): Key {
+        return [gameId]
     }
-}
+    // async getLatestVersionRequest(_d: db.Database, key: Key): Promise<VersionSpecRequest> {
+    //     return {
+    //         docs: [
+    //         ],
+    //         collections: [
+    //                             db.serializeDocPath(['players', 'games'], key)
+    //         ]
+    //     }
+    // },
+    // getState(d: db.Database, version: VersionSpec): ItemIterable<{}> {
+    //     // NOTE: messing with the VersionSpec is weird, but I'm not sure what the right thing is yet.
+    //     const transposedVersion: VersionSpec = {
+    //         docs: {
+    //             [db.serializeDocPath(['games'], [gameId])]: version.docs[db.serializeDocPath(['players', 'games'], [playerId, gameId])]
+    //         },
+    //         collections: [],
+    //     }
 
-async function PLAYER_AND_GAME_TO_IN_getDiffs(d: db.Database, savedAction: SavedAction): Promise<Diff<{}>[]> {
+    //     const maybeGame = option.from(await GAME.getState(d, [gameId], transposedVersion))
+
+    //     return maybeGame
+    //         .filter(({ value }) => value.players.some(p => p.id === playerId))
+    //         .map(({ key: [itemGameId] }) => item([playerId, itemGameId], {}))
+    // }
+};
+const GAME_AND_PLAYER_LIST: Table<{}> = diffs.mappedTable(GAME, GAME_TO_GAME_AND_PLAYER_LIST)
+
+async function GAME_AND_PLAYER_LIST_getDiffs(d: db.Database, savedAction: SavedAction): Promise<Diff<{}>[]> {
     return Array.from(ix.from(await getGameDiffs(d, savedAction)).pipe(
-        diffs.mapDiffs(GAME_TO_PLAYER_AND_GAME),
+        diffs.mapDiffs(GAME_TO_GAME_AND_PLAYER_LIST),
     ))
 }
+
+// function getPlayerToGameStateChunk(
+//     d: db.Database, docId: string, version: DocVersionSpec): ItemIterable<{}> {
+//     const { schema, key: gameKey } = db.parseDocPath(docId);
+//     if (util.lexCompare(schema, ['games']) !== 0) {
+//         return ixa.empty()
+//     }
+//     const [gameId] = gameKey;
+//     return ixa.from(GAME.getState(d, gameKey, { docs: { [docId]: version }, collections: [] })).pipe(
+//         util.filterNoneAsync(),
+//         ixaop.flatMap(({ key: [gameId], value }) => ixa.from(value.players).pipe(
+//             ixaop.map(
+//                 player => item([player.id, gameId], {})
+//             ))),
+
+//     )
+
+//     if (!game.data.some) {
+//         return []
+//     }
+//     return ix.from(game.data.value.value.players).pipe(
+//         ixop.map(player => item([player.id, gameId], {})),
+//     )
+// }
+
 
 export const PLAYER_TO_GAMES: Table<model1_1.GameList> = {
     async getLatestVersionRequest(_d: db.Database, key: Key): Promise<VersionSpecRequest> {
         return {
             docs: [],
             collections: [
-                db.serializeCollectionPath({ schema: ['players'], key, collectionId: 'games' })
+                db.serializeDocPath(['players-to-games'], key)
             ]
         }
     },
-    getState(d: db.Database, [playerId]: Key, version: VersionSpec): Promise<Option<Item<model1_1.GameList>>> {
-        const playerGameVersions = getDocsInCollection(version, { schema: ['players'], key: [playerId], collectionId: 'games' })
-        const gamesByPlayer = ixa.from(playerGameVersions).pipe(
-            ixaop.map(([pgKey,]) => PLAYER_AND_GAME_TO_IN.getState(d, pgKey, version)),
-            util.filterNoneAsync(),
-            ixaop.groupBy(({ key: [playerId,] }) => playerId,
-                ({ key: [, gameId] }) => gameId,
-                (playerId: string, games: Iterable<string>) => item(
-                    [playerId],
-                    { gameIds: Array.from(ix.from(games).pipe(ixop.orderBy(gameId => gameId))) }
-                ))
-        );
+    getState(d: db.Database, version: VersionSpec): ItemIterable<model1_1.GameList> {
+        const games_and_players = GAME_AND_PLAYER_LIST.getState(d, version)
 
-        return option.fromAsyncIterable(gamesByPlayer)
+        return ixa.from(games_and_players).pipe(
+            ixaop.groupBy(({ key: [gameId, playerId] }) => playerId,
+                ({ key: [gameId, playerId] }) => gameId,
+                (playerId: string, gameIds: Iterable<string>) => item(
+                    [playerId], { gameIds: Array.from(gameIds) }
+                ))
+        )
     }
 }
 
@@ -228,14 +263,39 @@ export const REVISION: fw.Integrator<Errors> = {
 
     async integrate(d: db.Database, savedAction: SavedAction): Promise<fw.IntegrationResult<Errors>> {
         const gameDiffs = await getGameDiffs(d, savedAction);
-        const gamesForPlayerDiffs = await PLAYER_AND_GAME_TO_IN_getDiffs(d, savedAction);
+        const gameAndPlayerListDiffs = await GAME_AND_PLAYER_LIST_getDiffs(d, savedAction);
+
+        const impactedCollections: Record<string, fw.CollectionDiff> = {}
+
+        for (const { key: [gameId, playerId], kind } of gameAndPlayerListDiffs) {
+            const collectionPath = db.serializeDocPath(['players-to-games'], [playerId])
+            const gamePath = db.serializeDocPath(['games'], [gameId])
+
+            if (!(collectionPath in impactedCollections)) {
+                impactedCollections[collectionPath] = {
+                    addedMembers: [],
+                    deletedMembers: [],
+                }
+            }
+            switch (kind) {
+                case "add":
+                    impactedCollections[collectionPath].addedMembers.push(gamePath)
+                    break
+                case "delete":
+                    impactedCollections[collectionPath].deletedMembers.push(gamePath)
+                    break
+                case "replace":
+                    throw new Error("can't have a diff here")
+            }
+        }
+
         const result = await getResult(d, savedAction);
         return {
             result,
             impactedReferenceIds: [
                 ...gameDiffs.map(({ key }) => db.serializeDocPath(['games'], key)),
-                ...gamesForPlayerDiffs.map(({ key }) => db.serializeDocPath(['players', 'games'], key)),
-            ]
+            ],
+            impactedCollections,
         }
     }
 }

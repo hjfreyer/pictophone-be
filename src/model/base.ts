@@ -19,3 +19,7 @@ export interface VersionSpecRequest {
 export interface Pointer {
     actionId: string
 }
+
+export interface Kollection {
+    members: string[]
+}

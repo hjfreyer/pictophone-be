@@ -3,10 +3,13 @@ import * as ix from "ix/iterable";
 import * as ixop from "ix/iterable/operators";
 import * as ixa from "ix/asynciterable";
 import * as ixaop from "ix/asynciterable/operators";
-import { Diff, Item, Key } from './interfaces';
+import { Diff, Item, Key, ItemIterable } from './interfaces';
 import * as util from './util';
 import deepEqual from "deep-equal";
 import * as ixi from "ix/interfaces";
+import { Table } from ".";
+import * as db from './db';
+import { VersionSpec, VersionSpecRequest } from "./model/base";
 
 export class Diffs<T> {
     constructor(public diffs: Diff<T>[]) { }
@@ -175,3 +178,17 @@ export function composeMappers<A, B, C>(f: Mapper<A, B>, g: Mapper<B, C>): Mappe
     }
 }
 
+
+export function mappedTable<I, O>(input: Table<I>, mapper: Mapper<I, O>): Table<O> {
+    return {
+        getState(d: db.Database, version: VersionSpec): ItemIterable<O> {
+            return ixa.from(input.getState(d, version)).pipe(
+                mapItemsAsync(mapper)
+            )
+        },
+
+        async getLatestVersionRequest(_d: db.Database, key: Key): Promise<VersionSpecRequest> {
+            return input.getLatestVersionRequest(_d, mapper.preimage(key))
+        }
+    }
+}

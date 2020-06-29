@@ -6,9 +6,9 @@ import { Params, ParamsDictionary, Query, Request } from 'express-serve-static-c
 import admin from 'firebase-admin'
 import * as ixa from "ix/asynciterable"
 import * as ixaop from "ix/asynciterable/operators"
-import { getActionId } from './base'
+import { getActionId, findItemAsync } from './base'
 import * as db from './db'
-import { Item, Key } from './interfaces'
+import { Item, Key, ItemIterable } from './interfaces'
 import * as logic1_1_1 from './logic/1.1.1'
 import { AnyAction, AnyError, SavedAction } from './model'
 import * as model1_0 from './model/1.0'
@@ -99,34 +99,36 @@ export async function getAction(db: db.Database, actionId: string): Promise<Opti
 }
 
 export async function resolveVersionSpec(db: db.Database, { docs, collections }: VersionSpecRequest): Promise<VersionSpec> {
+    const allDocs = [...docs]
+    for (const collectionId of collections) {
+        const members = option.from(await db.getRaw(collectionId))
+            .map(validateBase('Kollection'))
+            .map(col => col.members)
+            .orElse(() => [])
+        for (const doc of members) {
+            if (allDocs.indexOf(doc) === -1) {
+                allDocs.push(doc)
+            }
+        }
+    }
     const res: VersionSpec = { docs: {}, collections: collections }
-    for (const docId of docs) {
+    for (const docId of allDocs) {
         res.docs[docId] = option.from(await db.getRaw(docId))
             .map(validateBase('Pointer'))
             .map<DocVersionSpec>(p => ({ exists: true, actionId: p.actionId }))
             .orElse(() => ({ exists: false }))
-    }
-    for (const collectionId of collections) {
-        const collection = await db.tx.get(db.db.collection(collectionId));
-        for (const doc of collection.docs) {
-            const ptr = validateBase('Pointer')(doc.data())
-            res.docs[doc.ref.path] = {
-                exists: true,
-                actionId: ptr.actionId,
-            }
-        }
     }
     return res;
 }
 
 export interface Table<T> {
     getLatestVersionRequest(d: db.Database, key: Key): Promise<VersionSpecRequest>
-    getState(d: db.Database, key: Key, version: VersionSpec): Promise<Option<Item<T>>>
+    getState(d: db.Database, version: VersionSpec): ItemIterable<T>
 }
 
 export async function getLatestValue<T>(d: db.Database, table: Table<T>, key: Key): Promise<Option<T>> {
     const version = await resolveVersionSpec(d, await table.getLatestVersionRequest(d, key))
-    return option.from(await table.getState(d, key, version)).map(item => item.value)
+    return option.from(await findItemAsync(table.getState(d, version), key)).map(item => item.value)
 }
 
 export type Errors = {
@@ -153,6 +155,19 @@ function handleAction(action: AnyAction): Promise<Result<null, AnyError>> {
         db.tx.set(db.db.doc(actionId), savedAction)
         for (const refId of res.impactedReferenceIds) {
             db.tx.set(db.db.doc(refId), { actionId })
+        }
+
+        for (const [collectionPath, diffs] of Object.entries(res.impactedCollections)) {
+            if (0 < diffs.deletedMembers.length) {
+                db.tx.set(db.db.doc(collectionPath), {
+                    members: admin.firestore.FieldValue.arrayRemove(...diffs.deletedMembers)
+                }, { merge: true })
+            }
+            if (0 < diffs.addedMembers.length) {
+                db.tx.set(db.db.doc(collectionPath), {
+                    members: admin.firestore.FieldValue.arrayUnion(...diffs.addedMembers)
+                }, { merge: true })
+            }
         }
 
         return res.result[action.version]
