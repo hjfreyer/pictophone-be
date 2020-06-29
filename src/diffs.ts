@@ -10,6 +10,7 @@ import * as ixi from "ix/interfaces";
 import { Table } from ".";
 import * as db from './db';
 import { VersionSpec, VersionSpecRequest } from "./model/base";
+import { Option, option } from './util'
 
 export class Diffs<T> {
     constructor(public diffs: Diff<T>[]) { }
@@ -19,40 +20,40 @@ export class Diffs<T> {
     }
 }
 
-export function newDiff<T>(key: Key, oldValue: util.Defaultable<T>, newValue: util.Defaultable<T>): Diff<T>[] {
-    if (oldValue.is_default && newValue.is_default) {
-        return [];
+export function newDiff<T>(key: Key, oldValue: Option<T>, newValue: Option<T>): Option<Diff<T>> {
+    if (!oldValue.data.some && !newValue.data.some) {
+        return option.none()
     }
-    if (oldValue.is_default && !newValue.is_default) {
-        return [{
+    if (!oldValue.data.some && newValue.data.some) {
+        return option.some({
             key,
             kind: 'add',
-            value: newValue.value,
-        }]
+            value: newValue.data.value,
+        })
     }
-    if (!oldValue.is_default && newValue.is_default) {
-        return [{
+    if (oldValue.data.some && !newValue.data.some) {
+        return option.some({
             key,
             kind: 'delete',
-            value: oldValue.value,
-        }]
+            value: oldValue.data.value,
+        })
     }
-    if (!oldValue.is_default && !newValue.is_default) {
+    if (oldValue.data.some && newValue.data.some) {
         if (deepEqual(oldValue, newValue, { strict: true })) {
-            return []
+            return option.none()
         } else {
-            return [{
+            return option.some({
                 key,
                 kind: 'replace',
-                oldValue: oldValue.value,
-                newValue: newValue.value,
-            }]
+                oldValue: oldValue.data.value,
+                newValue: newValue.data.value,
+            })
         }
     }
     throw new Error("unreachable")
 }
 
-export function newDiff2<T>(key: Key, oldValue: util.Option<T>, newValue: util.Option<T>): Diffs<T> {
+export function newDiff2<T>(key: Key, oldValue: Option<T>, newValue: Option<T>): Diffs<T> {
     if (!oldValue.data.some && !newValue.data.some) {
         return from([]);
     }

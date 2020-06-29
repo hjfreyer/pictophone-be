@@ -145,7 +145,7 @@ export class OptionView<T> implements Option<T> {
     }
 }
 
-export function fromIterable<T>(iter: Iterable<T>): Option<T> {
+export function fromIterable<T>(iter: Iterable<T>): OptionView<T> {
     let res = none<T>();
     for (const item of iter) {
         if (res.data.some) {
@@ -156,7 +156,7 @@ export function fromIterable<T>(iter: Iterable<T>): Option<T> {
     return res
 }
 
-export async function fromAsyncIterable<T>(iter: AsyncIterable<T>): Promise<Option<T>> {
+export async function fromAsyncIterable<T>(iter: AsyncIterable<T>): Promise<OptionView<T>> {
     let res = none<T>();
     for await (const item of iter) {
         if (res.data.some) {

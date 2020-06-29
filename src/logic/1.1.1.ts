@@ -4,7 +4,7 @@ import * as ixa from "ix/asynciterable";
 import * as ixaop from "ix/asynciterable/operators";
 import * as ix from "ix/iterable";
 import * as ixop from "ix/iterable/operators";
-import { getAction, Table, Errors } from '..';
+import { getAction, Table, Errors, getActionIdsForSchema } from '..';
 import { findItemAsync, getNewValue, getDocsInCollection } from '../base';
 import * as db from '../db';
 import * as diffs from '../diffs';
@@ -44,16 +44,6 @@ async function getGameDiffs(db: db.Database, savedAction: SavedAction): Promise<
         .orElse(() => [])
 }
 
-function getActionIdsForSchema(targetSchema: Key): OperatorAsyncFunction<[string, DocVersionSpec], Item<string>> {
-    return ixaop.flatMap(([docId, docVersion]): ItemIterable<string> => {
-        const { schema, key } = db.parseDocPath(docId);
-        if (util.lexCompare(schema, targetSchema) === 0 && docVersion.exists) {
-            return ixa.of(item(key, docVersion.actionId))
-        } else {
-            return ixa.empty()
-        }
-    })
-}
 
 const GAME: Table<Game> = {
     getState(d: db.Database, version: VersionSpec): ItemIterable<Game> {

@@ -8,7 +8,7 @@ import * as ixa from "ix/asynciterable"
 import * as ixaop from "ix/asynciterable/operators"
 import { getActionId, findItemAsync, compareActionIds } from './base'
 import * as db from './db'
-import { Item, Key, ItemIterable } from './interfaces'
+import { Item, Key, ItemIterable, item } from './interfaces'
 import * as logic1_1_1 from './logic/1.1.1'
 import { AnyAction, AnyError, SavedAction } from './model'
 import * as model1_0 from './model/1.0'
@@ -22,6 +22,7 @@ import { validate as validateSchema } from './model/index.validator'
 import * as util from './util'
 import { Option, option, Result } from './util'
 import { ResultData } from './util/result'
+import { OperatorAsyncFunction } from 'ix/interfaces'
 
 
 
@@ -380,6 +381,18 @@ app.use('/batch', batch())
 type DeleteCollectionRequest = {
     collectionId: string
 }
+
+export function getActionIdsForSchema(targetSchema: Key): OperatorAsyncFunction<[string, DocVersionSpec], Item<string>> {
+    return ixaop.flatMap(([docId, docVersion]): ItemIterable<string> => {
+        const { schema, key } = db.parseDocPath(docId);
+        if (util.lexCompare(schema, targetSchema) === 0 && docVersion.exists) {
+            return ixa.of(item(key, docVersion.actionId))
+        } else {
+            return ixa.empty()
+        }
+    })
+}
+
 
 function listAllDocsExceptActions(): AsyncIterable<string> {
     const expandDocRef = (docRef: Option<DocumentReference>): AsyncIterable<Option<DocumentReference>> => {
