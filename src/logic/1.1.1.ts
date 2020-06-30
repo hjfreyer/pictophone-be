@@ -18,6 +18,8 @@ import { DocVersionSpec, VersionSpec, VersionSpecRequest } from '../model/base';
 import * as util from '../util';
 import { Option, option, Result, result } from '../util';
 import { OperatorAsyncFunction } from 'ix/interfaces';
+import { DocumentData, Firestore } from '@google-cloud/firestore'
+
 
 const GAME_SCHEMA = ['games']
 
@@ -71,6 +73,28 @@ export async function getCollections(d: db.Database, docId: string, actionId: st
     const { key } = db.parseDocPath(docId);
     const maybeNewGame = option.from(await GAME.getState(d, key, actionId));
     return maybeNewGame.map(newGame => gameToCollections(key, newGame)).orElse(() => [])
+}
+
+export async function getFacetExports(d: db.Database, facetId: string, actionId: string): Promise<Record<string, unknown>> {
+    const { key } = db.parseDocPath(facetId)
+    const maybeGame = await GAME.getState(d, key, actionId)
+    if (!maybeGame.data.some) {
+        return {}
+    }
+    const game = maybeGame.data.value;
+
+    const res: Record<string, unknown> = {};
+    for await (const { key: subKey, value } of GAME_TO_PLAYER_GAMES1_0.map(key, game)) {
+        res[db.serializeDocPath(['players', 'games-1.0'], subKey)] = value
+    }
+
+    for await (const { key: subKey, value } of GAME_TO_PLAYER_GAMES1_1.map(key, game)) {
+        res[db.serializeDocPath(['players', 'games-1.1'], subKey)] = value
+    }
+    for await (const { key: subKey, value } of PLAYERS_TO_GAMES.getShares(key, game)) {
+        res[db.serializeDocPath(['players-to-games'], subKey)] = value
+    }
+    return res
 }
 
 function toResult<T>(newGameResult: Result<T, Error>): Errors {

@@ -107,6 +107,28 @@ export async function getCollections(d: db.Database, docId: string, actionId: st
     return maybeNewGame.map(newGame => gameToCollections(key, newGame)).orElse(() => [])
 }
 
+export async function getFacetExports(d: db.Database, facetId: string, actionId: string): Promise<Record<string, unknown>> {
+    const { key } = db.parseDocPath(facetId)
+    const maybeGame = await GAME.getState(d, key, actionId)
+    if (!maybeGame.data.some) {
+        return {}
+    }
+    const game = maybeGame.data.value;
+
+    const res: Record<string, unknown> = {};
+    for await (const { key: subKey, value } of GAME_TO_PLAYER_GAMES1_0.map(key, game)) {
+        res[db.serializeDocPath(['players', 'games-1.0'], subKey)] = value
+    }
+
+    for await (const { key: subKey, value } of GAME_TO_PLAYER_GAMES1_1.map(key, game)) {
+        res[db.serializeDocPath(['players', 'games-1.1'], subKey)] = value
+    }
+    for await (const { key: subKey, value } of PLAYERS_TO_GAMES.getShares(key, game)) {
+        res[db.serializeDocPath(['players-to-games'], subKey)] = value
+    }
+    return res
+}
+
 
 function toResult<T>(newGameResult: Result<T, Error>): Errors {
     return {
@@ -436,80 +458,85 @@ function findById<T extends { id: string }>(ts: T[], id: string): T | null {
     return ts.find(t => t.id === id) || null
 }
 
-// function gameToPlayerGames1_1([gameId]: Key, game: Game): Iterable<Item<model1_1.PlayerGame>> {
-//     return ix.from(game.players).pipe(
-//         ixop.map(({ id }): Item<model1_1.PlayerGame> =>
-//             item([id, gameId], getPlayerGameExport1_1(game, id)))
-//     )
-// }
+const GAME_TO_PLAYER_GAMES1_1: fw.Mapper<Game, model1_1.PlayerGame> = {
+    map([gameId]: Key, game: Game): Iterable<Item<model1_1.PlayerGame>> {
+        return ix.from(game.players).pipe(
+            ixop.map(({ id }): Item<model1_1.PlayerGame> =>
+                item([id, gameId], getPlayerGameExport1_1(game, id)))
+        )
+    },
+    preimage([playerId, gameId]: Key): Key {
+        return [gameId]
+    }
+}
 
-// function getPlayerGameExport1_1(game: Game, playerId: string): model1_1.PlayerGame {
-//     if (game.state === 'UNSTARTED') {
-//         const sanitizedPlayers: model1_1.ExportedPlayer[] = game.players.map(p => ({
-//             id: p.id,
-//             displayName: p.displayName,
-//         }))
-//         return {
-//             state: 'UNSTARTED',
-//             players: sanitizedPlayers,
-//         }
-//     }
+function getPlayerGameExport1_1(game: Game, playerId: string): model1_1.PlayerGame {
+    if (game.state === 'UNSTARTED') {
+        const sanitizedPlayers: model1_1.ExportedPlayer[] = game.players.map(p => ({
+            id: p.id,
+            displayName: p.displayName,
+        }))
+        return {
+            state: 'UNSTARTED',
+            players: sanitizedPlayers,
+        }
+    }
 
-//     // Repeated because TS isn't smart enough to understand this code works whether 
-//     // the game is started or not.
-//     const sanitizedPlayers: model1_1.ExportedPlayer[] = game.players.map(p => ({
-//         id: p.id,
-//         displayName: p.displayName,
-//     }))
+    // Repeated because TS isn't smart enough to understand this code works whether 
+    // the game is started or not.
+    const sanitizedPlayers: model1_1.ExportedPlayer[] = game.players.map(p => ({
+        id: p.id,
+        displayName: p.displayName,
+    }))
 
-//     const numPlayers = game.players.length
-//     const roundNum = Math.min(...game.players.map(p => p.submissions.length))
+    const numPlayers = game.players.length
+    const roundNum = Math.min(...game.players.map(p => p.submissions.length))
 
-//     // Game is over.
-//     if (roundNum === numPlayers) {
-//         const series: model1_0.ExportedSeries[] = game.players.map(() => ({ entries: [] }))
-//         for (let rIdx = 0; rIdx < numPlayers; rIdx++) {
-//             for (let pIdx = 0; pIdx < numPlayers; pIdx++) {
-//                 series[(pIdx + rIdx) % numPlayers].entries.push({
-//                     playerId: game.players[pIdx].id,
-//                     submission: game.players[pIdx].submissions[rIdx]
-//                 })
-//             }
-//         }
+    // Game is over.
+    if (roundNum === numPlayers) {
+        const series: model1_0.ExportedSeries[] = game.players.map(() => ({ entries: [] }))
+        for (let rIdx = 0; rIdx < numPlayers; rIdx++) {
+            for (let pIdx = 0; pIdx < numPlayers; pIdx++) {
+                series[(pIdx + rIdx) % numPlayers].entries.push({
+                    playerId: game.players[pIdx].id,
+                    submission: game.players[pIdx].submissions[rIdx]
+                })
+            }
+        }
 
-//         return {
-//             state: 'GAME_OVER',
-//             players: sanitizedPlayers,
-//             series,
-//         }
-//     }
+        return {
+            state: 'GAME_OVER',
+            players: sanitizedPlayers,
+            series,
+        }
+    }
 
-//     const player = findById(game.players, playerId)!;
-//     if (player.submissions.length === 0) {
-//         return {
-//             state: 'FIRST_PROMPT',
-//             players: sanitizedPlayers,
-//         }
-//     }
+    const player = findById(game.players, playerId)!;
+    if (player.submissions.length === 0) {
+        return {
+            state: 'FIRST_PROMPT',
+            players: sanitizedPlayers,
+        }
+    }
 
-//     if (player.submissions.length === roundNum) {
-//         const playerIdx = game.players.findIndex(p => p.id === playerId)
-//         if (playerIdx === -1) {
-//             throw new Error('baad')
-//         }
-//         const nextPlayerIdx = (playerIdx + 1) % game.players.length
-//         return {
-//             state: 'RESPOND_TO_PROMPT',
-//             players: sanitizedPlayers,
-//             prompt: game.players[nextPlayerIdx].submissions[roundNum - 1]
-//         }
-//     }
+    if (player.submissions.length === roundNum) {
+        const playerIdx = game.players.findIndex(p => p.id === playerId)
+        if (playerIdx === -1) {
+            throw new Error('baad')
+        }
+        const nextPlayerIdx = (playerIdx + 1) % game.players.length
+        return {
+            state: 'RESPOND_TO_PROMPT',
+            players: sanitizedPlayers,
+            prompt: game.players[nextPlayerIdx].submissions[roundNum - 1]
+        }
+    }
 
-//     return {
-//         state: 'WAITING_FOR_PROMPT',
-//         players: sanitizedPlayers,
-//     }
-// }
+    return {
+        state: 'WAITING_FOR_PROMPT',
+        players: sanitizedPlayers,
+    }
+}
 
 // function gameToPlayerGames1_0(key: Key, value: Game): Iterable<Item<model1_0.PlayerGame>> {
 //     return ix.from(gameToPlayerGames1_1(key, value)).pipe(
@@ -521,6 +548,17 @@ function findById<T extends { id: string }>(ts: T[], id: string): T | null {
 //         }),
 //     );
 // }
+export const GAME_TO_PLAYER_GAMES1_0: fw.Mapper<Game, model1_0.PlayerGame> = fw.composeMappers(GAME_TO_PLAYER_GAMES1_1, {
+    map(key: Key, pg: model1_1.PlayerGame): Iterable<Item<model1_0.PlayerGame>> {
+        return [item(key, {
+            ...pg,
+            players: pg.players.map(p => p.id)
+        })]
+    },
+    preimage(key) { return key }
+})
+
+
 
 export const COLLECTION_SCHEMATA = [
     SHORT_CODE.schema,

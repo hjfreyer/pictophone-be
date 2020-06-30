@@ -285,6 +285,15 @@ function checkAction(actionId: string, savedAction: SavedAction): Promise<void> 
         if (!deepEqual(result1_1_1, result1_2_0)) {
             throw new Error(`divergence at ${actionId}`)
         }
+
+        for (const facetId of Object.keys(result1_1_1.facetDiffs)) {
+            // Check the exports agree.
+            const exports1_1_1 = await logic1_1_1.getFacetExports(d, facetId, actionId)
+            const exports1_2_0 = await logic1_2_0.getFacetExports(d, facetId, actionId)
+            if (!deepEqual(exports1_1_1, exports1_2_0)) {
+                throw new Error(`divergence at ${facetId}@${actionId}`)
+            }
+        }
     })
 }
 
