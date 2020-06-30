@@ -2,10 +2,17 @@ import * as db from './db'
 import {
     AnyAction, SavedAction,
 } from './model'
-import { Option } from './util'
+import { Option, option } from './util'
 import { OptionData } from './util/option'
-import { Key, Item } from './interfaces'
-
+import { Key, Item, ItemIterable, Diff, item } from './interfaces'
+import { validate as validateBase } from './model/base.validator'
+import { validate as validateSchema } from './model/index.validator'
+import { VersionSpecRequest, VersionSpec, DocVersionSpec } from './model/base'
+import { findItemAsync } from './base'
+import * as ixa from "ix/asynciterable"
+import * as ixaop from "ix/asynciterable/operators"
+import * as util from './util'
+import { OperatorAsyncFunction } from 'ix/interfaces'
 
 export interface Input2<TState> {
     getParent(label: string): Promise<Option<TState>>
@@ -45,4 +52,164 @@ export interface IntegrationResult<TResult> {
 export interface Integrator<TResult> {
     getNeededReferenceIds(db: db.Database, action: AnyAction): Promise<{ docs: string[], collections: string[] }>
     integrate(db: db.Database, savedAction: SavedAction): Promise<IntegrationResult<TResult>>
+}
+
+export async function getAction(db: db.Database, actionId: string): Promise<Option<SavedAction>> {
+    const data = await db.getRaw(actionId);
+    return option.from(data).map(validateSchema('SavedAction'))
+}
+
+export async function resolveVersionSpec(db: db.Database, { docs, collections }: VersionSpecRequest): Promise<VersionSpec> {
+    const allDocs = [...docs]
+    for (const collectionId of collections) {
+        const members = option.from(await db.getRaw(collectionId))
+            .map(validateBase('Kollection'))
+            .map(col => col.members)
+            .orElse(() => [])
+        for (const doc of members) {
+            if (allDocs.indexOf(doc) === -1) {
+                allDocs.push(doc)
+            }
+        }
+    }
+    const res: VersionSpec = { docs: {}, collections: collections }
+    for (const docId of allDocs) {
+        res.docs[docId] = option.from(await db.getRaw(docId))
+            .map(validateBase('Pointer'))
+            .map<DocVersionSpec>(p => ({ exists: true, actionId: p.actionId }))
+            .orElse(() => ({ exists: false }))
+    }
+    return res;
+}
+
+export interface Table<T> {
+    getLatestVersionRequest(d: db.Database, key: Key): Promise<VersionSpecRequest>
+    getState(d: db.Database, version: VersionSpec): ItemIterable<T>
+}
+
+export async function getLatestValue<T>(d: db.Database, table: Table<T>, key: Key): Promise<Option<T>> {
+    const version = await resolveVersionSpec(d, await table.getLatestVersionRequest(d, key))
+    return option.from(await findItemAsync(table.getState(d, version), key)).map(item => item.value)
+}
+
+export interface CollectionMapper<T> {
+    (key: Key, value: T): string[]
+}
+
+export function diffCollections<T>(diff: Diff<T>, collectionMapper: CollectionMapper<T>): FacetDiff {
+    switch (diff.kind) {
+        case 'add':
+            return {
+                joinedCollections: collectionMapper(diff.key, diff.value),
+                leftCollections: [],
+            }
+        case 'delete':
+            return {
+                joinedCollections: [],
+                leftCollections: collectionMapper(diff.key, diff.value),
+            }
+        case 'replace':
+            const oldCollections = collectionMapper(diff.key, diff.oldValue)
+            const newCollections = collectionMapper(diff.key, diff.newValue)
+            return {
+                joinedCollections: newCollections.filter(c => !oldCollections.includes(c)),
+                leftCollections: oldCollections.filter(c => !newCollections.includes(c)),
+            }
+    }
+}
+
+
+// export function getLatestAggregatedVersionRequest<TShare, TResult>(
+//     agg: AggregationTable<TShare, TResult>, key: Key): VersionSpecRequest {
+//     const collectionPath = db.serializeDocPath(agg.collectionSchema, key);
+//     return {
+//         docs: [],
+//         collections: [collectionPath]
+//     }
+// }
+
+export interface LiveTable<TResult> {
+    getLatestValue(d: db.Database, key: Key): Promise<Option<TResult>>
+}
+
+export interface PrimaryTable<T> {
+    schema: Key
+    getState(d: db.Database, key: Key, actionId: string): Promise<Option<T>>
+}
+
+export interface AggregationTable<TSource, TShare, TResult> {
+    schema: Key
+    getShares(sourceKey: Key, sourceValue: TSource): Iterable<Item<TShare>>
+    aggregateShares(groupKey: Key, shares: Iterable<TShare>): TResult
+}
+
+export function liveAggregatedTable<TSource, TShare, TResult>(
+    source: PrimaryTable<TSource>,
+    agg: AggregationTable<TSource, TShare, TResult>
+): LiveTable<TResult> {
+    return {
+        async getLatestValue(d: db.Database, key: Key): Promise<Option<TResult>> {
+            const collectionPath = db.serializeDocPath(agg.schema, key);
+            const version = await resolveVersionSpec(d, {
+                docs: [],
+                collections: [collectionPath],
+            })
+
+            return getAggregatedState(d, source, agg, key, version)
+        },
+    }
+}
+
+export async function getPrimaryState<T>(d: db.Database, t: PrimaryTable<T>, key: Key, version: VersionSpec): Promise<Option<T>> {
+    const docVersion = option.of(version.docs[db.serializeDocPath(t.schema, key)]).unwrap();
+    if (!docVersion.exists) {
+        return option.none()
+    }
+    return t.getState(d, key, docVersion.actionId)
+}
+
+
+export function getAllPrimaryStates<T>(d: db.Database, t: PrimaryTable<T>, version: VersionSpec): ItemIterable<T> {
+    return ixa.from(Object.entries(version.docs)).pipe(
+        getActionIdsForSchema(t.schema),
+        ixaop.map(async ({ key, value: actionId }: Item<string>): Promise<Option<Item<T>>> =>
+            option.from(await t.getState(d, key, actionId)).map(v => item(key, v))),
+        util.filterNoneAsync()
+    )
+}
+
+export async function getAggregatedState<TSource, TShare, TResult>(
+    d: db.Database,
+    source: PrimaryTable<TSource>,
+    agg: AggregationTable<TSource, TShare, TResult>, key: Key,
+    version: VersionSpec): Promise<Option<TResult>> {
+    const collectionPath = db.serializeDocPath(agg.schema, key);
+    if (!version.collections.includes(collectionPath)) {
+        throw new Error("bad version")
+    }
+    const primaryRecords = getAllPrimaryStates(d, source, version)
+    const shareRecords = ixa.from(primaryRecords).pipe(
+        ixaop.flatMap(({ key, value }) => ixa.from(agg.getShares(key, value)))
+    )
+    const aggregated = shareRecords.pipe(
+        ixaop.groupBy(item => db.serializeDocPath(agg.schema, item.key),
+            item => item.value,
+            (groupPath: string, shares: Iterable<TShare>): Item<TResult> => {
+                const { key: groupKey } = db.parseDocPath(groupPath);
+                return item(groupKey, agg.aggregateShares(groupKey, shares))
+            }
+        )
+    )
+    return option.from(await findItemAsync(aggregated, key)).map(item => item.value)
+}
+
+export function getActionIdsForSchema(targetSchema: Key): OperatorAsyncFunction<[string, DocVersionSpec], Item<string>> {
+    return ixaop.flatMap(([docId, docVersion]): ItemIterable<string> => {
+        const { schema, key } = db.parseDocPath(docId);
+        if (util.lexCompare(schema, targetSchema) === 0 && docVersion.exists) {
+            return ixa.of(item(key, docVersion.actionId))
+        } else {
+            return ixa.empty()
+        }
+    })
 }

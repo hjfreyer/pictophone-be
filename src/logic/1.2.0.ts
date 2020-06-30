@@ -22,7 +22,7 @@ import { Defaultable, Option, option, Result, result } from '../util';
 import { OptionData, OptionView } from '../util/option';
 import { ResultView } from '../util/result';
 import deepEqual from 'deep-equal';
-import { UnifiedInterface, Errors, Table, getAction, resolveVersionSpec, getActionIdsForSchema } from '..';
+import { UnifiedInterface, Errors, } from '..';
 import { validate as validateBase } from '../model/base.validator'
 import { validate as validateSchema } from '../model/index.validator'
 import * as readables from '../readables';
@@ -73,7 +73,7 @@ export const REVISION: fw.Integrator<Errors> = {
                 result: {
                     '1.0': result.ok(null),
                     '1.1': result.ok(null),
-                    '1.2': result.ok(null),
+                    // '1.2': result.ok(null),
                 },
                 facetDiffs: {},
             }
@@ -83,7 +83,7 @@ export const REVISION: fw.Integrator<Errors> = {
         return {
             result: toResult(gameDiffOrError),
             facetDiffs: {
-                [gameDocPath]: diffCollections(diff)
+                [gameDocPath]: fw.diffCollections(diff, gameToCollections)
             }
         }
     }
@@ -107,104 +107,23 @@ export async function getCollections(d: db.Database, docId: string, actionId: st
     return maybeNewGame.map(newGame => gameToCollections(key, newGame)).orElse(() => [])
 }
 
-function diffCollections(diff: Diff<Game>): fw.FacetDiff {
-    switch (diff.kind) {
-        case 'add':
-            return {
-                joinedCollections: gameToCollections(diff.key, diff.value),
-                leftCollections: [],
-            }
-        case 'delete':
-            return {
-                joinedCollections: [],
-                leftCollections: gameToCollections(diff.key, diff.value),
-            }
-        case 'replace':
-            const oldCollections = gameToCollections(diff.key, diff.oldValue)
-            const newCollections = gameToCollections(diff.key, diff.newValue)
-            return {
-                joinedCollections: newCollections.filter(c => !oldCollections.includes(c)),
-                leftCollections: oldCollections.filter(c => !newCollections.includes(c)),
-            }
-    }
-}
-
-export function getLatestAggregatedVersionRequest<TShare, TResult>(
-    agg: AggregationTable<TShare, TResult>, key: Key): VersionSpecRequest {
-    const collectionPath = db.serializeDocPath(agg.collectionSchema, key);
-    return {
-        docs: [],
-        collections: [collectionPath]
-    }
-}
-
-export interface LiveTable<TResult> {
-    getLatestValue(d: db.Database, key: Key): Promise<Option<TResult>>
-}
-
-export interface PrimaryTable<T> {
-    schema: Key
-    getState(d: db.Database, key: Key, actionId: string): Promise<Option<T>>
-}
-
-function liveAggregatedTable<TSource, TShare, TResult>(
-    source: PrimaryTable<TSource>,
-    agg: AggregationTable2<TSource, TShare, TResult>
-): LiveTable<TResult> {
-    return {
-        async getLatestValue(d: db.Database, key: Key): Promise<Option<TResult>> {
-            const collectionPath = db.serializeDocPath(agg.schema, key);
-            const version = await resolveVersionSpec(d, {
-                docs: [],
-                collections: [collectionPath],
-            })
-
-            return getAggregatedState(d, source, agg, key, version)
-        },
-    }
-}
-
-async function getAggregatedState<TSource, TShare, TResult>(
-    d: db.Database,
-    source: PrimaryTable<TSource>,
-    agg: AggregationTable2<TSource, TShare, TResult>, key: Key,
-    version: VersionSpec): Promise<Option<TResult>> {
-    const collectionPath = db.serializeDocPath(agg.schema, key);
-    if (!version.collections.includes(collectionPath)) {
-        throw new Error("bad version")
-    }
-    const primaryRecords = getAllPrimaryStates(d, source, version)
-    const shareRecords = ixa.from(primaryRecords).pipe(
-        ixaop.flatMap(({ key, value }) => ixa.from(agg.getShares(key, value)))
-    )
-    const aggregated = shareRecords.pipe(
-        ixaop.groupBy(item => db.serializeDocPath(agg.schema, item.key),
-            item => item.value,
-            (groupPath: string, shares: Iterable<TShare>): Item<TResult> => {
-                const { key: groupKey } = db.parseDocPath(groupPath);
-                return item(groupKey, agg.aggregateShares(groupKey, shares))
-            }
-        )
-    )
-    return option.from(await findItemAsync(aggregated, key)).map(item => item.value)
-}
 
 function toResult<T>(newGameResult: Result<T, Error>): Errors {
     return {
         '1.0': result.from(newGameResult).map(() => null).mapErr(convertError1_0),
         '1.1': result.from(newGameResult).map(() => null).mapErr(convertError1_0),
-        '1.2': result.from(newGameResult).map(() => null),
+        // '1.2': result.from(newGameResult).map(() => null),
     }
 }
 
-export async function getGameDiffOrError(d: db.Database, savedAction: SavedAction):
+async function getGameDiffOrError(d: db.Database, savedAction: SavedAction):
     Promise<Result<Option<Diff<Game>>, Error>> {
     const action = convertAction(savedAction);
     const { gameId } = action;
-    const oldGame = await getPrimaryState(d, GAME, [gameId], savedAction.parents)
+    const oldGame = await fw.getPrimaryState(d, GAME, [gameId], savedAction.parents)
 
     const internalIsShortCodeUsed = async (sc: string): Promise<boolean> => {
-        const scState = await getAggregatedState(
+        const scState = await fw.getAggregatedState(
             d, GAME, SHORT_CODE, [sc], savedAction.parents)
 
         return scState.data.some
@@ -216,54 +135,22 @@ export async function getGameDiffOrError(d: db.Database, savedAction: SavedActio
         .map(newGame => diffs.newDiff([gameId], oldGame, option.some(newGame)))
 }
 
-async function getPrimaryState<T>(d: db.Database, t: PrimaryTable<T>, key: Key, version: VersionSpec): Promise<Option<T>> {
-    const docVersion = option.of(version.docs[db.serializeDocPath(t.schema, key)]).unwrap();
-    if (!docVersion.exists) {
-        return option.none()
-    }
-    return t.getState(d, key, docVersion.actionId)
-}
 
-
-function getAllPrimaryStates<T>(d: db.Database, t: PrimaryTable<T>, version: VersionSpec): ItemIterable<T> {
-    return ixa.from(Object.entries(version.docs)).pipe(
-        getActionIdsForSchema(t.schema),
-        ixaop.map(async ({ key, value: actionId }: Item<string>): Promise<Option<Item<T>>> =>
-            option.from(await t.getState(d, key, actionId)).map(v => item(key, v))),
-        util.filterNoneAsync()
-    )
-}
-
-const GAME: PrimaryTable<Game> = {
+const GAME: fw.PrimaryTable<Game> = {
     schema: ['games'],
     async getState(d: db.Database, key: Key, actionId: string): Promise<Option<Game>> {
-        const savedAction = option.from(await getAction(d, actionId)).unwrap();
+        const savedAction = option.from(await fw.getAction(d, actionId)).unwrap();
 
         const maybeGameDiff = result.from(await getGameDiffOrError(d, savedAction)).unwrap();
         const gameDiff = option.from(maybeGameDiff).unwrap()
+        if (util.lexCompare(gameDiff.key, key) !== 0) {
+            throw new Error("Bad action ID")
+        }
         return option.from(getNewValue(gameDiff)).map(item => item.value)
     },
 }
 
-interface MappedTable<TSource, TResult> {
-    getPrimaryTableKey(d: db.Database, key: Key): Promise<Key>
-    mapState(primaryKey: Key, primaryValue: TSource): ItemIterable<TResult>
-}
-
-interface AggregationTable<TShare, TResult> {
-    collectionSchema: Key
-
-    getGroupKeyFromShareKey(key: Key): Key
-    groupValues(groupKey: Key, values: Iterable<Item<TShare>>): TResult
-}
-
-interface AggregationTable2<TSource, TShare, TResult> {
-    schema: Key
-    getShares(sourceKey: Key, sourceValue: TSource): Iterable<Item<TShare>>
-    aggregateShares(groupKey: Key, shares: Iterable<TShare>): TResult
-}
-
-const SHORT_CODE: AggregationTable2<Game, ShortCode, ShortCode> = {
+const SHORT_CODE: fw.AggregationTable<Game, ShortCode, ShortCode> = {
     schema: ['short-codes-to-games'],
 
     getShares([gameId]: Key, game: Game): Iterable<Item<ShortCode>> {
@@ -279,7 +166,7 @@ const SHORT_CODE: AggregationTable2<Game, ShortCode, ShortCode> = {
     }
 }
 
-const PLAYERS_TO_GAMES: AggregationTable2<Game, string, model1_1.GameList> = {
+const PLAYERS_TO_GAMES: fw.AggregationTable<Game, string, model1_1.GameList> = {
     schema: ['players-to-games'],
     getShares([gameId]: Key, game: Game): Iterable<Item<string>> {
         return ix.from(game.players).pipe(ixop.map(p => item([p.id], gameId)))
@@ -291,7 +178,7 @@ const PLAYERS_TO_GAMES: AggregationTable2<Game, string, model1_1.GameList> = {
     }
 }
 
-export const LIVE_PLAYERS_TO_GAMES: LiveTable<model1_1.GameList> = liveAggregatedTable(
+export const LIVE_PLAYERS_TO_GAMES: fw.LiveTable<model1_1.GameList> = fw.liveAggregatedTable(
     GAME, PLAYERS_TO_GAMES);
 
 function convertError1_0(error: Error): model1_0.Error {
@@ -540,8 +427,8 @@ function convertAction(a: AnyAction): Action {
             return convertAction1_0(a.action)
         case '1.1':
             return convertAction1_1(a.action)
-        case '1.2':
-            return convertAction1_2(a.action)
+        // case '1.2':
+        //     return convertAction1_2(a.action)
     }
 }
 

@@ -7,7 +7,7 @@ import { Diff, Item, Key, ItemIterable } from './interfaces';
 import * as util from './util';
 import deepEqual from "deep-equal";
 import * as ixi from "ix/interfaces";
-import { Table } from ".";
+import { Table } from "./framework";
 import * as db from './db';
 import { VersionSpec, VersionSpecRequest } from "./model/base";
 import { Option, option } from './util'

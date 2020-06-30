@@ -11,10 +11,12 @@ export type AnyAction = {
 } | {
     version: '1.1'
     action: Action1_1
-} | {
-    version: '1.2'
-    action: Action1_2
+    // } | {
+    //     version: '1.2'
+    //     action: Action1_2
 }
-export type AnyError = Error1_0 | Error1_1 | Error1_2
+export type AnyError = Error1_0
+    | Error1_1
+// | Error1_2
 
 export type SavedAction = AnyAction & { parents: VersionSpec }
