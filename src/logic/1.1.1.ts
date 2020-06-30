@@ -359,6 +359,15 @@ export const GAME_TO_PLAYER_GAMES1_0: diffs.Mapper<Game, model1_0.PlayerGame> = 
     preimage(key) { return key }
 })
 
+
+export const PLAYER_GAMES1_0: fw.LiveTable<model1_0.PlayerGame> = fw.liveMappedTable(
+    fw.livePrimaryTable(GAME), GAME_TO_PLAYER_GAMES1_0
+)
+
+export const PLAYER_GAMES1_1: fw.LiveTable<model1_1.PlayerGame> = fw.liveMappedTable(
+    fw.livePrimaryTable(GAME), GAME_TO_PLAYER_GAMES1_1
+)
+
 export const COLLECTION_SCHEMATA = [
     PLAYERS_TO_GAMES.schema
 ]

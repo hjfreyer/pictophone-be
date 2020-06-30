@@ -9,7 +9,8 @@ import * as ixaop from "ix/asynciterable/operators"
 import { getActionId, findItemAsync, compareActionIds } from './base'
 import * as db from './db'
 import { Item, Key, ItemIterable, item, Diff } from './interfaces'
-import * as logic1_1_1 from './logic/1.2.0'
+import * as logic1_1_1 from './logic/1.1.1'
+import * as logic1_2_0 from './logic/1.2.0'
 import { AnyAction, AnyError, SavedAction } from './model'
 import * as model1_0 from './model/1.0'
 import { validate as validate1_0 } from './model/1.0.validator'
@@ -255,12 +256,39 @@ async function handleCrossCheck(): Promise<void> {
             break;
         }
         const [actionId, savedAction] = maybeNextAction.data.value;
-        // await handleCrossCheckForAction(actionId, savedAction)
+        await checkAction(actionId, savedAction)
 
         cursor = option.some(actionId);
     }
     console.log('DONE')
 }
+
+function checkAction(actionId: string, savedAction: SavedAction): Promise<void> {
+    console.log("X-CHECK", actionId)
+    return db.runTransaction(fsDb)(async (d: db.Database): Promise<void> => {
+        // Check next version doesn't request invalid parents.
+        const parents1_2_0 = await logic1_2_0.REVISION.getNeededReferenceIds(d, savedAction)
+        for (const docId of parents1_2_0.docs) {
+            if (!(docId in savedAction.parents.docs)) {
+                throw new Error("Illegal parent lookup")
+            }
+        }
+        for (const collectionId of parents1_2_0.collections) {
+            if (!savedAction.parents.collections.includes(collectionId)) {
+                throw new Error("Illegal parent lookup")
+            }
+        }
+
+        // Check the next version has the same impact.
+        const result1_1_1 = await logic1_1_1.REVISION.integrate(d, savedAction)
+        const result1_2_0 = await logic1_2_0.REVISION.integrate(d, savedAction)
+        if (!deepEqual(result1_1_1, result1_2_0)) {
+            throw new Error(`divergence at ${actionId}`)
+        }
+    })
+}
+
+
 
 function v1_0(): Router {
     const res = Router()
@@ -282,16 +310,16 @@ function v1_0(): Router {
     res.options('/players/:playerId/games', cors())
     res.get('/players/:playerId/games', cors(), optionHandler(req => {
         return db.runTransaction(fsDb)(
-            db => logic1_1_1.LIVE_PLAYERS_TO_GAMES.getLatestValue(
-                db, [req.params['playerId']]))
+            db => fw.getLatestValue(db, logic1_1_1.LIVE_PLAYERS_TO_GAMES,
+                [req.params['playerId']]))
     }))
 
-    // res.options('/players/:playerId/games/:gameId', cors())
-    // res.get('/players/:playerId/games/:gameId', cors(), optionHandler(req => {
-    //     return db.runTransaction(fsDb)(
-    //         db => getLatestValue(
-    //             db, logic1_1_1.PLAYER_GAME1_1, [req.params['playerId'], req.params['gameId']]))
-    // }))
+    res.options('/players/:playerId/games/:gameId', cors())
+    res.get('/players/:playerId/games/:gameId', cors(), optionHandler(req => {
+        return db.runTransaction(fsDb)(
+            db => fw.getLatestValue(
+                db, logic1_1_1.PLAYER_GAMES1_0, [req.params['playerId'], req.params['gameId']]))
+    }))
 
     return res
 }
@@ -316,16 +344,16 @@ function v1_1(): Router {
     res.options('/players/:playerId/games', cors())
     res.get('/players/:playerId/games', cors(), optionHandler(req => {
         return db.runTransaction(fsDb)(
-            db => logic1_1_1.LIVE_PLAYERS_TO_GAMES.getLatestValue(
-                db, [req.params['playerId']]))
+            db => fw.getLatestValue(db, logic1_1_1.LIVE_PLAYERS_TO_GAMES,
+                [req.params['playerId']]))
     }))
 
-    // res.options('/players/:playerId/games/:gameId', cors())
-    // res.get('/players/:playerId/games/:gameId', cors(), optionHandler(req => {
-    //     return db.runTransaction(fsDb)(
-    //         db => getLatestValue(
-    //             db, logic1_1_1.PLAYER_GAME1_1, [req.params['playerId'], req.params['gameId']]))
-    // }))
+    res.options('/players/:playerId/games/:gameId', cors())
+    res.get('/players/:playerId/games/:gameId', cors(), optionHandler(req => {
+        return db.runTransaction(fsDb)(
+            db => fw.getLatestValue(
+                db, logic1_1_1.PLAYER_GAMES1_1, [req.params['playerId'], req.params['gameId']]))
+    }))
 
     return res
 }

@@ -94,12 +94,16 @@ export function diffToChange<T>(d: Diff<T>): Change<T> {
     }
 }
 
-export function findItem<T>(items: Iterable<Item<T>>, key: Key): Option<Item<T>> {
-    return option.of(ix.find(items, item => util.lexCompare(item.key, key) === 0))
+export function findItem<T>(items: Iterable<Item<T>>, key: Key): Option<T> {
+    return option.of(ix.find(items, item => util.lexCompare(item.key, key) === 0)).map(
+        item => item.value
+    )
 }
 
-export async function findItemAsync<T>(items: ItemIterable<T>, key: Key): Promise<util.Option<Item<T>>> {
-    return util.option.of(await ixa.find(items, item => util.lexCompare(item.key, key) === 0))
+export async function findItemAsync<T>(items: ItemIterable<T>, key: Key): Promise<util.Option<T>> {
+    return util.option.of(await ixa.find(items, item => util.lexCompare(item.key, key) === 0)).map(
+        item => item.value
+    )
 }
 
 const HASH_HEX_CHARS_LEN = (32 / 8) * 2;  // 32 bits of hash

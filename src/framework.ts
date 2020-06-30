@@ -8,11 +8,16 @@ import { Key, Item, ItemIterable, Diff, item } from './interfaces'
 import { validate as validateBase } from './model/base.validator'
 import { validate as validateSchema } from './model/index.validator'
 import { VersionSpecRequest, VersionSpec, DocVersionSpec } from './model/base'
-import { findItemAsync } from './base'
+import { findItemAsync, findItem } from './base'
+
 import * as ixa from "ix/asynciterable"
 import * as ixaop from "ix/asynciterable/operators"
+
+import * as ix from "ix/iterable"
+import * as ixop from "ix/iterable/operators"
 import * as util from './util'
 import { OperatorAsyncFunction } from 'ix/interfaces'
+import * as diffs from './diffs'
 
 export interface Input2<TState> {
     getParent(label: string): Promise<Option<TState>>
@@ -87,9 +92,9 @@ export interface Table<T> {
     getState(d: db.Database, version: VersionSpec): ItemIterable<T>
 }
 
-export async function getLatestValue<T>(d: db.Database, table: Table<T>, key: Key): Promise<Option<T>> {
+export async function getLatestValue<T>(d: db.Database, table: LiveTable<T>, key: Key): Promise<Option<T>> {
     const version = await resolveVersionSpec(d, await table.getLatestVersionRequest(d, key))
-    return option.from(await findItemAsync(table.getState(d, version), key)).map(item => item.value)
+    return table.getState(d, key, version)
 }
 
 export interface CollectionMapper<T> {
@@ -128,8 +133,9 @@ export function diffCollections<T>(diff: Diff<T>, collectionMapper: CollectionMa
 //     }
 // }
 
-export interface LiveTable<TResult> {
-    getLatestValue(d: db.Database, key: Key): Promise<Option<TResult>>
+export interface LiveTable<T> {
+    getLatestVersionRequest(d: db.Database, key: Key): Promise<VersionSpecRequest>
+    getState(d: db.Database, key: Key, version: VersionSpec): Promise<Option<T>>
 }
 
 export interface PrimaryTable<T> {
@@ -143,20 +149,69 @@ export interface AggregationTable<TSource, TShare, TResult> {
     aggregateShares(groupKey: Key, shares: Iterable<TShare>): TResult
 }
 
+export function livePrimaryTable<T>(
+    source: PrimaryTable<T>): LiveTable<T> {
+    return {
+        async getState(d: db.Database, key: Key, version: VersionSpec): Promise<Option<T>> {
+            const docPath = db.serializeDocPath(source.schema, key)
+            const docVersion = option.of(version.docs[docPath]).unwrap();
+            if (docVersion.exists) {
+                return await source.getState(d, key, docVersion.actionId)
+
+            } else {
+                return option.none()
+            }
+        },
+        async getLatestVersionRequest(d: db.Database, key: Key): Promise<VersionSpecRequest> {
+            const docPath = db.serializeDocPath(source.schema, key)
+            return {
+                docs: [docPath],
+                collections: [],
+            }
+        }
+    }
+}
+
 export function liveAggregatedTable<TSource, TShare, TResult>(
     source: PrimaryTable<TSource>,
     agg: AggregationTable<TSource, TShare, TResult>
 ): LiveTable<TResult> {
     return {
-        async getLatestValue(d: db.Database, key: Key): Promise<Option<TResult>> {
-            const collectionPath = db.serializeDocPath(agg.schema, key);
-            const version = await resolveVersionSpec(d, {
-                docs: [],
-                collections: [collectionPath],
-            })
+        async getState(d: db.Database, key: Key, version: VersionSpec): Promise<Option<TResult>> {
 
             return getAggregatedState(d, source, agg, key, version)
         },
+
+        async getLatestVersionRequest(d: db.Database, key: Key): Promise<VersionSpecRequest> {
+            const collectionPath = db.serializeDocPath(agg.schema, key);
+            return {
+                docs: [],
+                collections: [collectionPath],
+            }
+        }
+    }
+}
+
+
+export function liveMappedTable<TSource, TResult>(
+    source: LiveTable<TSource>,
+    mapper: diffs.Mapper<TSource, TResult>
+): LiveTable<TResult> {
+    return {
+        async getState(d: db.Database, key: Key, version: VersionSpec): Promise<Option<TResult>> {
+            const sourceKey = mapper.preimage(key)
+            const maybeSource = await source.getState(d, sourceKey, version);
+            const mapped = ix.of(maybeSource).pipe(
+                util.filterNone(),
+                ixop.flatMap(value => mapper.map(sourceKey, value)),
+            )
+
+            return findItem(mapped, key)
+        },
+        async getLatestVersionRequest(d: db.Database, key: Key): Promise<VersionSpecRequest> {
+            const sourceKey = mapper.preimage(key)
+            return source.getLatestVersionRequest(d, sourceKey)
+        }
     }
 }
 
@@ -167,7 +222,6 @@ export async function getPrimaryState<T>(d: db.Database, t: PrimaryTable<T>, key
     }
     return t.getState(d, key, docVersion.actionId)
 }
-
 
 export function getAllPrimaryStates<T>(d: db.Database, t: PrimaryTable<T>, version: VersionSpec): ItemIterable<T> {
     return ixa.from(Object.entries(version.docs)).pipe(
@@ -200,7 +254,7 @@ export async function getAggregatedState<TSource, TShare, TResult>(
             }
         )
     )
-    return option.from(await findItemAsync(aggregated, key)).map(item => item.value)
+    return option.from(await findItemAsync(aggregated, key))
 }
 
 export function getActionIdsForSchema(targetSchema: Key): OperatorAsyncFunction<[string, DocVersionSpec], Item<string>> {
