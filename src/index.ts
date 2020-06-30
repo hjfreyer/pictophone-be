@@ -148,19 +148,16 @@ function handleAction(action: AnyAction): Promise<Result<null, AnyError>> {
         const res = await logic1_2_0.REVISION.integrate(db, savedAction)
 
         db.tx.set(db.db.doc(actionId), savedAction)
-        for (const refId of res.impactedReferenceIds) {
-            db.tx.set(db.db.doc(refId), { actionId })
-        }
-
-        for (const [collectionPath, diffs] of Object.entries(res.impactedCollections)) {
-            if (0 < diffs.deletedMembers.length) {
-                db.tx.set(db.db.doc(collectionPath), {
-                    members: admin.firestore.FieldValue.arrayRemove(...diffs.deletedMembers)
+        for (const [facetId, facetDiff] of Object.entries(res.facetDiffs)) {
+            db.tx.set(db.db.doc(facetId), { actionId })
+            for (const left of facetDiff.leftCollections) {
+                db.tx.set(db.db.doc(left), {
+                    members: admin.firestore.FieldValue.arrayRemove(facetId)
                 }, { merge: true })
             }
-            if (0 < diffs.addedMembers.length) {
-                db.tx.set(db.db.doc(collectionPath), {
-                    members: admin.firestore.FieldValue.arrayUnion(...diffs.addedMembers)
+            for (const joined of facetDiff.joinedCollections) {
+                db.tx.set(db.db.doc(joined), {
+                    members: admin.firestore.FieldValue.arrayUnion(facetId)
                 }, { merge: true })
             }
         }
@@ -187,17 +184,17 @@ async function handleBackfillDocs(): Promise<void> {
 
 async function backfillDocsForAction(actionId: string, savedAction: SavedAction): Promise<void> {
     await db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
-        const { impactedReferenceIds } = await logic1_2_0.REVISION.integrate(db, savedAction)
+        const { facetDiffs } = await logic1_2_0.REVISION.integrate(db, savedAction)
 
-        for (const refId of impactedReferenceIds) {
-            const newPointer: Pointer = option.from(await db.getRaw(refId))
+        for (const facetId of Object.keys(facetDiffs)) {
+            const newPointer: Pointer = option.from(await db.getRaw(facetId))
                 .map(validateBase('Pointer'))
                 .map(ptr => ({
                     actionId: compareActionIds(ptr.actionId, actionId) < 0 ? actionId : ptr.actionId
                 }))
                 .orElse(() => ({ actionId }))
 
-            db.tx.set(db.db.doc(refId), newPointer);
+            db.tx.set(db.db.doc(facetId), newPointer);
         }
     })
 }
@@ -223,12 +220,12 @@ async function checkDoc(docPath: string): Promise<void> {
             }
             const { actionId } = maybeDoc.data.value;
             const savedAction = option.from(await getAction(db, actionId)).unwrap()
-            const { impactedReferenceIds } = await logic1_2_0.REVISION.integrate(db, savedAction)
-            if (!impactedReferenceIds.includes(docPath)) {
+            const { facetDiffs } = await logic1_2_0.REVISION.integrate(db, savedAction)
+            if (!(docPath in facetDiffs)) {
                 throw new Error(`Incorrect pointer at ${JSON.stringify(docPath)}`)
             }
 
-            const collections = (await logic1_2_0.getCollections(db, docPath, savedAction));
+            const collections = (await logic1_2_0.getCollections(db, docPath, actionId));
             for (const collectionPath of collections) {
                 db.tx.set(db.db.doc(collectionPath), {
                     members: admin.firestore.FieldValue.arrayUnion(docPath)
@@ -236,7 +233,8 @@ async function checkDoc(docPath: string): Promise<void> {
             }
         })
     }
-    if (util.lexCompare(schema, ['players-to-games']) === 0) {
+
+    if (logic1_2_0.COLLECTION_SCHEMATA.some(s => util.lexCompare(schema, s) === 0)) {
         await db.runTransaction(fsDb)(async (db: db.Database): Promise<void> => {
             const maybeDoc = option.from(await db.getRaw(docPath))
                 .map(validateBase('Kollection'))
@@ -249,8 +247,7 @@ async function checkDoc(docPath: string): Promise<void> {
                     .map(validateBase('Pointer'))
                     .unwrap()
 
-                const savedAction = option.from(await getAction(db, actionId)).unwrap()
-                const collections = (await logic1_2_0.getCollections(db, memberDocPath, savedAction));
+                const collections = await logic1_2_0.getCollections(db, memberDocPath, actionId);
                 if (!collections.includes(docPath)) {
                     throw new Error(`Doc ${JSON.stringify(memberDocPath)} is incorrectly marked as a member of ${docPath}`)
                 }
