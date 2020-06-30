@@ -268,7 +268,7 @@ function findById<T extends { id: string }>(ts: T[], id: string): T | null {
     return ts.find(t => t.id === id) || null
 }
 
-const GAME_TO_PLAYER_GAMES1_1: diffs.Mapper<Game, model1_1.PlayerGame> = {
+const GAME_TO_PLAYER_GAMES1_1: fw.Mapper<Game, model1_1.PlayerGame> = {
     map([gameId]: Key, game: Game): Iterable<Item<model1_1.PlayerGame>> {
         return ix.from(game.players).pipe(
             ixop.map(({ id }): Item<model1_1.PlayerGame> =>
@@ -349,7 +349,7 @@ function getPlayerGameExport1_1(game: Game, playerId: string): model1_1.PlayerGa
     }
 }
 
-export const GAME_TO_PLAYER_GAMES1_0: diffs.Mapper<Game, model1_0.PlayerGame> = diffs.composeMappers(GAME_TO_PLAYER_GAMES1_1, {
+export const GAME_TO_PLAYER_GAMES1_0: fw.Mapper<Game, model1_0.PlayerGame> = fw.composeMappers(GAME_TO_PLAYER_GAMES1_1, {
     map(key: Key, pg: model1_1.PlayerGame): Iterable<Item<model1_0.PlayerGame>> {
         return [item(key, {
             ...pg,

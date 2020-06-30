@@ -16,33 +16,9 @@ import * as ixaop from "ix/asynciterable/operators"
 import * as ix from "ix/iterable"
 import * as ixop from "ix/iterable/operators"
 import * as util from './util'
-import { OperatorAsyncFunction } from 'ix/interfaces'
+import { OperatorAsyncFunction, OperatorFunction } from 'ix/interfaces'
 import * as diffs from './diffs'
-
-export interface Input2<TState> {
-    getParent(label: string): Promise<Option<TState>>
-}
-
-export interface ParentLink {
-    actionId: OptionData<string>
-}
-
-export interface Annotation2<TState> {
-    labels: string[]
-    parents: Record<string, ParentLink>
-    state: TState
-}
-
-export interface Revision2<TState> {
-    id: string
-    validateAnnotation(u: unknown): Annotation2<TState>
-    integrate(action: AnyAction, inputs: Input2<TState>): Promise<IntegrationResult2<TState>>
-}
-
-export interface IntegrationResult2<TState> {
-    labels: string[]
-    state: TState
-}
+import deepEqual from 'deep-equal'
 
 export interface FacetDiff {
     joinedCollections: string[]
@@ -87,6 +63,111 @@ export async function resolveVersionSpec(db: db.Database, { docs, collections }:
     return res;
 }
 
+export interface Mapper<I, O> {
+    // Must be injective: input items with different keys must never produce 
+    // output items with the same key.
+    map(key: Key, value: I): Iterable<Item<O>>
+
+    // Return the input key which could possibly produce outputKey. 
+    preimage(outputKey: Key): Key
+}
+
+function singleMap<I, O>(mapper: Mapper<I, O>, diff: Diff<I>): Iterable<Diff<O>> {
+    const [oldMapped, newMapped] = (() => {
+        switch (diff.kind) {
+            case 'add':
+                return [[], mapper.map(diff.key, diff.value)]
+            case 'delete':
+                return [mapper.map(diff.key, diff.value), []]
+            case 'replace':
+                return [mapper.map(diff.key, diff.oldValue), mapper.map(diff.key, diff.newValue)]
+        }
+    })()
+    type AgedItem = { age: 'old' | 'new', key: Key, value: O };
+    const tagger = (age: 'old' | 'new') => ({ key, value }: Item<O>): AgedItem => ({ age, key, value });
+
+    const aged: ix.IterableX<AgedItem> = ix.concat(
+        ix.from(oldMapped).pipe(ixop.map(tagger('old'))),
+        ix.from(newMapped).pipe(ixop.map(tagger('new'))));
+    return aged.pipe(
+        ixop.groupBy(({ key }) => JSON.stringify(key), x => x, (_, valueIter): Iterable<Diff<O>> => {
+            const values = Array.from(valueIter);
+            if (values.length === 0) {
+                throw new Error("wtf")
+            }
+            if (2 < values.length) {
+                throw new Error("mapper must have returned the same key multiple times")
+            }
+            if (values.length === 1) {
+                const [{ age, key, value }] = values;
+                return [{
+                    kind: age === 'old' ? 'delete' : 'add',
+                    key,
+                    value,
+                }]
+            }
+            // Else, values has 2 elements.
+            if (values[0].age === values[1].age) {
+                throw new Error("mapper must have returned the same key multiple times")
+            }
+
+            if (deepEqual(values[0].value, values[1].value)) {
+                return []
+            }
+
+            return [{
+                kind: 'replace',
+                key: values[0].key,
+                oldValue: values[0].age === 'old' ? values[0].value : values[1].value,
+                newValue: values[0].age === 'new' ? values[0].value : values[1].value,
+            }]
+        }),
+        ixop.flatMap(diffs => diffs),
+    )
+}
+
+export function mapDiffs<I, O>(mapper: Mapper<I, O>): OperatorFunction<Diff<I>, Diff<O>> {
+    return ixop.flatMap(d => ix.from(singleMap(mapper, d)))
+}
+
+export function mapItems<I, O>(mapper: Mapper<I, O>): OperatorFunction<Item<I>, Item<O>> {
+    return ixop.flatMap(({ key, value }) => mapper.map(key, value))
+}
+
+export function mapItemsAsync<I, O>(mapper: Mapper<I, O>): OperatorAsyncFunction<Item<I>, Item<O>> {
+    return ixaop.flatMap(({ key, value }) => ixa.from(mapper.map(key, value)))
+}
+
+export function composeMappers<A, B, C>(f: Mapper<A, B>, g: Mapper<B, C>): Mapper<A, C> {
+    return {
+        map(key: Key, value: A): Iterable<Item<C>> {
+            return ix.from(f.map(key, value)).pipe(
+                ixop.flatMap(({ key, value }) => g.map(key, value))
+            )
+        },
+
+        preimage(outputKey: Key): Key {
+            return f.preimage(g.preimage(outputKey))
+        }
+    }
+}
+
+
+export function mappedTable<I, O>(input: Table<I>, mapper: Mapper<I, O>): Table<O> {
+    return {
+        getState(d: db.Database, version: VersionSpec): ItemIterable<O> {
+            return ixa.from(input.getState(d, version)).pipe(
+                mapItemsAsync(mapper)
+            )
+        },
+
+        async getLatestVersionRequest(_d: db.Database, key: Key): Promise<VersionSpecRequest> {
+            return input.getLatestVersionRequest(_d, mapper.preimage(key))
+        }
+    }
+}
+
+
 export interface Table<T> {
     getLatestVersionRequest(d: db.Database, key: Key): Promise<VersionSpecRequest>
     getState(d: db.Database, version: VersionSpec): ItemIterable<T>
@@ -122,16 +203,6 @@ export function diffCollections<T>(diff: Diff<T>, collectionMapper: CollectionMa
             }
     }
 }
-
-
-// export function getLatestAggregatedVersionRequest<TShare, TResult>(
-//     agg: AggregationTable<TShare, TResult>, key: Key): VersionSpecRequest {
-//     const collectionPath = db.serializeDocPath(agg.collectionSchema, key);
-//     return {
-//         docs: [],
-//         collections: [collectionPath]
-//     }
-// }
 
 export interface LiveTable<T> {
     getLatestVersionRequest(d: db.Database, key: Key): Promise<VersionSpecRequest>
@@ -195,7 +266,7 @@ export function liveAggregatedTable<TSource, TShare, TResult>(
 
 export function liveMappedTable<TSource, TResult>(
     source: LiveTable<TSource>,
-    mapper: diffs.Mapper<TSource, TResult>
+    mapper: Mapper<TSource, TResult>
 ): LiveTable<TResult> {
     return {
         async getState(d: db.Database, key: Key, version: VersionSpec): Promise<Option<TResult>> {
