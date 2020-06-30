@@ -758,8 +758,16 @@ export const Schema = {
             "type": "object"
         },
         "ShortCode": {
+            "defaultProperties": [
+            ],
             "properties": {
+                "usedBy": {
+                    "type": "string"
+                }
             },
+            "required": [
+                "usedBy"
+            ],
             "type": "object"
         },
         "StartGameAction": {

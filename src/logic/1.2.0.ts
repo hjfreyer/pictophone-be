@@ -79,6 +79,7 @@ export const REVISION: fw.Integrator<Errors> = {
                 result: {
                     '1.0': result.ok(null),
                     '1.1': result.ok(null),
+                    '1.2': result.ok(null),
                 },
                 impactedReferenceIds: [],
                 impactedCollections: {},
@@ -93,6 +94,37 @@ export const REVISION: fw.Integrator<Errors> = {
         for (const diff of shortCodeShareDiffs) {
             const collectionKey = SHORT_CODE.getGroupKeyFromShareKey(diff.key)
             const collectionPath = db.serializeDocPath(SHORT_CODE.collectionSchema, collectionKey)
+            if (!(collectionPath in impactedCollections)) {
+                impactedCollections[collectionPath] = {
+                    addedMembers: [],
+                    deletedMembers: [],
+                }
+            }
+
+            switch (diff.kind) {
+                case "add":
+                    impactedCollections[collectionPath].addedMembers.push(gameDocPath)
+                    break
+                case "delete":
+                    impactedCollections[collectionPath].deletedMembers.push(gameDocPath)
+                    break
+                case "replace":
+                    break
+            }
+        }
+
+
+        const playersToGamesShareDiffs = ix.of(diff).pipe(diffs.mapDiffs(PLAYERS_TO_GAMES_SHARE));
+        for (const diff of playersToGamesShareDiffs) {
+            const collectionKey = PLAYERS_TO_GAMES.getGroupKeyFromShareKey(diff.key)
+            const collectionPath = db.serializeDocPath(PLAYERS_TO_GAMES.collectionSchema, collectionKey)
+
+            if (!(collectionPath in impactedCollections)) {
+                impactedCollections[collectionPath] = {
+                    addedMembers: [],
+                    deletedMembers: [],
+                }
+            }
 
             switch (diff.kind) {
                 case "add":
@@ -122,12 +154,115 @@ export const REVISION: fw.Integrator<Errors> = {
     }
 }
 
-function getLatestAggregatedVersionRequest<TShare, TResult>(
+
+export async function getCollections(d: db.Database, docId: string, savedAction: SavedAction): Promise<string[]> {
+    const gameDiffOrError = result.from(await getGameDiffOrError(d, savedAction));
+
+    const { schema, key } = db.parseDocPath(docId);
+    if (util.lexCompare(schema, GAME_SCHEMA) !== 0) {
+        throw new Error("bad doc ID")
+    }
+    if (gameDiffOrError.data.status === 'err') {
+        throw new Error("bad version")
+    }
+    if (!gameDiffOrError.data.value.data.some) {
+        throw new Error("bad version")
+    }
+    if (util.lexCompare(gameDiffOrError.data.value.data.value.key, key) !== 0) {
+        throw new Error("bad version")
+    }
+    const maybeNewGame = getNewValue(gameDiffOrError.data.value.data.value);
+    if (!maybeNewGame.data.some) {
+        return []
+    }
+    const newGame = maybeNewGame.data.value;
+    const shortCodeShares = SHORT_CODE_SHARE_MAPPER.map(newGame.key, newGame.value)
+    const shortCodesWithShares = ix.from(shortCodeShares).pipe(
+        ixop.map(({ key }) => SHORT_CODE.getGroupKeyFromShareKey(key)),
+        ixop.map(key => db.serializeDocPath(SHORT_CODE.collectionSchema, key)),
+        ixop.distinct(),
+    )
+
+    const playerToGamesShares = PLAYERS_TO_GAMES_SHARE.map(newGame.key, newGame.value)
+    const playersToGamesWithShares = ix.from(playerToGamesShares).pipe(
+        ixop.map(({ key }) => PLAYERS_TO_GAMES.getGroupKeyFromShareKey(key)),
+        ixop.map(key => db.serializeDocPath(PLAYERS_TO_GAMES.collectionSchema, key)),
+        ixop.distinct(),
+    )
+
+    return [...shortCodesWithShares, ...playersToGamesWithShares]
+
+
+
+    //     const maybeDiff = gameDiffOrError.data.value;
+    //     if (!maybeDiff.data.some) {
+    //         return {
+    //             result: {
+    //                 '1.0': result.ok(null),
+    //                 '1.1': result.ok(null),
+    //                 '1.2': result.ok(null),
+    //             },
+    //             impactedReferenceIds: [],
+    //             impactedCollections: {},
+    //         }
+    //     }
+    //     const diff = maybeDiff.data.value;
+    //     const gameDocPath = db.serializeDocPath(GAME_SCHEMA, diff.key)
+
+    //         const gameDiffs = await getGameDiffs(d, savedAction);
+    // if (gameDiffs.length === 0) {
+    //     return {}
+    // }
+    // if (1 < gameDiffs.length) {
+    //     throw new Error("shouldn't happen")
+    // }
+
+    // const gameDoc = db.serializeDocPath(['games'], gameDiffs[0].key);
+    // const newGame = getNewValue(gameDiffs[0])
+    // if (!newGame.data.some) {
+    //     return { [gameDoc]: [] }
+    // }
+    // const collections: string[] = [];
+    // for (const player of newGame.data.value.value.players) {
+    //     collections.push(db.serializeDocPath(['players-to-games'], [player.id]));
+    // }
+    // return { [gameDoc]: collections }
+}
+
+export function getLatestAggregatedVersionRequest<TShare, TResult>(
     agg: AggregationTable<TShare, TResult>, key: Key): VersionSpecRequest {
     const collectionPath = db.serializeDocPath(agg.collectionSchema, key);
     return {
         docs: [],
         collections: [collectionPath]
+    }
+}
+
+export interface LiveTable<TResult> {
+    getLatestValue(d: db.Database, key: Key): Promise<Option<TResult>>
+}
+
+export interface PrimaryTable<TResult> {
+    getState(d: db.Database, key: Key, actionId: string): TResult
+    getCollections(d: db.Database, key: Key, actionId: string): string[]
+    getDiffs(d: db.Database, savedAction: SavedAction): Iterable<Diff<TResult>>
+}
+
+function liveAggregatedTable<TSource, TShare, TResult>(
+    source: Table<TSource>,
+    mapper: diffs.Mapper<TSource, TShare>,
+    agg: AggregationTable<TShare, TResult>
+): LiveTable<TResult> {
+    return {
+        async getLatestValue(d: db.Database, key: Key): Promise<Option<TResult>> {
+            const collectionPath = db.serializeDocPath(agg.collectionSchema, key);
+            const version = await resolveVersionSpec(d, {
+                docs: [],
+                collections: [collectionPath],
+            })
+
+            return getAggregatedState(d, source, mapper, agg, key, version)
+        },
     }
 }
 
@@ -164,6 +299,7 @@ function toResult<T>(newGameResult: Result<T, Error>): Errors {
     return {
         '1.0': result.from(newGameResult).map(() => null).mapErr(convertError1_0),
         '1.1': result.from(newGameResult).map(() => null).mapErr(convertError1_0),
+        '1.2': result.from(newGameResult).map(() => null),
     }
 }
 
@@ -247,31 +383,6 @@ const SHORT_CODE_SHARE_MAPPER: diffs.Mapper<Game, ShortCode> = {
     }
 }
 
-// function SHORT_CODE_SHARE_getState(d : Database, gameKey: Key, version: VersionSpec)
-
-// const SHORT_CODE_SHARE: MappedTable<Game, ShortCode> = {
-// async getPrimaryTableKey(d: db.Database, [gameId, shortCodeId]: Key): Promise<Key> {
-//     return [gameId]
-// }
-//     mapState([gameId] : Key, game : Game): ItemIterable<ShortCode> {
-
-//     }
-
-// }
-
-
-// diffs.mappedTable(GAME,SHORT_CODE_SHARE_MAPPER )
-
-// async getLatestVersionRequest(d: db.Database, key: Key): Promise<VersionSpecRequest> {
-//     return {
-//         docs: [],
-//         collections: [
-//             db.serializeDocPath(SHORT_CODE_SCHEMA, key)
-//         ]
-//     }
-// }
-
-
 const SHORT_CODE: AggregationTable<ShortCode, ShortCode> = {
     collectionSchema: ['short-codes-to-games'],
 
@@ -283,32 +394,35 @@ const SHORT_CODE: AggregationTable<ShortCode, ShortCode> = {
         const maybeValue = option.fromIterable(values);
         return maybeValue.unwrap().value
     }
-
-
-    //  getState(d: db.Database, version: VersionSpec): ItemIterable<{}> {
-    //     const gamesAndShortCodes = SHORT_CODE_SHARE.getState(d, version);
-
-    //     return ixa.from(gamesAndShortCodes).pipe(
-    //         ixaop.map(({ key: [gameId, shortCodeId] }) => shortCodeId),
-    //         ixaop.distinct(),
-    //         ixaop.map(shortCodeId => item([shortCodeId], {}))
-    //     )
-    // },
-    // async getLatestVersionRequest(d: db.Database, key: Key): Promise<VersionSpecRequest> {
-    //     return {
-    //         docs: [],
-    //         collections: [
-    //             db.serializeDocPath(SHORT_CODE_SCHEMA, key)
-    //         ]
-    //     }
-    // }
 }
 
-function shortCodeShareDiffs(diff: Diff<Game>): Iterable<Diff<ShortCode>> {
-    return ix.of(diff).pipe(
-        diffs.mapDiffs(SHORT_CODE_SHARE_MAPPER)
-    )
+const PLAYERS_TO_GAMES_SHARE: diffs.Mapper<Game, {}> = {
+    map([gameId]: Key, game: Game): Iterable<Item<{}>> {
+        return ix.from(game.players).pipe(ixop.map(p => item([gameId, p.id], {})))
+    },
+    preimage([gameId, playerId]: Key): Key {
+        return [gameId]
+    }
+};
+
+const PLAYERS_TO_GAMES: AggregationTable<{}, model1_1.GameList> = {
+    collectionSchema: ['players-to-games'],
+    getGroupKeyFromShareKey([gameId, playerId]: Key): Key {
+        return [playerId]
+    },
+    groupValues(_key: Key, values: Iterable<Item<{}>>): model1_1.GameList {
+        return {
+            gameIds: Array.from(ix.from(values).pipe(
+                ixop.map(({ key: [gameId, playerId] }) => gameId),
+                ixop.distinct(),
+            ))
+        }
+    }
 }
+
+export const LIVE_PLAYERS_TO_GAMES: LiveTable<model1_1.GameList> = liveAggregatedTable(
+    GAME, PLAYERS_TO_GAMES_SHARE, PLAYERS_TO_GAMES);
+
 // function getCollectionForShortCodeShare([, shortCodeId]: Key): string {
 //     return db.serializeDocPath(SHORT_CODES_TO_GAME_SCHEMA, [shortCodeId])
 // }
@@ -791,33 +905,31 @@ function convertAction1_1(a: model1_1.Action): Action {
     }
 }
 
-// function convertAction1_2(a: model1_2.Action): Action {
-//     switch (a.kind) {
-//         case 'join_game':
-//             return {
-//                 kind: 'join_game',
-//                 gameId: a.gameId,
-//                 playerId: a.playerId,
-//                 playerDisplayName: a.playerDisplayName,
-//                 createIfNecessary: false
-//             }
-//         case 'create_game':
-//         case 'start_game':
-//         case 'make_move':
-//             return {
-//                 ...a,
-//             }
-//     }
-// }
+function convertAction1_2(a: model1_2.Action): Action {
+    switch (a.kind) {
+        case 'join_game':
+            return {
+                kind: 'join_game',
+                gameId: a.gameId,
+                playerId: a.playerId,
+                playerDisplayName: a.playerDisplayName,
+                createIfNecessary: false
+            }
+        case 'create_game':
+        case 'start_game':
+        case 'make_move':
+            return a
+    }
+}
 
-function convertAction(a: SavedAction | AnyAction): Action {
+function convertAction(a: AnyAction): Action {
     switch (a.version) {
         case '1.0':
             return convertAction1_0(a.action)
         case '1.1':
             return convertAction1_1(a.action)
-        // case '1.2':
-        //     return convertAction1_2(a)
+        case '1.2':
+            return convertAction1_2(a.action)
     }
 }
 
