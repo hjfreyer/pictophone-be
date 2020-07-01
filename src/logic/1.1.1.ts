@@ -4,13 +4,11 @@ import * as ixa from "ix/asynciterable";
 import * as ixaop from "ix/asynciterable/operators";
 import * as ix from "ix/iterable";
 import * as ixop from "ix/iterable/operators";
-import { Errors } from '..';
 import { findItemAsync, getNewValue, getDocsInCollection } from '../base';
 import * as db from '../db';
 import * as diffs from '../diffs';
 import * as fw from '../framework';
 import { Diff, Item, item, Key, ItemIterable } from '../interfaces';
-import { AnyAction, SavedAction } from '../model';
 import * as model1_0 from '../model/1.0';
 import * as model1_1 from '../model/1.1';
 import { Action, Error, Game, MakeMoveAction } from '../model/1.1.1';
@@ -23,6 +21,20 @@ import { DocumentData, Firestore } from '@google-cloud/firestore'
 
 const GAME_SCHEMA = ['games']
 
+export type AnyAction = {
+    version: '1.0'
+    action: model1_0.Action
+} | {
+    version: '1.1'
+    action: model1_1.Action
+}
+
+export type SavedAction = AnyAction & { parents: VersionSpec }
+
+export type Errors = {
+    '1.0': Result<null, model1_0.Error>,
+    '1.1': Result<null, model1_1.Error>,
+}
 
 export const REVISION: fw.Integrator<Errors> = {
     async getNeededReferenceIds(_db: db.Database, anyAction: AnyAction): Promise<VersionSpecRequest> {

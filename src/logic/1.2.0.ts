@@ -16,20 +16,19 @@ import * as model1_2 from '../model/1.2';
 import { Error, Game, Action, MakeMoveAction, ShortCode, StartedGame } from '../model/1.2.0';
 import { validate } from '../model/1.2.0.validator';
 import { validate as validate1_1 } from '../model/1.1.validator';
-import { AnyAction, SavedAction } from '../model';
 import * as util from '../util';
 import { Defaultable, Option, option, Result, result } from '../util';
 import { OptionData, OptionView } from '../util/option';
 import { ResultView } from '../util/result';
 import deepEqual from 'deep-equal';
-import { UnifiedInterface, Errors, } from '..';
+import { UnifiedInterface, } from '..';
 import { validate as validateBase } from '../model/base.validator'
 import { validate as validateSchema } from '../model/index.validator'
 import * as readables from '../readables';
 import admin from 'firebase-admin'
 import { strict as assert } from 'assert';
 import { dirname } from 'path';
-import { VersionSpec, VersionSpecRequest } from '../model/base'
+import { VersionSpec, VersionSpecRequest, DocVersionSpec } from '../model/base'
 import { group } from 'console';
 
 const GAME_SCHEMA = ['games']
@@ -40,6 +39,25 @@ const PLAYER_GAME_SCHEMA = ['players', 'games']
 const SHORT_CODES_TO_GAME_SCHEMA = ['short-codes-to-games']
 const PLAYERS_TO_GAMES_SCHEMA = ['players-to-games']
 
+
+export type AnyAction = {
+    version: '1.0'
+    action: model1_0.Action
+} | {
+    version: '1.1'
+    action: model1_1.Action
+} | {
+    version: '1.2'
+    action: model1_2.Action
+}
+
+export type SavedAction = AnyAction & { parents: VersionSpec }
+
+export type Errors = {
+    '1.0': Result<null, model1_0.Error>,
+    '1.1': Result<null, model1_1.Error>,
+    '1.2': Result<null, model1_2.Error>,
+}
 
 export const REVISION: fw.Integrator<Errors> = {
     async getNeededReferenceIds(_db: db.Database, anyAction: AnyAction): Promise<VersionSpecRequest> {
@@ -73,7 +91,7 @@ export const REVISION: fw.Integrator<Errors> = {
                 result: {
                     '1.0': result.ok(null),
                     '1.1': result.ok(null),
-                    // '1.2': result.ok(null),
+                    '1.2': result.ok(null),
                 },
                 facetDiffs: {},
             }
@@ -134,7 +152,7 @@ function toResult<T>(newGameResult: Result<T, Error>): Errors {
     return {
         '1.0': result.from(newGameResult).map(() => null).mapErr(convertError1_0),
         '1.1': result.from(newGameResult).map(() => null).mapErr(convertError1_0),
-        // '1.2': result.from(newGameResult).map(() => null),
+        '1.2': result.from(newGameResult).map(() => null),
     }
 }
 
@@ -449,8 +467,8 @@ function convertAction(a: AnyAction): Action {
             return convertAction1_0(a.action)
         case '1.1':
             return convertAction1_1(a.action)
-        // case '1.2':
-        //     return convertAction1_2(a.action)
+        case '1.2':
+            return convertAction1_2(a.action)
     }
 }
 
@@ -557,8 +575,6 @@ export const GAME_TO_PLAYER_GAMES1_0: fw.Mapper<Game, model1_0.PlayerGame> = fw.
     },
     preimage(key) { return key }
 })
-
-
 
 export const COLLECTION_SCHEMATA = [
     SHORT_CODE.schema,

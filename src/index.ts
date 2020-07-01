@@ -11,7 +11,7 @@ import * as db from './db'
 import { Item, Key, ItemIterable, item, Diff } from './interfaces'
 import * as logic1_1_1 from './logic/1.1.1'
 import * as logic1_2_0 from './logic/1.2.0'
-import { AnyAction, AnyError, SavedAction } from './model'
+import { AnyAction, SavedAction } from './model'
 import * as model1_0 from './model/1.0'
 import { validate as validate1_0 } from './model/1.0.validator'
 import * as model1_1 from './model/1.1'
@@ -101,11 +101,10 @@ function compareInterfaces(expected: UnifiedInterface, actual: UnifiedInterface)
 export type Errors = {
     '1.0': Result<null, model1_0.Error>,
     '1.1': Result<null, model1_1.Error>,
-    // '1.2': Result<null, model1_2.Error>,
 }
 
-function handleAction(action: AnyAction): Promise<Result<null, AnyError>> {
-    return db.runTransaction(fsDb)(async (db: db.Database): Promise<Result<null, AnyError>> => {
+function handleAction(action: AnyAction): Promise<Errors> {
+    return db.runTransaction(fsDb)(async (db: db.Database): Promise<Errors> => {
         const parents = await fw.resolveVersionSpec(db, await logic1_1_1.REVISION.getNeededReferenceIds(db, action))
 
         const savedAction: SavedAction = { ...action, parents }
@@ -128,7 +127,7 @@ function handleAction(action: AnyAction): Promise<Result<null, AnyError>> {
             }
         }
 
-        return res.result[action.version]
+        return res.result
     })
 }
 
@@ -305,7 +304,8 @@ function v1_0(): Router {
     res.options('/action', cors())
     res.post('/action', cors(), function(req: Request<{}>, res, next) {
         const action = validate1_0('Action')(req.body);
-        handleAction({ version: "1.0", action }).then((resp) => {
+        handleAction({ version: "1.0", action }).then((errs) => {
+            const resp = errs['1.0']
             if (resp.data.status === 'err') {
                 res.status(resp.data.error.status_code)
                 res.json(resp.data.error)
@@ -339,7 +339,8 @@ function v1_1(): Router {
     res.options('/action', cors())
     res.post('/action', cors(), function(req: Request<{}>, res, next) {
         const action = validate1_1('Action')(req.body);
-        handleAction({ version: "1.1", action }).then((resp) => {
+        handleAction({ version: "1.1", action }).then((errs) => {
+            const resp = errs['1.1']
             if (resp.data.status === 'err') {
                 res.status(resp.data.error.status_code)
                 res.json(resp.data.error)

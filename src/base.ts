@@ -2,7 +2,7 @@
 import * as db from './db'
 import { Live, Diff, Change, Key, ItemIterable, Item, item } from './interfaces'
 // import { validate } from './schema/interfaces.validator'
-import { AnyAction, AnyError, SavedAction } from './model';
+import { AnyAction, SavedAction } from './model';
 import { VersionSpec, DocVersionSpec } from './model/base'
 import { sha256 } from 'js-sha256';
 import _ from 'lodash';
