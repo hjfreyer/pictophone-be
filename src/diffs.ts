@@ -44,3 +44,32 @@ export function newDiff<T>(key: Key, oldValue: Option<T>, newValue: Option<T>): 
     }
     throw new Error("unreachable")
 }
+
+export function newDiffEvenIfSame<T>(key: Key, oldValue: Option<T>, newValue: Option<T>): Option<Diff<T>> {
+    if (!oldValue.data.some && !newValue.data.some) {
+        return option.none()
+    }
+    if (!oldValue.data.some && newValue.data.some) {
+        return option.some({
+            key,
+            kind: 'add',
+            value: newValue.data.value,
+        })
+    }
+    if (oldValue.data.some && !newValue.data.some) {
+        return option.some({
+            key,
+            kind: 'delete',
+            value: oldValue.data.value,
+        })
+    }
+    if (oldValue.data.some && newValue.data.some) {
+        return option.some({
+            key,
+            kind: 'replace',
+            oldValue: oldValue.data.value,
+            newValue: newValue.data.value,
+        })
+    }
+    throw new Error("unreachable")
+}

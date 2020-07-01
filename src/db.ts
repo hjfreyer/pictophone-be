@@ -3,13 +3,21 @@ import { strict as assert } from "assert"
 import { basename, dirname, join } from "path"
 import { Key, Item, ItemIterable, Range, item } from './interfaces'
 import * as ranges from './ranges';
-
+import admin from 'firebase-admin'
 import * as ixaop from 'ix/asynciterable/operators';
 import * as ixa from "ix/asynciterable";
 import * as ixop from 'ix/iterable/operators';
 import * as ix from "ix/iterable";
 import { AsyncIterableX } from 'ix/asynciterable';
 import { Option, option } from './util';
+import { SavedAction, AnyAction } from './model';
+import { validate as validateSchema } from './model/index.validator'
+import { validate as validateBase } from './model/base.validator'
+import { FacetDiff } from './framework';
+import { DocVersionSpec, VersionSpec } from './model/base';
+import deepEqual from 'deep-equal';
+import { getActionId } from './base';
+import * as util from './util';
 
 export interface TxRunner {
     <R>(cb: (db: Database) => Promise<R>): Promise<R>
@@ -28,6 +36,104 @@ export function runTransaction(fsDb: Firestore): TxRunner {
             db.commit();
             return res
         });
+    }
+}
+
+export interface Commit {
+    previousDocVersions: Record<string, DocVersionSpec>
+    previousCollectionMembers: Record<string, string[]>
+    action: AnyAction
+    diffs: Record<string, FacetDiff>
+}
+
+export class Database2 {
+    constructor(private db: Firestore) { }
+
+    async getAction(actionId: string): Promise<Option<SavedAction>> {
+        const doc = await this.db.doc(actionId).get()
+        return doc.exists
+            ? option.some(validateSchema('SavedAction')(doc.data()))
+            : option.none();
+    }
+
+    async getFacetVersion(facetId: string): Promise<DocVersionSpec> {
+        const doc = await this.db.doc(facetId).get()
+        return doc.exists
+            ? {
+                exists: true, actionId:
+                    validateBase('Pointer')(doc.data()).actionId
+            }
+            : { exists: false };
+    }
+
+    async getCollectionMembers(collectionId: string): Promise<string[]> {
+        const doc = await this.db.doc(collectionId).get()
+        if (!doc.exists) {
+            return []
+        }
+        const collection = validateBase('Kollection')(doc.data())
+        return collection.members
+    }
+
+    commitAction(commit: Commit): Promise<boolean> {
+        for (const members of Object.values(commit.previousCollectionMembers)) {
+            for (const member of members) {
+                if (!(member in commit.previousDocVersions)) {
+                    throw new Error("illegal commit")
+                }
+            }
+        }
+
+        return this.db.runTransaction(async (tx): Promise<boolean> => {
+            const facetVersionsGood = ixa.from(Object.entries(commit.previousDocVersions)).pipe(
+                ixaop.map(async ([facetId, expectedDocVersion]) => {
+                    const doc = await this.db.doc(facetId).get()
+                    if (doc.exists) {
+                        const ptr = validateBase('Pointer')(doc.data());
+                        return expectedDocVersion.exists
+                            && ptr.actionId === expectedDocVersion.actionId
+                    } else {
+                        return !expectedDocVersion.exists
+                    }
+                })
+            )
+            const collectionsGood = ixa.from(Object.entries(commit.previousCollectionMembers)).pipe(
+                ixaop.map(async ([collectionId, expectedMembers]) => {
+                    const doc = await tx.get(this.db.doc(collectionId))
+                    if (!doc.exists) {
+                        return expectedMembers.length === 0
+                    }
+                    const actualMembers = validateBase('Kollection')(doc.data()).members
+                    return deepEqual(actualMembers, expectedMembers)
+                })
+            )
+
+            if (!await ixa.every(ixa.concat(facetVersionsGood, collectionsGood), b => b)) {
+                return false
+            }
+            const parents: VersionSpec = {
+                docs: commit.previousDocVersions,
+                collections: util.sorted(Object.keys(commit.previousCollectionMembers)),
+            };
+            const savedAction: SavedAction = { ...commit.action, parents }
+            const actionId = getActionId(savedAction);
+
+            tx.set(this.db.doc(actionId), savedAction)
+            for (const [facetId, facetDiff] of Object.entries(commit.diffs)) {
+                tx.set(this.db.doc(facetId), { actionId })
+                for (const left of facetDiff.leftCollections) {
+                    tx.set(this.db.doc(left), {
+                        members: admin.firestore.FieldValue.arrayRemove(facetId)
+                    }, { merge: true })
+                }
+                for (const joined of facetDiff.joinedCollections) {
+                    tx.set(this.db.doc(joined), {
+                        members: admin.firestore.FieldValue.arrayUnion(facetId)
+                    }, { merge: true })
+                }
+            }
+            return true
+        })
     }
 }
 

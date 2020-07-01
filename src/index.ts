@@ -95,40 +95,30 @@ function compareInterfaces(expected: UnifiedInterface, actual: UnifiedInterface)
     }
 }
 
-
-
-
 export type Errors = {
     '1.0': Result<null, model1_0.Error>,
     '1.1': Result<null, model1_1.Error>,
 }
 
-function handleAction(action: AnyAction): Promise<Errors> {
-    return db.runTransaction(fsDb)(async (db: db.Database): Promise<Errors> => {
-        const parents = await fw.resolveVersionSpec(db, await logic1_1_1.REVISION.getNeededReferenceIds(db, action))
+async function handleAction(action: AnyAction): Promise<Errors> {
+    const d = new db.Database2(fsDb);
 
-        const savedAction: SavedAction = { ...action, parents }
-        const actionId = getActionId(savedAction);
+    while (true) {
+        const result = await logic1_2_0.integrate(d, action);
 
-        const res = await logic1_1_1.REVISION.integrate(db, savedAction)
+        const committed = await d.commitAction({
+            previousDocVersions: result.previousDocVersions,
+            previousCollectionMembers: result.previousCollectionMembers,
+            action,
+            diffs: result.diffs,
+        })
 
-        db.tx.set(db.db.doc(actionId), savedAction)
-        for (const [facetId, facetDiff] of Object.entries(res.facetDiffs)) {
-            db.tx.set(db.db.doc(facetId), { actionId })
-            for (const left of facetDiff.leftCollections) {
-                db.tx.set(db.db.doc(left), {
-                    members: admin.firestore.FieldValue.arrayRemove(facetId)
-                }, { merge: true })
-            }
-            for (const joined of facetDiff.joinedCollections) {
-                db.tx.set(db.db.doc(joined), {
-                    members: admin.firestore.FieldValue.arrayUnion(facetId)
-                }, { merge: true })
-            }
+        if (committed) {
+            return result.result
         }
+    }
 
-        return res.result
-    })
+
 }
 
 async function handleBackfillDocs(): Promise<void> {
@@ -246,55 +236,55 @@ async function getNextAction(startAfter: Option<string>): Promise<Option<[string
         validateSchema('SavedAction')(snapshot.docs[0].data())]);
 }
 
-async function handleCrossCheck(): Promise<void> {
-    let cursor: Option<string> = option.none();
-    console.log('REPLAY')
-    while (true) {
-        const maybeNextAction = await getNextAction(cursor);
-        if (!maybeNextAction.data.some) {
-            break;
-        }
-        const [actionId, savedAction] = maybeNextAction.data.value;
-        await checkAction(actionId, savedAction)
+// async function handleCrossCheck(): Promise<void> {
+//     let cursor: Option<string> = option.none();
+//     console.log('REPLAY')
+//     while (true) {
+//         const maybeNextAction = await getNextAction(cursor);
+//         if (!maybeNextAction.data.some) {
+//             break;
+//         }
+//         const [actionId, savedAction] = maybeNextAction.data.value;
+//         await checkAction(actionId, savedAction)
 
-        cursor = option.some(actionId);
-    }
-    console.log('DONE')
-}
+//         cursor = option.some(actionId);
+//     }
+//     console.log('DONE')
+// }
 
-function checkAction(actionId: string, savedAction: SavedAction): Promise<void> {
-    console.log("X-CHECK", actionId)
-    return db.runTransaction(fsDb)(async (d: db.Database): Promise<void> => {
-        // Check next version doesn't request invalid parents.
-        const parents1_2_0 = await logic1_2_0.REVISION.getNeededReferenceIds(d, savedAction)
-        for (const docId of parents1_2_0.docs) {
-            if (!(docId in savedAction.parents.docs)) {
-                throw new Error("Illegal parent lookup")
-            }
-        }
-        for (const collectionId of parents1_2_0.collections) {
-            if (!savedAction.parents.collections.includes(collectionId)) {
-                throw new Error("Illegal parent lookup")
-            }
-        }
+// function checkAction(actionId: string, savedAction: SavedAction): Promise<void> {
+//     console.log("X-CHECK", actionId)
+//     return db.runTransaction(fsDb)(async (d: db.Database): Promise<void> => {
+//         // Check next version doesn't request invalid parents.
+//         const parents1_2_0 = await logic1_2_0.REVISION.getNeededReferenceIds(d, savedAction)
+//         for (const docId of parents1_2_0.docs) {
+//             if (!(docId in savedAction.parents.docs)) {
+//                 throw new Error("Illegal parent lookup")
+//             }
+//         }
+//         for (const collectionId of parents1_2_0.collections) {
+//             if (!savedAction.parents.collections.includes(collectionId)) {
+//                 throw new Error("Illegal parent lookup")
+//             }
+//         }
 
-        // Check the next version has the same impact.
-        const result1_1_1 = await logic1_1_1.REVISION.integrate(d, savedAction)
-        const result1_2_0 = await logic1_2_0.REVISION.integrate(d, savedAction)
-        if (!deepEqual(result1_1_1, result1_2_0)) {
-            throw new Error(`divergence at ${actionId}`)
-        }
+//         // Check the next version has the same impact.
+//         const result1_1_1 = await logic1_1_1.REVISION.integrate(d, savedAction)
+//         const result1_2_0 = await logic1_2_0.REVISION.integrate(d, savedAction)
+//         if (!deepEqual(result1_1_1, result1_2_0)) {
+//             throw new Error(`divergence at ${actionId}`)
+//         }
 
-        for (const facetId of Object.keys(result1_1_1.facetDiffs)) {
-            // Check the exports agree.
-            const exports1_1_1 = await logic1_1_1.getFacetExports(d, facetId, actionId)
-            const exports1_2_0 = await logic1_2_0.getFacetExports(d, facetId, actionId)
-            if (!deepEqual(exports1_1_1, exports1_2_0)) {
-                throw new Error(`divergence at ${facetId}@${actionId}`)
-            }
-        }
-    })
-}
+//         for (const facetId of Object.keys(result1_1_1.facetDiffs)) {
+//             // Check the exports agree.
+//             const exports1_1_1 = await logic1_1_1.getFacetExports(d, facetId, actionId)
+//             const exports1_2_0 = await logic1_2_0.getFacetExports(d, facetId, actionId)
+//             if (!deepEqual(exports1_1_1, exports1_2_0)) {
+//                 throw new Error(`divergence at ${facetId}@${actionId}`)
+//             }
+//         }
+//     })
+// }
 
 
 
@@ -316,19 +306,19 @@ function v1_0(): Router {
         }).catch(next)
     })
 
-    res.options('/players/:playerId/games', cors())
-    res.get('/players/:playerId/games', cors(), optionHandler(req => {
-        return db.runTransaction(fsDb)(
-            db => fw.getLatestValue(db, logic1_1_1.LIVE_PLAYERS_TO_GAMES,
-                [req.params['playerId']]))
-    }))
+    // res.options('/players/:playerId/games', cors())
+    // res.get('/players/:playerId/games', cors(), optionHandler(req => {
+    //     return db.runTransaction(fsDb)(
+    //         db => fw.getLatestValue(db, logic1_1_1.LIVE_PLAYERS_TO_GAMES,
+    //             [req.params['playerId']]))
+    // }))
 
-    res.options('/players/:playerId/games/:gameId', cors())
-    res.get('/players/:playerId/games/:gameId', cors(), optionHandler(req => {
-        return db.runTransaction(fsDb)(
-            db => fw.getLatestValue(
-                db, logic1_1_1.PLAYER_GAMES1_0, [req.params['playerId'], req.params['gameId']]))
-    }))
+    // res.options('/players/:playerId/games/:gameId', cors())
+    // res.get('/players/:playerId/games/:gameId', cors(), optionHandler(req => {
+    //     return db.runTransaction(fsDb)(
+    //         db => fw.getLatestValue(
+    //             db, logic1_1_1.PLAYER_GAMES1_0, [req.params['playerId'], req.params['gameId']]))
+    // }))
 
     return res
 }
@@ -351,19 +341,19 @@ function v1_1(): Router {
         }).catch(next)
     })
 
-    res.options('/players/:playerId/games', cors())
-    res.get('/players/:playerId/games', cors(), optionHandler(req => {
-        return db.runTransaction(fsDb)(
-            db => fw.getLatestValue(db, logic1_1_1.LIVE_PLAYERS_TO_GAMES,
-                [req.params['playerId']]))
-    }))
+    // res.options('/players/:playerId/games', cors())
+    // res.get('/players/:playerId/games', cors(), optionHandler(req => {
+    //     return db.runTransaction(fsDb)(
+    //         db => fw.getLatestValue(db, logic1_1_1.LIVE_PLAYERS_TO_GAMES,
+    //             [req.params['playerId']]))
+    // }))
 
-    res.options('/players/:playerId/games/:gameId', cors())
-    res.get('/players/:playerId/games/:gameId', cors(), optionHandler(req => {
-        return db.runTransaction(fsDb)(
-            db => fw.getLatestValue(
-                db, logic1_1_1.PLAYER_GAMES1_1, [req.params['playerId'], req.params['gameId']]))
-    }))
+    // res.options('/players/:playerId/games/:gameId', cors())
+    // res.get('/players/:playerId/games/:gameId', cors(), optionHandler(req => {
+    //     return db.runTransaction(fsDb)(
+    //         db => fw.getLatestValue(
+    //             db, logic1_1_1.PLAYER_GAMES1_1, [req.params['playerId'], req.params['gameId']]))
+    // }))
 
     return res
 }
@@ -409,25 +399,25 @@ async function handlePurge(): Promise<void> {
 function batch(): Router {
     const res = Router()
 
-    res.post('/cross-check', function(_req: Request<{}>, res, next) {
-        handleCrossCheck().then(result => {
-            res.status(200)
-            res.json(result)
-        }).catch(next)
-    })
+    // res.post('/cross-check', function(_req: Request<{}>, res, next) {
+    //     handleCrossCheck().then(result => {
+    //         res.status(200)
+    //         res.json(result)
+    //     }).catch(next)
+    // })
 
-    res.post('/backfill-docs', function(req: Request<{}>, res, next) {
-        handleBackfillDocs().then(result => {
-            res.status(200)
-            res.json(result)
-        }).catch(next)
-    })
-    res.post('/check', function(req: Request<{}>, res, next) {
-        handleCheck().then(result => {
-            res.status(200)
-            res.json(result)
-        }).catch(next)
-    })
+    // res.post('/backfill-docs', function(req: Request<{}>, res, next) {
+    //     handleBackfillDocs().then(result => {
+    //         res.status(200)
+    //         res.json(result)
+    //     }).catch(next)
+    // })
+    // res.post('/check', function(req: Request<{}>, res, next) {
+    //     handleCheck().then(result => {
+    //         res.status(200)
+    //         res.json(result)
+    //     }).catch(next)
+    // })
     res.post('/purge', function(_req: Request<{}>, res, next) {
         handlePurge().then(result => {
             res.status(200)

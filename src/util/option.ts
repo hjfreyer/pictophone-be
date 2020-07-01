@@ -36,6 +36,10 @@ export function none<T>(): OptionView<T> {
     return fromData({ some: false })
 }
 
+export function await<T>(t: Option<Promise<T>>): Promise<OptionView<T>> {
+    return from(t).andThenAsync(async p => some(await p))
+}
+
 
 export class OptionView<T> implements Option<T> {
     data: OptionData<T>

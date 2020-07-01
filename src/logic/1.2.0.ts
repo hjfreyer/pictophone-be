@@ -19,7 +19,7 @@ import { validate as validate1_1 } from '../model/1.1.validator';
 import * as util from '../util';
 import { Defaultable, Option, option, Result, result } from '../util';
 import { OptionData, OptionView } from '../util/option';
-import { ResultView } from '../util/result';
+import { ResultView, AsyncResult } from '../util/result';
 import deepEqual from 'deep-equal';
 import { UnifiedInterface, } from '..';
 import { validate as validateBase } from '../model/base.validator'
@@ -27,7 +27,7 @@ import { validate as validateSchema } from '../model/index.validator'
 import * as readables from '../readables';
 import admin from 'firebase-admin'
 import { strict as assert } from 'assert';
-import { dirname } from 'path';
+import { dirname, resolve } from 'path';
 import { VersionSpec, VersionSpecRequest, DocVersionSpec } from '../model/base'
 import { group } from 'console';
 
@@ -59,53 +59,265 @@ export type Errors = {
     '1.2': Result<null, model1_2.Error>,
 }
 
-export const REVISION: fw.Integrator<Errors> = {
-    async getNeededReferenceIds(_db: db.Database, anyAction: AnyAction): Promise<VersionSpecRequest> {
-        const action = convertAction(anyAction)
-        const docs = [db.serializeDocPath(GAME_SCHEMA, [action.gameId])];
-        if (action.kind === 'create_game' && action.shortCode !== '') {
-            return {
-                docs,
-                collections: [
-                    db.serializeDocPath(
-                        SHORT_CODE.schema,
-                        [action.shortCode])]
-            }
+interface Facet {
+    game: Option<Game>
+    playersToGames: Item<string>[]
+    shortCodes: Item<{}>[]
+    playerGames1_0: Item<model1_0.PlayerGame>[]
+    playerGames1_1: Item<model1_1.PlayerGame>[]
+}
+
+interface Input {
+    getGame(key: Key): Promise<Option<Game>>
+    getShortCode(key: Key): Promise<Option<{}>>
+}
+
+function versionedInput(d: db.Database2, version: VersionSpec): Input {
+    const subFacets: Record<string, Option<Promise<Facet>>> = {}
+    for (const [facetId, facetVersion] of Object.entries(version.docs)) {
+        if (facetVersion.exists) {
+            subFacets[facetId] = option.some(
+                getFacet(d, facetId, facetVersion.actionId))
         } else {
-            return { docs, collections: [] }
-        }
-    },
-
-    async integrate(d: db.Database, savedAction: SavedAction): Promise<fw.IntegrationResult<Errors>> {
-        const gameDiffOrError = result.from(await getGameDiffOrError(d, savedAction));
-
-        if (gameDiffOrError.data.status === 'err') {
-            return {
-                result: toResult(gameDiffOrError),
-                facetDiffs: {},
-            }
-        }
-        const maybeDiff = gameDiffOrError.data.value;
-        if (!maybeDiff.data.some) {
-            return {
-                result: {
-                    '1.0': result.ok(null),
-                    '1.1': result.ok(null),
-                    '1.2': result.ok(null),
-                },
-                facetDiffs: {},
-            }
-        }
-        const diff = maybeDiff.data.value;
-        const gameDocPath = db.serializeDocPath(GAME_SCHEMA, diff.key)
-        return {
-            result: toResult(gameDiffOrError),
-            facetDiffs: {
-                [gameDocPath]: fw.diffCollections(diff, gameToCollections)
-            }
+            subFacets[facetId] = option.none()
         }
     }
+
+    return {
+        async getGame(key: Key): Promise<Option<Game>> {
+            const facetId = db.serializeDocPath(['games'], key);
+            const maybeSubfacet = option.of(
+                subFacets[facetId]).expect("Illegal parent fetch")
+            return (await option.await(maybeSubfacet)).andThen(f => f.game)
+        },
+        getShortCode(key: Key): Promise<Option<{}>> {
+            const collectionId = db.serializeDocPath(
+                ['short-codes-to-games'], key);
+
+            if (!version.collections.includes(collectionId)) {
+                throw new Error("bad version")
+            }
+
+            const shares: AsyncIterable<{}> = ixa.from(Object.values(subFacets)).pipe(
+                util.filterNoneAsync(),
+                ixaop.map(facetPromise => facetPromise),
+                ixaop.flatMap(facet => ixa.from(facet.shortCodes)),
+                ixaop.filter(item => util.lexCompare(item.key, key) === 0),
+                ixaop.map(item => item.value)
+            );
+
+            return option.fromAsyncIterable(shares)
+        },
+    }
 }
+
+function gameToFacet(gameId: string, maybeGame: Option<Game>): Facet {
+    if (!maybeGame.data.some) {
+        return {
+            game: maybeGame,
+            shortCodes: [],
+            playerGames1_0: [],
+            playerGames1_1: [],
+            playersToGames: [],
+        }
+    }
+    const game = maybeGame.data.value;
+    return {
+        game: maybeGame,
+        shortCodes: Array.from(SHORT_CODE.getShares([gameId], game)),
+        playerGames1_0: Array.from(GAME_TO_PLAYER_GAMES1_0.map([gameId], game)),
+        playerGames1_1: Array.from(GAME_TO_PLAYER_GAMES1_1.map([gameId], game)),
+        playersToGames: Array.from(PLAYERS_TO_GAMES.getShares([gameId], game)),
+    }
+}
+
+async function getFacet(d: db.Database2, facetId: string, actionId: string): Promise<Facet> {
+    const savedAction = option.from(await d.getAction(actionId)).unwrap()
+    const input: Input = versionedInput(d, savedAction.parents)
+
+    const newGamesOrErrors = await integrateAction(convertAction(savedAction), input);
+
+    const [gameId] = db.parseDocPath(facetId).key
+    const game = option.from(findItem(result.from(newGamesOrErrors).unwrap(),
+        [gameId])).unwrap();
+    return gameToFacet(gameId, option.some(game))
+}
+
+export interface IntegrationResult2<T> {
+    result: T
+    previousDocVersions: Record<string, DocVersionSpec>
+    previousCollectionMembers: Record<string, string[]>
+    diffs: Record<string, fw.FacetDiff>
+}
+
+export async function integrate(d: db.Database2, anyAction: AnyAction): Promise<IntegrationResult2<Errors>> {
+    const previousDocVersions: Record<string, Promise<DocVersionSpec>> = {}
+    const previousCollectionMembers: Record<string, Promise<string[]>> = {}
+    const previousFacets: Record<string, Promise<Option<Facet>>> = {}
+
+    const getFacetVersionInternal = (facetId: string): Promise<DocVersionSpec> => {
+        if (!(facetId in previousDocVersions)) {
+            previousDocVersions[facetId] = d.getFacetVersion(facetId);
+        }
+        return previousDocVersions[facetId];
+    }
+
+    const getFacetInternal = (facetId: string): Promise<Option<Facet>> => {
+        if (!(facetId in previousFacets)) {
+            previousFacets[facetId] = (async (): Promise<Option<Facet>> => {
+                const version = await getFacetVersionInternal(facetId);
+
+                if (version.exists) {
+                    return option.some(await getFacet(d, facetId, version.actionId))
+                } else {
+                    return option.none()
+                }
+            })();
+        }
+        return previousFacets[facetId];
+    }
+
+    const includeCollectionMembers = async (collectionId: string): Promise<void> => {
+        if (!(collectionId in previousCollectionMembers)) {
+            previousCollectionMembers[collectionId] = d.getCollectionMembers(collectionId);
+        }
+        for (const facetId of await previousCollectionMembers[collectionId]) {
+            getFacetVersionInternal(facetId);
+        }
+    }
+
+    const getAllFacets = (): AsyncIterable<Facet> => {
+        return ixa.from(Object.keys(previousDocVersions)).pipe(
+            ixaop.map(getFacetInternal),
+            util.filterNoneAsync(),
+        )
+    }
+
+    const input: Input = {
+        async getGame(key: Key): Promise<Option<Game>> {
+            const facetId = db.serializeDocPath(['games'], key);
+            const facet = option.from(await getFacetInternal(facetId));
+            return facet.andThen(facet => facet.game)
+        },
+        async getShortCode(key: Key): Promise<Option<{}>> {
+            const collectionId = db.serializeDocPath(
+                ['short-codes-to-games'], key);
+            await includeCollectionMembers(collectionId)
+
+            const shares: AsyncIterable<{}> = ixa.from(getAllFacets()).pipe(
+                ixaop.flatMap(facet => ixa.from(facet.shortCodes)),
+                ixaop.filter(item => util.lexCompare(item.key, key) === 0),
+                ixaop.map(item => item.value)
+            );
+
+            return await option.fromAsyncIterable(shares)
+        },
+    }
+
+    const newDocsOrError = await integrateAction(convertAction(anyAction), input);
+
+    const result: IntegrationResult2<Errors> = {
+        result: toResult(newDocsOrError),
+        previousDocVersions: {},
+        previousCollectionMembers: {},
+        diffs: {},
+    }
+
+    for (const [docId, docVersion] of Object.entries(previousDocVersions)) {
+        result.previousDocVersions[docId] = await docVersion;
+    }
+    for (const [collectionId, collectionMembers] of Object.entries(previousCollectionMembers)) {
+        result.previousCollectionMembers[collectionId] = await collectionMembers;
+    }
+    if (newDocsOrError.data.status === 'ok') {
+        for (const { key: newGameKey, value: newGame } of newDocsOrError.data.value) {
+            const facetId = db.serializeDocPath(['games'], newGameKey);
+            if (!(facetId in previousDocVersions)) {
+                throw new Error(`no blind writes: ${facetId} was not in \
+fetched facets ${JSON.stringify(previousDocVersions)}`)
+            }
+            const oldGame = option.from(await getFacetInternal(facetId)).andThen(
+                facet => facet.game
+            )
+            const diff = option.from(diffs.newDiffEvenIfSame(newGameKey, oldGame, option.some(newGame))).unwrap()
+            result.diffs[facetId] = fw.diffCollections(diff, gameToCollections);
+        }
+    }
+
+    return result
+}
+
+
+
+
+// export const REVISION: fw.Integrator<Errors> = {
+//     async getNeededReferenceIds(legacyD: db.Database, anyAction: AnyAction): Promise<VersionSpecRequest> {
+//         const d = new db.Database2(legacyD.db)
+//         const action = convertAction(anyAction)
+//         const res: VersionSpecRequest = {
+//             docs: [], collections: [],
+//         }
+//         const input: Input = {
+//             async getGame(key: Key): Promise<Option<Game>> {
+//                 const facetId = db.serializeDocPath(['games'], key);
+//                 if (!res.docs.includes(facetId)) {
+//                     res.docs.push(facetId)
+//                 }
+//                 const versionSpec = await fw.resolveVersionSpec(d, { docs: [facetId], collections: [] });
+//                 const docVersionSpec = versionSpec.docs[facetId]
+//                 if (!docVersionSpec.exists) {
+//                     return option.none()
+//                 }
+//                 const savedAction = option.from(await fw.getAction(d, docVersionSpec.actionId)).unwrap()
+
+//             }
+//         }
+//         const docs = [db.serializeDocPath(GAME_SCHEMA, [action.gameId])];
+//         if (action.kind === 'create_game' && action.shortCode !== '') {
+//             return {
+//                 docs,
+//                 collections: [
+//                     db.serializeDocPath(
+//                         SHORT_CODE.schema,
+//                         [action.shortCode])]
+//             }
+//         } else {
+//             return { docs, collections: [] }
+//         }
+//     },
+
+//     async integrate(d: db.Database, savedAction: SavedAction): Promise<fw.IntegrationResult<Errors>> {
+
+
+//         const gameDiffOrError = result.from(await getGameDiffOrError(d, savedAction));
+
+//         if (gameDiffOrError.data.status === 'err') {
+//             return {
+//                 result: toResult(gameDiffOrError),
+//                 facetDiffs: {},
+//             }
+//         }
+//         const maybeDiff = gameDiffOrError.data.value;
+//         if (!maybeDiff.data.some) {
+//             return {
+//                 result: {
+//                     '1.0': result.ok(null),
+//                     '1.1': result.ok(null),
+//                     '1.2': result.ok(null),
+//                 },
+//                 facetDiffs: {},
+//             }
+//         }
+//         const diff = maybeDiff.data.value;
+//         const gameDocPath = db.serializeDocPath(GAME_SCHEMA, diff.key)
+//         return {
+//             result: toResult(gameDiffOrError),
+//             facetDiffs: {
+//                 [gameDocPath]: fw.diffCollections(diff, gameToCollections)
+//             }
+//         }
+//     }
+// }
 
 function gameToCollections(key: Key, game: Game): string[] {
     const shortCodesWithShares = ix.from(SHORT_CODE.getShares(key, game)).pipe(
@@ -119,33 +331,33 @@ function gameToCollections(key: Key, game: Game): string[] {
     return [...shortCodesWithShares, ...playersToGamesWithShares]
 }
 
-export async function getCollections(d: db.Database, docId: string, actionId: string): Promise<string[]> {
+export async function getCollections(d: db.Database2, docId: string, actionId: string): Promise<string[]> {
     const { key } = db.parseDocPath(docId);
-    const maybeNewGame = option.from(await GAME.getState(d, key, actionId));
-    return maybeNewGame.map(newGame => gameToCollections(key, newGame)).orElse(() => [])
+    const facet = await getFacet(d, docId, actionId);
+    return option.from(facet.game).map(newGame => gameToCollections(key, newGame)).orElse(() => [])
 }
 
-export async function getFacetExports(d: db.Database, facetId: string, actionId: string): Promise<Record<string, unknown>> {
-    const { key } = db.parseDocPath(facetId)
-    const maybeGame = await GAME.getState(d, key, actionId)
-    if (!maybeGame.data.some) {
-        return {}
-    }
-    const game = maybeGame.data.value;
+// export async function getFacetExports(d: db.Database, facetId: string, actionId: string): Promise<Record<string, unknown>> {
+//     const { key } = db.parseDocPath(facetId)
+//     const maybeGame = await GAME.getState(d, key, actionId)
+//     if (!maybeGame.data.some) {
+//         return {}
+//     }
+//     const game = maybeGame.data.value;
 
-    const res: Record<string, unknown> = {};
-    for await (const { key: subKey, value } of GAME_TO_PLAYER_GAMES1_0.map(key, game)) {
-        res[db.serializeDocPath(['players', 'games-1.0'], subKey)] = value
-    }
+//     const res: Record<string, unknown> = {};
+//     for await (const { key: subKey, value } of GAME_TO_PLAYER_GAMES1_0.map(key, game)) {
+//         res[db.serializeDocPath(['players', 'games-1.0'], subKey)] = value
+//     }
 
-    for await (const { key: subKey, value } of GAME_TO_PLAYER_GAMES1_1.map(key, game)) {
-        res[db.serializeDocPath(['players', 'games-1.1'], subKey)] = value
-    }
-    for await (const { key: subKey, value } of PLAYERS_TO_GAMES.getShares(key, game)) {
-        res[db.serializeDocPath(['players-to-games'], subKey)] = value
-    }
-    return res
-}
+//     for await (const { key: subKey, value } of GAME_TO_PLAYER_GAMES1_1.map(key, game)) {
+//         res[db.serializeDocPath(['players', 'games-1.1'], subKey)] = value
+//     }
+//     for await (const { key: subKey, value } of PLAYERS_TO_GAMES.getShares(key, game)) {
+//         res[db.serializeDocPath(['players-to-games'], subKey)] = value
+//     }
+//     return res
+// }
 
 
 function toResult<T>(newGameResult: Result<T, Error>): Errors {
@@ -156,39 +368,39 @@ function toResult<T>(newGameResult: Result<T, Error>): Errors {
     }
 }
 
-async function getGameDiffOrError(d: db.Database, savedAction: SavedAction):
-    Promise<Result<Option<Diff<Game>>, Error>> {
-    const action = convertAction(savedAction);
-    const { gameId } = action;
-    const oldGame = await fw.getPrimaryState(d, GAME, [gameId], savedAction.parents)
+// async function getGameDiffOrError(d: db.Database, savedAction: SavedAction):
+//     Promise<Result<Option<Diff<Game>>, Error>> {
+//     const action = convertAction(savedAction);
+//     const { gameId } = action;
+//     const oldGame = await fw.getPrimaryState(d, GAME, [gameId], savedAction.parents)
 
-    const internalIsShortCodeUsed = async (sc: string): Promise<boolean> => {
-        const scState = await fw.getAggregatedState(
-            d, GAME, SHORT_CODE, [sc], savedAction.parents)
+//     const internalIsShortCodeUsed = async (sc: string): Promise<boolean> => {
+//         const scState = await fw.getAggregatedState(
+//             d, GAME, SHORT_CODE, [sc], savedAction.parents)
 
-        return scState.data.some
-    }
+//         return scState.data.some
+//     }
 
-    const res = await helper(action, oldGame, internalIsShortCodeUsed);
+//     const res = await helper(action, oldGame, internalIsShortCodeUsed);
 
-    return result.from(res)
-        .map(newGame => diffs.newDiff([gameId], oldGame, option.some(newGame)))
-}
+//     return result.from(res)
+//         .map(newGame => diffs.newDiff([gameId], oldGame, option.some(newGame)))
+// }
 
 
-const GAME: fw.PrimaryTable<Game> = {
-    schema: ['games'],
-    async getState(d: db.Database, key: Key, actionId: string): Promise<Option<Game>> {
-        const savedAction = option.from(await fw.getAction(d, actionId)).unwrap();
+// const GAME: fw.PrimaryTable<Game> = {
+//     schema: ['games'],
+//     async getState(d: db.Database, key: Key, actionId: string): Promise<Option<Game>> {
+//         const savedAction = option.from(await fw.getAction(d, actionId)).unwrap();
 
-        const maybeGameDiff = result.from(await getGameDiffOrError(d, savedAction)).unwrap();
-        const gameDiff = option.from(maybeGameDiff).unwrap()
-        if (util.lexCompare(gameDiff.key, key) !== 0) {
-            throw new Error("Bad action ID")
-        }
-        return option.from(getNewValue(gameDiff)).map(item => item.value)
-    },
-}
+//         const maybeGameDiff = result.from(await getGameDiffOrError(d, savedAction)).unwrap();
+//         const gameDiff = option.from(maybeGameDiff).unwrap()
+//         if (util.lexCompare(gameDiff.key, key) !== 0) {
+//             throw new Error("Bad action ID")
+//         }
+//         return option.from(getNewValue(gameDiff)).map(item => item.value)
+//     },
+// }
 
 const SHORT_CODE: fw.AggregationTable<Game, ShortCode, ShortCode> = {
     schema: ['short-codes-to-games'],
@@ -218,8 +430,8 @@ const PLAYERS_TO_GAMES: fw.AggregationTable<Game, string, model1_1.GameList> = {
     }
 }
 
-export const LIVE_PLAYERS_TO_GAMES: fw.LiveTable<model1_1.GameList> = fw.liveAggregatedTable(
-    GAME, PLAYERS_TO_GAMES);
+// export const LIVE_PLAYERS_TO_GAMES: fw.LiveTable<model1_1.GameList> = fw.liveAggregatedTable(
+//     GAME, PLAYERS_TO_GAMES);
 
 function convertError1_0(error: Error): model1_0.Error {
     switch (error.status) {
@@ -236,7 +448,10 @@ function convertError1_0(error: Error): model1_0.Error {
     }
 }
 
-async function helper(a: Action, maybeOldGame: Option<Game>, isShortCodeUsed: (shortCode: string) => Promise<boolean>): Promise<Result<Game, Error>> {
+async function integrateAction(
+    a: Action, input: Input): AsyncResult<Item<Game>[], Error> {
+    const maybeOldGame = await input.getGame([a.gameId]);
+
     switch (a.kind) {
         case 'create_game': {
             if (maybeOldGame.data.some) {
@@ -246,7 +461,8 @@ async function helper(a: Action, maybeOldGame: Option<Game>, isShortCodeUsed: (s
                     gameId: a.gameId,
                 })
             }
-            if (await isShortCodeUsed(a.shortCode)) {
+            const shortCode = await input.getShortCode([a.shortCode])
+            if (shortCode.data.some) {
                 return result.err({
                     status: 'SHORT_CODE_IN_USE',
                     status_code: 400,
@@ -255,23 +471,23 @@ async function helper(a: Action, maybeOldGame: Option<Game>, isShortCodeUsed: (s
             }
 
             // Game doesn't exist, short code is free. We're golden!
-            return result.ok({
+            return result.ok([item([a.gameId], {
                 state: 'UNSTARTED',
                 players: [],
                 shortCode: a.shortCode,
-            })
+            })])
         }
         case 'join_game': {
             if (!maybeOldGame.data.some) {
                 if (a.createIfNecessary) {
-                    return result.ok({
+                    return result.ok([item([a.gameId], {
                         state: 'UNSTARTED',
                         players: [{
                             id: a.playerId,
                             displayName: a.playerDisplayName,
                         }],
                         shortCode: '',
-                    });
+                    })]);
 
                 } else {
                     return result.err({
@@ -293,15 +509,15 @@ async function helper(a: Action, maybeOldGame: Option<Game>, isShortCodeUsed: (s
             }
 
             if (game.players.some(p => p.id === a.playerId)) {
-                return result.ok(game)
+                return result.ok([])
             }
-            return result.ok({
+            return result.ok([item([a.gameId], {
                 ...game,
                 players: [...game.players, {
                     id: a.playerId,
                     displayName: a.playerDisplayName,
                 }]
-            });
+            })]);
         }
         case 'start_game':
             if (!maybeOldGame.data.some) {
@@ -325,16 +541,16 @@ async function helper(a: Action, maybeOldGame: Option<Game>, isShortCodeUsed: (s
             }
 
             if (game.state === 'STARTED') {
-                return result.ok(game)
+                return result.ok([])
             }
 
-            return result.ok({
+            return result.ok([item([a.gameId], {
                 state: 'STARTED',
                 players: game.players.map(p => ({
                     ...p,
                     submissions: [],
                 })),
-            })
+            })])
         case 'make_move':
             if (!maybeOldGame.data.some || maybeOldGame.data.value.state !== 'STARTED') {
                 return result.err({
@@ -349,7 +565,120 @@ async function helper(a: Action, maybeOldGame: Option<Game>, isShortCodeUsed: (s
     }
 }
 
-function makeMove(game: StartedGame, action: MakeMoveAction): ResultView<Game, Error> {
+// async function helper(a: Action, maybeOldGame: Option<Game>, isShortCodeUsed: (shortCode: string) => Promise<boolean>): Promise<Result<Game, Error>> {
+//     switch (a.kind) {
+//         case 'create_game': {
+//             if (maybeOldGame.data.some) {
+//                 return result.err({
+//                     status: 'GAME_ALREADY_EXISTS',
+//                     status_code: 400,
+//                     gameId: a.gameId,
+//                 })
+//             }
+//             if (await isShortCodeUsed(a.shortCode)) {
+//                 return result.err({
+//                     status: 'SHORT_CODE_IN_USE',
+//                     status_code: 400,
+//                     shortCode: a.shortCode,
+//                 })
+//             }
+
+//             // Game doesn't exist, short code is free. We're golden!
+//             return result.ok({
+//                 state: 'UNSTARTED',
+//                 players: [],
+//                 shortCode: a.shortCode,
+//             })
+//         }
+//         case 'join_game': {
+//             if (!maybeOldGame.data.some) {
+//                 if (a.createIfNecessary) {
+//                     return result.ok({
+//                         state: 'UNSTARTED',
+//                         players: [{
+//                             id: a.playerId,
+//                             displayName: a.playerDisplayName,
+//                         }],
+//                         shortCode: '',
+//                     });
+
+//                 } else {
+//                     return result.err({
+//                         status: 'GAME_NOT_FOUND',
+//                         status_code: 404,
+//                         gameId: a.gameId,
+//                     })
+//                 }
+//             }
+//             const game = maybeOldGame.data.value;
+
+//             if (game.state !== 'UNSTARTED') {
+//                 return result.err({
+//                     version: '1.0',
+//                     status: 'GAME_ALREADY_STARTED',
+//                     status_code: 400,
+//                     gameId: a.gameId,
+//                 })
+//             }
+
+//             if (game.players.some(p => p.id === a.playerId)) {
+//                 return result.ok(game)
+//             }
+//             return result.ok({
+//                 ...game,
+//                 players: [...game.players, {
+//                     id: a.playerId,
+//                     displayName: a.playerDisplayName,
+//                 }]
+//             });
+//         }
+//         case 'start_game':
+//             if (!maybeOldGame.data.some) {
+//                 return result.err({
+//                     version: '1.2',
+//                     status: 'GAME_NOT_FOUND',
+//                     status_code: 404,
+//                     gameId: a.gameId,
+//                 })
+//             }
+//             const game = maybeOldGame.data.value;
+
+//             if (!game.players.some(p => p.id === a.playerId)) {
+//                 return result.err({
+//                     version: '1.0',
+//                     status: 'PLAYER_NOT_IN_GAME',
+//                     status_code: 403,
+//                     gameId: a.gameId,
+//                     playerId: a.playerId,
+//                 })
+//             }
+
+//             if (game.state === 'STARTED') {
+//                 return result.ok(game)
+//             }
+
+//             return result.ok({
+//                 state: 'STARTED',
+//                 players: game.players.map(p => ({
+//                     ...p,
+//                     submissions: [],
+//                 })),
+//             })
+//         case 'make_move':
+//             if (!maybeOldGame.data.some || maybeOldGame.data.value.state !== 'STARTED') {
+//                 return result.err({
+//                     version: '1.0',
+//                     status: 'GAME_NOT_STARTED',
+//                     status_code: 400,
+//                     gameId: a.gameId,
+//                 })
+//             }
+
+//             return makeMove(maybeOldGame.data.value, a)
+//     }
+// }
+
+function makeMove(game: StartedGame, action: MakeMoveAction): Result<Item<Game>[], Error> {
     const playerId = action.playerId
 
     const player = findById(game.players, playerId)
@@ -403,9 +732,9 @@ function makeMove(game: StartedGame, action: MakeMoveAction): ResultView<Game, E
         })
     }
 
-    return result.ok(produce(game, game => {
+    return result.ok([item([action.gameId], produce(game, game => {
         findById(game.players, playerId)!.submissions.push(action.submission)
-    }))
+    }))])
 }
 
 function convertAction1_0(a: model1_0.Action): Action {
