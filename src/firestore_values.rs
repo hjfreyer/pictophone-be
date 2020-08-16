@@ -14,13 +14,6 @@ use std::collections::HashMap;
 
 use crate::proto::google::firestore::v1 as fs;
 
-// #[derive(Serialize, Deserialize)]
-// struct Wrapper {
-//     #[serde(flatten)]
-//     extra: HashMap<String, Value>,
-// }
-
-// use serde_json::{map::Map, Number};
 #[derive(Debug)]
 pub enum DeserializeError {
     EmptyValue,
@@ -149,26 +142,7 @@ where
 
     let v = sj::Value::Object(converted?);
 
-    // // The firebase document has a field called "fields" that contain all top-level fields.
-    // // We want those to be flattened to our custom data structure. To not reinvent the wheel,
-    // // perform the firebase-value to serde-values conversion for all fields first and wrap those
-    // // Wrapper struct with a HashMap. Use #[serde(flatten)] on that map.
-    // let r = Wrapper {
-    //     extra: document
-    //         .fields
-    //         .as_ref()
-    //         .unwrap()
-    //         .iter()
-    //         .map(|(k, v)| {
-    //             return (k.to_owned(), firebase_value_to_serde_value(&v));
-    //         })
-    //         .collect(),
-    // };
-
-    // let v = serde_json::to_value(r)?;
-    let t: T = serde_json::from_value(v)?;
-    Ok(t)
-    // serde_json::from_value::<T>(v).into()
+    Ok(serde_json::from_value::<T>(v)?)
 }
 
 /// Converts a custom data type into a firebase google-rpc-api inspired heavily nested and wrapped type
@@ -189,8 +163,4 @@ where
     } else {
         Err(SerializeError::InvalidDocument)
     }
-    // Ok(fs::Document {
-    //     fields: Some(&v).map_value.unwrap().fields),
-    //     ..Default::default()
-    // })
 }

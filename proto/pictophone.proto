@@ -4,11 +4,13 @@ package pictophone;
 import "google/protobuf/any.proto";
 
 service Pictophone1_0 {
+    // rpc CreateGame (CreateGameRequest) returns (Empty);
     rpc JoinGame (JoinGameRequest) returns (Empty);
     rpc StartGame (StartGameRequest) returns (Empty);
     rpc MakeMove (MakeMoveRequest) returns (Empty);
 
     rpc GetGame(GetGameRequest) returns (stream GetGameResponse);
+ //   rpc GetShortCode(GetGameRequest) returns (stream GetGameResponse);
 }
 
 message AnyAction {
@@ -19,10 +21,17 @@ message AnyAction {
 
 message Action1_0 {
     oneof action {
-        JoinGameRequest join = 1;
-        StartGameRequest start = 2;
-        MakeMoveRequest move = 3;
+        CreateGameRequest create = 1;
+        JoinGameRequest join = 2;
+        StartGameRequest start = 3;
+        MakeMoveRequest move = 4;
     }
+}
+
+message CreateGameRequest {
+    string game_id = 1;
+    string player_id = 2;
+    string short_code = 3;
 }
 
 message JoinGameRequest {

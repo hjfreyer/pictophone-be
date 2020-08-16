@@ -72,9 +72,11 @@ checksum = "3441f0f7b02788e948e47f457ca01f1d7e6d92c693bc132c22b087d3141c03ff"
 name = "be2"
 version = "0.1.0"
 dependencies = [
+ "chrono",
  "futures",
  "gcp_auth",
  "itertools 0.9.0",
+ "maplit",
  "prost",
  "prost-types",
  "serde",
@@ -579,6 +581,12 @@ dependencies = [
  "generator",
  "scoped-tls",
 ]
+
+[[package]]
+name = "maplit"
+version = "1.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3e2e65a1a2e43cfcb47a895c4c8b10d1f4a61097f9f254f183aee60cad9c651d"
 
 [[package]]
 name = "matches"

@@ -25,7 +25,7 @@ use hello_world::greeter_server::{Greeter, GreeterServer};
 use hello_world::{HelloReply, HelloRequest};
 use pictophone as pt;
 use pictophone::pictophone10_server::{Pictophone10, Pictophone10Server};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -35,6 +35,7 @@ mod proto;
 use proto::*;
 use std::path;
 //
+use maplit::{btreemap, btreeset};
 
 mod firestore_values;
 
@@ -96,9 +97,8 @@ trait TypedString: Sized {
 }
 
 macro_rules! typed_path {
-    // `()` indicates that the macro takes no argument.
     ($name:ident) => {
-        #[derive(Deserialize, PartialEq, Eq, PartialOrd, Ord, Debug, Clone)]
+        #[derive(Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Debug, Clone)]
         struct $name(String);
 
         impl TypedString for $name {
@@ -214,6 +214,11 @@ struct Database {
     db_base: String,
 }
 
+enum CommitError {
+    TransactionConflict(String),
+    Status(Status),
+}
+
 impl Database {
     fn new(client: FirestoreClient<Channel>, project_id: &str) -> Database {
         Database {
@@ -222,8 +227,64 @@ impl Database {
         }
     }
 
-    async fn get_commit(commit_id: &CommitId) -> Result<Commit, Status> {
+    async fn get_parents(
+        &self,
+        req: &ParentsRequest,
+    ) -> Result<(Parents, TransactionContext), Status> {
+        // let mut facets_to_get: BTreeSet<FacetId> = futures::stream::iter(req.collections.iter())
+        //     .flat_map(|collection_id| db.collection_members(collection_id).into_stream())
+        //     .try_collect()
+        //     .await?;
+        // facets_to_get.extend(req.facets.iter().cloned());
+
+        // let facets = futures::stream::iter(facets_to_get.into_iter())
+        //     .map(|facet_id| async move {
+        //         db.facet_version(&facet_id)
+        //             .await
+        //             .map(|commit_id| (facet_id, commit_id))
+        //     })
+        //     .buffer_unordered(10)
+        //     .try_collect()
+        //     .await?;
+
+        // Ok(Parents {
+        //     facets,
+        //     collections: req.collections.iter().cloned().collect(),
+        // })
+        unimplemented!()
+    }
+
+    async fn commit(
+        &self,
+        tx: &TransactionContext,
+        commit_id: &CommitId,
+        commit: &Commit,
+        ptr_updates: &PointerUpdates,
+    ) -> Result<(), CommitError> {
         unimplemented!();
+    }
+
+    async fn get_commit(&self, commit_id: &CommitId) -> Result<Option<Commit>, Status> {
+        let doc_path: String = format!("{}/{}", self.db_base, commit_id.as_str());
+        let req = GetDocumentRequest {
+            name: doc_path,
+            mask: None,
+            consistency_selector: None,
+        };
+
+        let doc_res = self.client.clone().get_document(req).await;
+
+        match doc_res {
+            Err(e) => {
+                if e.code() == tonic::Code::NotFound {
+                    Ok(None)
+                } else {
+                    Err(e)
+                }
+            }
+            Ok(doc) => firestore_values::from_document(&doc.into_inner())
+                .map_err(|e| Status::internal(format!("{:?}", e))),
+        }
     }
 
     async fn facet_version(&self, facet_id: &FacetId) -> Result<Option<CommitId>, Status> {
@@ -312,42 +373,111 @@ impl Database {
 //         fn
 // }
 
+#[derive(Clone)]
 struct ParentsRequest {
-    facets: Vec<FacetId>,
-    collections: Vec<CollectionId>,
+    facets: BTreeSet<FacetId>,
+    collections: BTreeSet<CollectionId>,
 }
 
+impl ParentsRequest {
+    fn is_subset_of(&self, other: &ParentsRequest) -> bool {
+        self.facets.is_subset(&other.facets) && self.collections.is_subset(&other.collections)
+    }
+
+    fn extend(&mut self, other: ParentsRequest) {
+        self.facets.extend(other.facets.into_iter());
+        self.collections.extend(other.collections.into_iter());
+    }
+}
+
+#[derive(Serialize, Deserialize)]
 struct Parents {
     facets: BTreeMap<FacetId, Option<CommitId>>,
     collections: BTreeSet<CollectionId>,
 }
 
+struct TransactionContext {
+    precondition: BTreeMap<String, Precondition>,
+}
+
+#[derive(Serialize, Deserialize)]
 struct Commit {
-    payload: pt::AnyAction,
+    action: pt::AnyAction,
     parents: Parents,
 }
 
-async fn get_parents(db: &Database, req: &ParentsRequest) -> Result<Parents, Status> {
-    let mut facets_to_get: BTreeSet<FacetId> = futures::stream::iter(req.collections.iter())
-        .flat_map(|collection_id| db.collection_members(collection_id).into_stream())
-        .try_collect()
-        .await?;
-    facets_to_get.extend(req.facets.iter().cloned());
+#[derive(Serialize, Deserialize)]
+struct Collection {
+    members: Vec<FacetId>,
+}
 
-    let facets = futures::stream::iter(facets_to_get.into_iter())
-        .map(|facet_id| async move {
-            db.facet_version(&facet_id)
-                .await
-                .map(|commit_id| (facet_id, commit_id))
-        })
-        .buffer_unordered(10)
-        .try_collect()
-        .await?;
+impl Serialize for pt::AnyAction {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use prost::Message;
+        use serde::ser::Error;
+        let mut buf = vec![];
+        let serialized = self.encode(&mut buf).map_err(Error::custom)?;
+        serializer.serialize_bytes(&buf)
+    }
+}
 
-    Ok(Parents {
-        facets,
-        collections: req.collections.iter().cloned().collect(),
-    })
+impl<'de> Deserialize<'de> for pt::AnyAction {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use prost::Message;
+        use serde::de::Error;
+        let buf: Vec<u8> = Deserialize::deserialize(deserializer)?;
+        Self::decode(buf.as_slice()).map_err(Error::custom)
+    }
+}
+
+fn new_commit_id(commit: &Commit) -> CommitId {
+    use chrono::prelude::Utc;
+    let dt_part = Utc::now().to_rfc3339();
+
+    unimplemented!();
+}
+
+// fn
+
+async fn do_action(
+    db: &Database,
+    any_action: pt::AnyAction,
+) -> Result<Response<pt::Empty>, Status> {
+    loop {
+        let mut needs = ParentsRequest {
+            facets: BTreeSet::new(),
+            collections: BTreeSet::new(),
+        };
+        let (updates, parents, tx) = loop {
+            let (parents, tx) = db.get_parents(&needs).await?;
+            let parent_facets = get_parent_facets(db, &parents).await?;
+            let DataPoll { result, parents: n } = update_structure(&any_action, &parent_facets);
+            match result {
+                Some(updates) => break (updates, parents, tx),
+                None => {
+                    needs = n;
+                }
+            }
+        };
+        let commit = Commit {
+            action: any_action.clone(),
+            parents,
+        };
+        let commit_id = new_commit_id(&commit);
+        match db.commit(&tx, &commit_id, &commit, &updates).await {
+            Ok(_) => return Ok(Response::new(pt::Empty {})),
+            Err(CommitError::TransactionConflict(_)) => {
+                // Try again.
+            }
+            Err(CommitError::Status(e)) => return Err(Status::internal(format!("{:?}", e))),
+        }
+    }
 }
 
 #[tonic::async_trait]
@@ -356,33 +486,34 @@ impl Pictophone10 for MyGreeter {
         &self,
         request: Request<pt::JoinGameRequest>,
     ) -> Result<Response<pt::Empty>, Status> {
-        // let action10 = pt::Action10 {
-        //     action: Some(pt::action1_0::Action::Join(request.into_inner())),
-        // };
-        // let any_action = pt::AnyAction {
-        //     version: Some(pt::any_action::Version::V10(action10)),
-        // };
+        do_action(
+            &self.client,
+            pt::AnyAction {
+                version: Some(pt::any_action::Version::V10(pt::Action10 {
+                    action: Some(pt::action1_0::Action::Join(request.into_inner())),
+                })),
+            },
+        )
+        .await
 
-        // let mut previous_facet_versions = HashMap::<String, Option<String>>::new();
-        // let mut previous_facets = HashMap::new();
-        // let mut complete_collections = HashSet::new();
-        // loop {
-        //     match integrate(&any_action, &previous_facets, &complete_collections) {
-        //         Ok(facet) => unimplemented!(),
-        //         Err(IntegrationError::ApplicationError(status)) => return Err(status),
-        //         Err(IntegrationError::NeedMore(needs)) => {
-        //             meet_needs(
-        //                 &self.client,
-        //                 &needs,
-        //                 &mut previous_facet_versions,
-        //                 &mut previous_facets,
-        //                 &mut complete_collections,
-        //             )
+        // let commit_doc = Document {
+        //     name: "".into(),
+        //     fields: firestore_values::to_document(&commit).unwrap(),
+        //     create_time: None,
+        //     update_time: None,
+        // };
+        //         let res = self
+        //             .create_document(CreateDocumentRequest {
+        //                 parent,
+        //                 collection_id,
+        //                 document_id,
+        //                 document,
+        //                 mask: None,
+        //             })
         //             .await
-        //         }
-        //     }
-        // }
-        unimplemented!();
+        //             .unwrap();
+        //         res.into_inner()
+        //         //    Ok(res.into_inner())
     }
 
     async fn start_game(
@@ -408,7 +539,10 @@ impl Pictophone10 for MyGreeter {
     }
 }
 
-struct Facet {}
+#[derive(Clone)]
+struct Facet {
+    game: Game,
+}
 
 // struct Needs {
 //     facets: Vec<FacetId>,
@@ -421,19 +555,233 @@ struct Facet {}
 //     complete_collections: HashSet<CollectionId>,
 // }
 
-enum IntegrationError {
-    ApplicationError(Status),
-    NeedMore(ParentsRequest),
+struct PointerUpdates {
+    changed_facets: Vec<FacetId>,
+    added_memberships: Vec<(FacetId, CollectionId)>,
+    removed_memberships: Vec<(FacetId, CollectionId)>,
 }
 
-// fn integrate(
-//     action: &pictophone::AnyAction,
-//     previous_facets: &HashMap<FacetId, Option<Facet>>,
-//     complete_collections: &HashSet<CollectionId>,
-// ) -> Result<Facet, IntegrationError> {
-//     unimplemented!();
-// }
+fn update_structure(
+    action: &pictophone::AnyAction,
+    parents: &ParentFacets,
+) -> DataPoll<PointerUpdates> {
+    unimplemented!()
+}
 
+async fn get_parent_facets(
+    db: &Database,
+    parent_commits: &Parents,
+) -> Result<ParentFacets, Status> {
+    let commit_ids: BTreeSet<CommitId> = parent_commits
+        .facets
+        .values()
+        .filter_map(|f| f.clone())
+        .collect();
+    let mut commit_map: BTreeMap<CommitId, Commit> = btreemap![];
+    for commit_id in &commit_ids {
+        commit_map.insert(
+            commit_id.to_owned(),
+            db.get_commit(commit_id)
+                .await?
+                .ok_or_else(|| Status::internal("No such commit"))?,
+        );
+    }
+
+    unimplemented!()
+}
+
+fn game_facet_id(game_id: &str) -> FacetId {
+    FacetId(format!("games/{}", game_id))
+}
+
+async fn get_facets_for_commit(
+    db: &Database,
+    commit_id: &CommitId,
+) -> Result<BTreeMap<FacetId, Facet>, Status> {
+    let commit = db
+        .get_commit(&commit_id)
+        .await?
+        .ok_or_else(|| Status::internal("No such commit"))?;
+    let parent_facets = get_parent_facets(db, &commit.parents).await?;
+
+    let (game_id, game) =
+        pictophone_user_integrate(Action::from_proto(commit.action), &parent_facets)
+            .result
+            .ok_or_else(|| {
+                Status::internal("integrator requested more resources than it originally did")
+            })?
+            .map_err(|_| Status::internal("commit ref pointed to action that errored"))?
+            .ok_or_else(|| Status::internal("commit ref pointed to action that changed nothing"))?;
+
+    Ok(btreemap![
+        game_facet_id(&game_id) => Facet { game }])
+}
+
+mod deps {
+    use super::*;
+
+    pub(super) fn get_game(parents: &ParentFacets, game_id: &str) -> DataPoll<Option<Game>> {
+        let facet_id = FacetId(format!("games/{}", game_id));
+        let needs = ParentsRequest {
+            facets: btreeset![facet_id.clone()],
+            collections: btreeset![],
+        };
+        match parents.facets.get(&facet_id) {
+            None => DataPoll {
+                result: None,
+                parents: needs,
+            },
+            Some(maybe_facet) => DataPoll {
+                result: Some(maybe_facet.as_ref().map(|f| f.game.clone())),
+                parents: needs,
+            },
+        }
+    }
+    pub(super) fn get_short_code(
+        parents: &ParentFacets,
+        short_code_id: &str,
+    ) -> DataPoll<Option<()>> {
+        let collection_id = CollectionId(format!("shortCode/{}", short_code_id));
+        let needs = ParentsRequest {
+            facets: btreeset![],
+            collections: btreeset![collection_id.clone()],
+        };
+        let short_code_id = short_code_id.to_string();
+        if parents.collections.contains(&collection_id) {
+            DataPoll {
+                result: None,
+                parents: needs,
+            }
+        } else {
+            for (facet_id, maybe_facet) in &parents.facets {
+                if let Some(facet) = maybe_facet {
+                    let share = extract_short_code_share(&short_code_id, facet_id, facet);
+                    if share.is_some() {
+                        return DataPoll {
+                            result: Some(Some(())),
+                            parents: needs,
+                        };
+                    }
+                }
+            }
+            DataPoll {
+                result: None,
+                parents: needs,
+            }
+        }
+    }
+}
+
+struct DataPoll<T> {
+    result: Option<T>,
+    parents: ParentsRequest,
+}
+
+struct ParentFacets {
+    facets: BTreeMap<FacetId, Option<Facet>>,
+    collections: BTreeSet<CollectionId>,
+}
+
+fn extract_short_code_share(short_code: &str, facet_id: &FacetId, facet: &Facet) -> Option<()> {
+    let sc = match &facet.game {
+        Game::Unstarted { short_code, .. } => Some(short_code),
+    }?;
+
+    if *sc == *short_code {
+        Some(())
+    } else {
+        None
+    }
+}
+
+enum Action {
+    CreateGame { game_id: String, short_code: String },
+    // JoinGame {
+    //     game_id: String,
+    //     player_id: String,
+    // }
+}
+
+impl Action {
+    fn from_proto(any_action: pt::AnyAction) -> Action {
+        unimplemented!()
+    }
+}
+
+enum ApplicationError {
+    GameAlreadyExists,
+    GameNotFound,
+    ShortCodeInUse,
+}
+
+#[derive(Clone)]
+enum Game {
+    Unstarted {
+        players: Vec<String>,
+        short_code: String,
+    },
+}
+
+type PictophoneResult = Result<Option<(String, Game)>, ApplicationError>;
+
+fn data_join<A, B>(a: DataPoll<A>, b: DataPoll<B>) -> DataPoll<(A, B)> {
+    let mut parents = a.parents;
+    parents.extend(b.parents);
+    match (a.result, b.result) {
+        (Some(aa), Some(bb)) => DataPoll {
+            result: Some((aa, bb)),
+            parents,
+        },
+        _ => DataPoll {
+            result: None,
+            parents,
+        },
+    }
+}
+
+fn pictophone_user_integrate(action: Action, parents: &ParentFacets) -> DataPoll<PictophoneResult> {
+    match action {
+        Action::CreateGame {
+            game_id,
+            short_code,
+        } => {
+            let game_fetch = deps::get_game(parents, &game_id);
+            let short_code_fetch = deps::get_short_code(parents, &short_code);
+
+            let DataPoll { result, parents } = data_join(game_fetch, short_code_fetch);
+
+            match result {
+                None => DataPoll {
+                    result: None,
+                    parents,
+                },
+                Some((game, sc)) => {
+                    let mk_res = move |result| DataPoll {
+                        result: Some(result),
+                        parents,
+                    };
+
+                    if game.is_some() {
+                        return mk_res(Err(ApplicationError::GameAlreadyExists));
+                    }
+                    if sc.is_some() {
+                        return mk_res(Err(ApplicationError::ShortCodeInUse));
+                    }
+                    mk_res(Ok(Some((
+                        game_id.clone(),
+                        Game::Unstarted {
+                            short_code: short_code.clone(),
+                            players: vec![],
+                        },
+                    ))))
+                }
+            }
+        } // Action::JoinGame{game_id, player_id} => {
+          //     let game = deps.get(deps::get_game(game_id)).ok_or()?;
+
+          // }}
+    }
+}
 enum NewClientError {
     GcpAuth(gcp_auth::GCPAuthError),
     InvalidHeader(tonic::metadata::errors::InvalidMetadataValue),
@@ -488,7 +836,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Boom, running on: {}", addr);
 
-    // client.create_document2().await;
+    println!(
+        "{:?}",
+        greeter.client.client.clone().create_document2().await
+    );
 
     Server::builder()
         .add_service(Pictophone10Server::new(greeter))
@@ -532,3 +883,71 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //         //    Ok(res.into_inner())
 //     }
 // }
+
+#[derive(Serialize, Deserialize)]
+struct FakeData {
+    foo: String,
+}
+impl firestore_client::FirestoreClient<Channel> {
+    async fn create_document2(&mut self) -> CommitResponse {
+        let project_id = "pictophone-test";
+        let parent = format!("projects/{}/databases/(default)", project_id);
+        // let collection_id = "greetings".into();
+        // let document_id = "".into();
+        // let mut fields = HashMap::new();
+        // fields.insert(
+        //     "message".into(),
+        //     Value {
+        //         value_type: Some(value::ValueType::StringValue(
+        //             "Hello world from CloudRun!".into(),
+        //         )),
+        //     },
+        // );
+        let document = Document {
+            name: "projects/pictophone-test/databases/(default)/documents/games/aa/actions/02020-06-27T21:01:33.858Z90388966".into(),
+            fields: Default::default(),
+            create_time: None,
+            update_time: None,
+        };
+        let check = Write {
+            operation: Some(write::Operation::Update(document)),
+            update_mask: Some(DocumentMask {
+                field_paths: vec![],
+            }),
+            update_transforms: vec![],
+            current_document: Some(Precondition {
+                condition_type: Some(precondition::ConditionType::UpdateTime(
+                    prost_types::Timestamp {
+                        seconds: 1593291694,
+                        nanos: 37231000,
+                    },
+                )),
+            }),
+        };
+        let fake_data = FakeData {
+            foo: "bar".to_string(),
+        };
+        let write = Write {
+        operation: Some(write::Operation::Update(Document {
+            name: "projects/pictophone-test/databases/(default)/documents/games/aa/actions/testtest".into(),
+            fields: firestore_values::to_document(&fake_data).unwrap(),
+            create_time: None,
+            update_time: None,
+        })),
+        update_mask: None,
+    update_transforms: vec![],
+    current_document: None,
+    };
+
+        let res = self
+            .commit(CommitRequest {
+                database: parent,
+                writes: vec![check, write],
+                transaction: vec![],
+            })
+            .await
+            .unwrap();
+        res.into_inner()
+        //    Ok(res.into_inner())
+    }
+}
