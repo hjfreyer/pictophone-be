@@ -42,6 +42,11 @@ mod firestore_values;
 use firestore_client::FirestoreClient;
 use google::firestore::v1::*;
 
+mod db;
+use db::*;
+
+use db::CommitIdOld as CommitId;
+
 #[derive(Debug)]
 pub struct MyGreeter {
     client: Database,
@@ -65,51 +70,6 @@ where
             }
         }
     }
-}
-
-trait TypedString: Sized {
-    fn new(s: String) -> Self;
-    fn as_str(&self) -> &str;
-
-    fn parent(&self) -> Option<Self> {
-        use itertools::Itertools;
-        let s = self.as_str();
-        if s.is_empty() {
-            None
-        } else {
-            let split = s.split("/").collect::<Vec<&str>>();
-            let new_len = split.len() - 1;
-            Some(Self::new(
-                split.into_iter().take(new_len).intersperse("/").collect(),
-            ))
-        }
-    }
-
-    fn file_name(&self) -> Option<&str> {
-        let s = self.as_str();
-        if s.is_empty() {
-            None
-        } else {
-            let split = s.split("/").collect::<Vec<&str>>();
-            split.last().map(|s| *s)
-        }
-    }
-}
-
-macro_rules! typed_path {
-    ($name:ident) => {
-        #[derive(Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Debug, Clone)]
-        struct $name(String);
-
-        impl TypedString for $name {
-            fn new(s: String) -> Self {
-                Self(s)
-            }
-            fn as_str(&self) -> &str {
-                &self.0
-            }
-        }
-    };
 }
 
 // enum ParseDocumentError {
@@ -163,10 +123,6 @@ macro_rules! typed_path {
 //         }
 //     };
 // }
-
-typed_path![FacetId];
-typed_path![CollectionId];
-typed_path![CommitId];
 
 // struct FacetIdBuf(path::PathBuf);
 
