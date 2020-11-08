@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::collections::{BTreeMap, BTreeSet};
 
 use maplit::{btreemap, btreeset};
@@ -56,23 +54,40 @@ impl CommitGraph for TestCommitGraph {
     }
 }
 
-#[derive(Debug, Hash, Copy, Clone, Eq, PartialEq)]
-enum Implementation {
-    V1,
-}
+mod evolver {
+    use std::collections::{BTreeMap, BTreeSet};
 
-// #[derive(Debug, Hash, Clone, Eq, PartialEq, Ord, PartialOrd)]
-// struct TopicId(String);
+    pub trait Evolver {
+        type Action;
+        type Response;
+
+        type Id;
+        type State;
+
+        fn evolve(
+            &self,
+            action: &Self::Action,
+            reads: BTreeMap<Self::Id, Option<Self::State>>,
+        ) -> Response<Self::Response, Self::Id, Self::State>;
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum Response<R, Id, State> {
+        NeedMore {
+            topics: BTreeSet<Id>,
+        },
+        Commit {
+            response: R,
+            updates: BTreeMap<Id, State>,
+        },
+    }
+}
 
 #[derive(Debug, Hash, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 struct TopicRev(usize);
 
 #[derive(Debug, Hash, Clone, Copy, Eq, PartialEq)]
 struct ChangeId(usize);
-
-#[derive(Debug, Hash, Clone, Eq, PartialEq)]
-struct Slice(Vec<ChangeId>);
-struct Thing {}
 
 fn merge_trees<Key, Rank, Value>(
     input: Vec<BTreeMap<Key, (Rank, Value)>>,
@@ -106,24 +121,28 @@ enum OutputsError {
     CommitIdNotFound,
 }
 
-fn outputs(
-    graph: &TestCommitGraph,
-    implementation: Implementation,
-    change_id: &ChangeId,
-) -> Result<(Response, BTreeMap<TopicId, (TopicRev, State)>), OutputsError> {
+fn outputs<Action, CommitId, StateId, State, Response>(
+    graph: &impl CommitGraph<Action = Action, CommitId = CommitId>,
+    evolver: &impl evolver::Evolver<Action = Action, Id = StateId, State = State, Response = Response>,
+    change_id: &CommitId,
+) -> Result<(Response, BTreeMap<StateId, (TopicRev, State)>), OutputsError>
+where
+    StateId: Ord + Clone,
+    State: Clone,
+{
     let action = if let Some(action) = graph.action(change_id) {
         action
     } else {
         return Err(OutputsError::CommitIdNotFound);
     };
     let preds = graph.predecessors(change_id);
-    let outs: Result<Vec<(Response, BTreeMap<TopicId, (TopicRev, State)>)>, OutputsError> = preds
+    let outs: Result<Vec<(Response, BTreeMap<StateId, (TopicRev, State)>)>, OutputsError> = preds
         .iter()
-        .map(|cid| outputs(graph, implementation, cid))
+        .map(|cid| outputs(graph, evolver, cid))
         .collect();
     let outs = merge_trees(outs?.into_iter().map(|(_resp, states)| states).collect());
 
-    let mut needs: BTreeSet<TopicId> = btreeset![];
+    let mut needs: BTreeSet<StateId> = btreeset![];
     loop {
         let reads = needs
             .iter()
@@ -134,9 +153,9 @@ fn outputs(
                 )
             })
             .collect();
-        match apply_action_iter(implementation, &action, reads) {
-            ActorResponse::NeedMore { topics } => needs = topics,
-            ActorResponse::Commit { response, updates } => {
+        match evolver.evolve(&action, reads) {
+            evolver::Response::NeedMore { topics } => needs = topics,
+            evolver::Response::Commit { response, updates } => {
                 return Ok((
                     response,
                     updates
@@ -172,13 +191,20 @@ fn outputs(
 //     todo!()
 // }
 
-fn apply_action_iter(
-    implementation: Implementation,
-    action: &Action,
-    reads: BTreeMap<TopicId, Option<State>>,
-) -> ActorResponse {
-    match implementation {
-        Implementation::V1 => match action {
+struct TestEvolver {}
+impl evolver::Evolver for TestEvolver {
+    type Action = Action;
+    type Response = Response;
+
+    type Id = TopicId;
+    type State = State;
+
+    fn evolve(
+        &self,
+        action: &Action,
+        reads: BTreeMap<TopicId, Option<State>>,
+    ) -> evolver::Response<Response, TopicId, State> {
+        match action {
             Action::CreateGame {
                 game_id,
                 short_code,
@@ -191,7 +217,7 @@ fn apply_action_iter(
                         .map(|s| s.game().unwrap().to_owned())
                         .unwrap_or_default(),
                     None => {
-                        return ActorResponse::NeedMore {
+                        return evolver::Response::NeedMore {
                             topics: btreeset! {game_topic_id, sc_topic_id},
                         }
                     }
@@ -202,7 +228,7 @@ fn apply_action_iter(
                         .map(|s| s.sc().unwrap().to_owned())
                         .unwrap_or_default(),
                     None => {
-                        return ActorResponse::NeedMore {
+                        return evolver::Response::NeedMore {
                             topics: btreeset! {game_topic_id, sc_topic_id},
                         }
                     }
@@ -211,7 +237,7 @@ fn apply_action_iter(
                 match game_state {
                     Game::None => {}
                     _ => {
-                        return ActorResponse::Commit {
+                        return evolver::Response::Commit {
                             response: Response::GameAlreadyExists {
                                 game_id: game_id.to_owned(),
                             },
@@ -221,7 +247,7 @@ fn apply_action_iter(
                 }
 
                 if let ShortCode::ForGame(_) = sc_state {
-                    return ActorResponse::Commit {
+                    return evolver::Response::Commit {
                         response: Response::ShortCodeInUse {
                             short_code: short_code.to_owned(),
                         },
@@ -229,7 +255,7 @@ fn apply_action_iter(
                     };
                 }
 
-                ActorResponse::Commit {
+                evolver::Response::Commit {
                     response: Response::Ok,
                     updates: btreemap! {
                         game_topic_id => State::Game(Game::Created{short_code: short_code.to_owned()}),
@@ -245,7 +271,7 @@ fn apply_action_iter(
                         .map(|s| s.game().unwrap().to_owned())
                         .unwrap_or_default(),
                     None => {
-                        return ActorResponse::NeedMore {
+                        return evolver::Response::NeedMore {
                             topics: btreeset! {game_topic_id},
                         }
                     }
@@ -253,7 +279,7 @@ fn apply_action_iter(
 
                 let short_code = match game_state {
                     Game::None => {
-                        return ActorResponse::Commit {
+                        return evolver::Response::Commit {
                             response: Response::GameNotFound {
                                 game_id: game_id.to_owned(),
                             },
@@ -265,7 +291,7 @@ fn apply_action_iter(
                 };
                 let sc_topic_id = TopicId::ShortCode(short_code);
 
-                ActorResponse::Commit {
+                evolver::Response::Commit {
                     response: Response::Ok,
                     updates: btreemap! {
                         game_topic_id => State::Game(Game::None),
@@ -273,7 +299,7 @@ fn apply_action_iter(
                     },
                 }
             }
-        },
+        }
     }
 }
 // }
@@ -357,22 +383,6 @@ impl Default for ShortCode {
     }
 }
 
-// struct Commit {
-//     read: BTreeMap<TopicId, Slice>
-
-// }
-
-#[derive(Debug, Clone)]
-enum ActorResponse {
-    NeedMore {
-        topics: BTreeSet<TopicId>,
-    },
-    Commit {
-        response: Response,
-        updates: BTreeMap<TopicId, State>,
-    },
-}
-
 #[derive(Debug, Clone)]
 enum Response {
     Ok,
@@ -381,15 +391,9 @@ enum Response {
     ShortCodeInUse { short_code: ShortCodeId },
 }
 
-struct Change {}
-
-struct TopicInfo {
-    pending_writes: BTreeSet<ChangeId>,
-}
-
 fn main() {
     println!(
         "{:#?}",
-        outputs(&TestCommitGraph {}, Implementation::V1, &ChangeId(3))
+        outputs(&TestCommitGraph {}, &TestEvolver{}, &ChangeId(3))
     );
 }
