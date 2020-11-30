@@ -1,6 +1,28 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use maplit::{btreemap, btreeset};
+use proto::{
+    v1::{Action, GameId, ShortCodeId},
+    LogicRequest, VersionedAction, VersionedResponse,
+};
+
+mod runner;
+
+struct Server {
+    actions: Vec<VersionedAction>,
+    primary_version: runner::LogicVersion,
+    states: BTreeMap<runner::LogicVersion, Vec<Vec<u8>>>,
+}
+
+impl Server {
+    fn handle_action(
+        &mut self,
+        action: VersionedAction,
+    ) -> Result<VersionedResponse, anyhow::Error> {
+        self.actions.push(action);
+        unimplemented!()
+    }
+}
 
 mod lib {
     use std::collections::{BTreeMap, BTreeSet};
@@ -48,7 +70,7 @@ mod lib {
     }
 
     #[derive(Debug, Hash, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
-    pub struct TopicRev(usize);
+    pub struct TopicRev(pub usize);
 
     fn merge_trees<Key, Rank, Value>(
         input: Vec<BTreeMap<Key, (Rank, Value)>>,
@@ -201,194 +223,275 @@ mod lib {
     }
 }
 
-#[derive(Debug, Hash, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
-struct CommitId(usize);
+// #[derive(Debug, Hash, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+// struct CommitId(usize);
 
-use lib::{evolver, CommitGraph};
+// use lib::{evolver, CommitGraph};
 
-struct TestCommitGraph {
-    actions: Vec<WrappedAction>,
-}
+// struct TestCommitGraph {
+//     v2_status: V2Status,
+//     actions: Vec<WrappedAction>,
+//     topics: BTreeMap<VersionedTopicId, (lib::TopicRev, CommitId)>,
+//     // v2_topics: BTreeMap<TopicId, (lib::TopicRev, CommitId)>,
+// }
 
-struct WrappedAction {
-    action: Action,
-    pending: bool,
-    predecessors: Vec<CommitId>,
-}
+// #[derive(Debug, Ord, PartialOrd, Eq, PartialEq, Clone)]
+// enum VersionedTopicId {
+//     V1(TopicId),
+//     V2(TopicId),
+// }
 
-impl TestCommitGraph {
-    pub fn propose(&mut self, action: Action) -> CommitId {
-        let commit_id = CommitId(self.actions.len());
-        self.actions.push(WrappedAction {
-            action,
-            pending: true,
-            predecessors: vec![],
-        });
-        commit_id
-    }
+// struct WrappedAction {
+//     action: Action,
+//     pending: bool,
+//     v2_indexed: bool,
+//     predecessors: Vec<CommitId>,
+// }
 
-    pub fn add_predecessor(&mut self, before_id: &CommitId, after_id: &CommitId) {
-        let before = self.actions.get(before_id.0).unwrap();
-        if before.pending {
-            panic!("before is still pending")
-        }
+// #[derive(Debug)]
+// enum CommitError {
+//     CommitIdNotFound,
+//     OutOfDate,
+//     Conflict,
+// }
 
-        let after = self.actions.get_mut(after_id.0).unwrap();
-        if !after.pending {
-            panic!("tooo lateeee")
-        }
-        after.predecessors.push(before_id.to_owned());
-    }
+// #[derive(Debug)]
+// enum V2Status {
+//     Disabled,
+//     Backfilling,
+//     Backfilled,
+// }
 
-    pub fn commit(&mut self, commit_id: &CommitId) {
-        let c = self.actions.get_mut(commit_id.0).unwrap();
-        c.pending = false;
-    }
-}
+// impl TestCommitGraph {
+//     pub fn new() -> Self {
+//         Self {
+//             v2_status: V2Status::Disabled,
+//             actions: Default::default(),
+//             topics: Default::default(),
+//         }
+//     }
 
-impl CommitGraph for TestCommitGraph {
-    type CommitId = CommitId;
+//     pub fn propose(&mut self, action: Action) -> CommitId {
+//         let commit_id = CommitId(self.actions.len());
+//         self.actions.push(WrappedAction {
+//             action,
+//             pending: true,
+//             v2_indexed: false,
+//             predecessors: vec![],
+//         });
+//         commit_id
+//     }
 
-    type Action = Action;
+//     pub fn add_predecessor(&mut self, before_id: &CommitId, after_id: &CommitId) {
+//         let before = self.actions.get(before_id.0).unwrap();
+//         if before.pending {
+//             panic!("before is still pending")
+//         }
 
-    fn action(&self, commit_id: &Self::CommitId) -> Option<Self::Action> {
-        self.actions.get(commit_id.0).map(|wa| wa.action.to_owned())
-    }
+//         let after = self.actions.get_mut(after_id.0).unwrap();
+//         if !after.pending {
+//             panic!("tooo lateeee")
+//         }
+//         after.predecessors.push(before_id.to_owned());
+//     }
 
-    fn predecessors(&self, commit_id: &Self::CommitId) -> Vec<Self::CommitId> {
-        let wa = self.actions.get(commit_id.0).unwrap();
-        if wa.pending {
-            panic!("no peeking")
-        }
-        wa.predecessors.to_owned()
-    }
+//     pub fn commit(
+//         &mut self,
+//         commit_id: &CommitId,
+//         topics: &Vec<(VersionedTopicId, lib::TopicRev)>,
+//     ) -> Result<(), CommitError> {
+//         let action = self
+//             .actions
+//             .get_mut(commit_id.0)
+//             .ok_or(CommitError::CommitIdNotFound)?;
+//         // let needed_preds: Vec<CommitId> = topics
+//         //     .iter()
+//         //     .filter_map(|(tid, _rev)| self.topics.get(tid).map(|c| c.last().unwrap().unwrap()))
+//         //     .collect();
+//         let mut has_all = true;
+//         for (tid, rev) in topics.iter() {
+//             if let Some((latest_rev, latest_commit)) = self.topics.get(tid) {
+//                 // Trying to commit into an occupied spot.
+//                 if rev.0 <= latest_rev.0 {
+//                     action.predecessors.push(latest_commit.to_owned());
+//                     has_all = false;
+//                 }
+//             }
+//         }
 
-    fn all_commits(&self) -> Vec<Self::CommitId> {
-        self.actions
-            .iter()
-            .enumerate()
-            .filter_map(|(idx, wa)| {
-                if wa.pending {
-                    None
-                } else {
-                    Some(CommitId(idx))
-                }
-            })
-            .collect()
-    }
-}
+//         if has_all {
+//             action.pending = false;
+//             action.v2_indexed = match self.v2_status {
+//                 V2Status::Disabled => false,
+//                 V2Status::Backfilling|
+//                 V2Status::Backfilled => true
+//             };
+//             for (tid, rev) in topics.iter() {
+//                 self.topics.insert(tid.to_owned(), (rev.to_owned(), commit_id.to_owned()));
+//             }
 
-struct TestEvolver {}
-impl evolver::Evolver for TestEvolver {
-    type Action = Action;
-    type Response = Response;
+//             // for (tid,rev) in topics {
+//             //     let versions = if let Some(versions) = self.topics.get_mut(tid) {
+//             //         versions
+//             //     } else {
+//             //         self.topics.insert(tid.to_owned(), Default::default());
+//             //         self.topics.get_mut(tid).unwrap()
+//             //     };
+//             //     if versions.len() <= rev.0 {
+//             //         versions.resize_with(rev.0 + 1, Default::default)
+//             //     }
+//             //     versions.insert(rev.0,Some(commit_id.to_owned()));
+//             // }
+//             Ok(())
+//         } else {
+//             Err(CommitError::OutOfDate)
+//         }
+//     }
+// }
 
-    type TopicId = TopicId;
-    type State = State;
+// impl CommitGraph for TestCommitGraph {
+//     type CommitId = CommitId;
 
-    fn evolve(
-        &self,
-        action: &Action,
-        reads: BTreeMap<TopicId, Option<State>>,
-    ) -> evolver::Response<Response, TopicId, State> {
-        match action {
-            Action::CreateGame {
-                game_id,
-                short_code,
-            } => {
-                let game_topic_id = TopicId::Game(game_id.to_owned());
-                let sc_topic_id = TopicId::ShortCode(short_code.to_owned());
-                let game_state = match reads.get(&game_topic_id) {
-                    Some(state) => state
-                        .as_ref()
-                        .map(|s| s.game().unwrap().to_owned())
-                        .unwrap_or_default(),
-                    None => {
-                        return evolver::Response::NeedMore {
-                            topics: btreeset! {game_topic_id, sc_topic_id},
-                        }
-                    }
-                };
-                let sc_state = match reads.get(&sc_topic_id) {
-                    Some(state) => state
-                        .as_ref()
-                        .map(|s| s.sc().unwrap().to_owned())
-                        .unwrap_or_default(),
-                    None => {
-                        return evolver::Response::NeedMore {
-                            topics: btreeset! {game_topic_id, sc_topic_id},
-                        }
-                    }
-                };
+//     type Action = Action;
 
-                match game_state {
-                    Game::None => {}
-                    _ => {
-                        return evolver::Response::Commit {
-                            response: Response::GameAlreadyExists {
-                                game_id: game_id.to_owned(),
-                            },
-                            updates: btreemap! {},
-                        }
-                    }
-                }
+//     fn action(&self, commit_id: &Self::CommitId) -> Option<Self::Action> {
+//         self.actions.get(commit_id.0).map(|wa| wa.action.to_owned())
+//     }
 
-                if let ShortCode::ForGame(_) = sc_state {
-                    return evolver::Response::Commit {
-                        response: Response::ShortCodeInUse {
-                            short_code: short_code.to_owned(),
-                        },
-                        updates: btreemap! {},
-                    };
-                }
+//     fn predecessors(&self, commit_id: &Self::CommitId) -> Vec<Self::CommitId> {
+//         let wa = self.actions.get(commit_id.0).unwrap();
+//         // if wa.pending {
+//         //     panic!("no peeking")
+//         // }
+//         wa.predecessors.to_owned()
+//     }
 
-                evolver::Response::Commit {
-                    response: Response::Ok,
-                    updates: btreemap! {
-                        game_topic_id => State::Game(Game::Created{short_code: short_code.to_owned()}),
-                        sc_topic_id => State::ShortCode(ShortCode::ForGame(game_id.to_owned())),
-                    },
-                }
-            }
-            Action::DeleteGame { game_id } => {
-                let game_topic_id = TopicId::Game(game_id.to_owned());
-                let game_state = match reads.get(&game_topic_id) {
-                    Some(state) => state
-                        .as_ref()
-                        .map(|s| s.game().unwrap().to_owned())
-                        .unwrap_or_default(),
-                    None => {
-                        return evolver::Response::NeedMore {
-                            topics: btreeset! {game_topic_id},
-                        }
-                    }
-                };
+//     fn all_commits(&self) -> Vec<Self::CommitId> {
+//         self.actions
+//             .iter()
+//             .enumerate()
+//             .filter_map(|(idx, wa)| {
+//                 if wa.pending {
+//                     None
+//                 } else {
+//                     Some(CommitId(idx))
+//                 }
+//             })
+//             .collect()
+//     }
+// }
 
-                let short_code = match game_state {
-                    Game::None => {
-                        return evolver::Response::Commit {
-                            response: Response::GameNotFound {
-                                game_id: game_id.to_owned(),
-                            },
-                            updates: btreemap! {},
-                        }
-                    }
+// struct TestEvolver {}
+// impl evolver::Evolver for TestEvolver {
+//     type Action = Action;
+//     type Response = Response;
 
-                    Game::Created { short_code } => short_code,
-                };
-                let sc_topic_id = TopicId::ShortCode(short_code);
+//     type TopicId = TopicId;
+//     type State = State;
 
-                evolver::Response::Commit {
-                    response: Response::Ok,
-                    updates: btreemap! {
-                        game_topic_id => State::Game(Game::None),
-                        sc_topic_id => State::ShortCode(ShortCode::None),
-                    },
-                }
-            }
-        }
-    }
-}
+//     fn evolve(
+//         &self,
+//         action: &Action,
+//         reads: BTreeMap<TopicId, Option<State>>,
+//     ) -> evolver::Response<Response, TopicId, State> {
+//         match action {
+//             Action::CreateGame {
+//                 game_id,
+//                 short_code,
+//             } => {
+//                 let game_topic_id = TopicId::Game(game_id.to_owned());
+//                 let sc_topic_id = TopicId::ShortCode(short_code.to_owned());
+//                 let game_state = match reads.get(&game_topic_id) {
+//                     Some(state) => state
+//                         .as_ref()
+//                         .map(|s| s.game().unwrap().to_owned())
+//                         .unwrap_or_default(),
+//                     None => {
+//                         return evolver::Response::NeedMore {
+//                             topics: btreeset! {game_topic_id, sc_topic_id},
+//                         }
+//                     }
+//                 };
+//                 let sc_state = match reads.get(&sc_topic_id) {
+//                     Some(state) => state
+//                         .as_ref()
+//                         .map(|s| s.sc().unwrap().to_owned())
+//                         .unwrap_or_default(),
+//                     None => {
+//                         return evolver::Response::NeedMore {
+//                             topics: btreeset! {game_topic_id, sc_topic_id},
+//                         }
+//                     }
+//                 };
+
+//                 match game_state {
+//                     Game::None => {}
+//                     _ => {
+//                         return evolver::Response::Commit {
+//                             response: Response::GameAlreadyExists {
+//                                 game_id: game_id.to_owned(),
+//                             },
+//                             updates: btreemap! {},
+//                         }
+//                     }
+//                 }
+
+//                 if let ShortCode::ForGame(_) = sc_state {
+//                     return evolver::Response::Commit {
+//                         response: Response::ShortCodeInUse {
+//                             short_code: short_code.to_owned(),
+//                         },
+//                         updates: btreemap! {},
+//                     };
+//                 }
+
+//                 evolver::Response::Commit {
+//                     response: Response::Ok,
+//                     updates: btreemap! {
+//                         game_topic_id => State::Game(Game::Created{short_code: short_code.to_owned()}),
+//                         sc_topic_id => State::ShortCode(ShortCode::ForGame(game_id.to_owned())),
+//                     },
+//                 }
+//             }
+//             Action::DeleteGame { game_id } => {
+//                 let game_topic_id = TopicId::Game(game_id.to_owned());
+//                 let game_state = match reads.get(&game_topic_id) {
+//                     Some(state) => state
+//                         .as_ref()
+//                         .map(|s| s.game().unwrap().to_owned())
+//                         .unwrap_or_default(),
+//                     None => {
+//                         return evolver::Response::NeedMore {
+//                             topics: btreeset! {game_topic_id},
+//                         }
+//                     }
+//                 };
+
+//                 let short_code = match game_state {
+//                     Game::None => {
+//                         return evolver::Response::Commit {
+//                             response: Response::GameNotFound {
+//                                 game_id: game_id.to_owned(),
+//                             },
+//                             updates: btreemap! {},
+//                         }
+//                     }
+
+//                     Game::Created { short_code } => short_code,
+//                 };
+//                 let sc_topic_id = TopicId::ShortCode(short_code);
+
+//                 evolver::Response::Commit {
+//                     response: Response::Ok,
+//                     updates: btreemap! {
+//                         game_topic_id => State::Game(Game::None),
+//                         sc_topic_id => State::ShortCode(ShortCode::None),
+//                     },
+//                 }
+//             }
+//         }
+//     }
+// }
 
 #[cfg(test)]
 mod test {
@@ -400,120 +503,145 @@ mod test {
     }
 }
 
-#[derive(Debug, Hash, Clone, Eq, PartialEq, Ord, PartialOrd)]
-struct GameId(String);
+// #[derive(Debug, Hash, Clone, Eq, PartialEq, Ord, PartialOrd)]
+// struct GameId(String);
 
-#[derive(Debug, Hash, Clone, Eq, PartialEq, Ord, PartialOrd)]
-struct ShortCodeId(String);
+// #[derive(Debug, Hash, Clone, Eq, PartialEq, Ord, PartialOrd)]
+// struct ShortCodeId(String);
 
-#[derive(Debug, Hash, Clone, Eq, PartialEq, Ord, PartialOrd)]
-enum TopicId {
-    Game(GameId),
-    ShortCode(ShortCodeId),
-}
+// #[derive(Debug, Hash, Clone, Eq, PartialEq, Ord, PartialOrd)]
+// enum TopicId {
+//     Game(GameId),
+//     ShortCode(ShortCodeId),
+// }
 
-#[derive(Debug, Clone)]
-enum Action {
-    CreateGame {
-        game_id: GameId,
-        short_code: ShortCodeId,
-    },
-    DeleteGame {
-        game_id: GameId,
-    },
-}
+// #[derive(Debug, Clone)]
+// enum Action {
+//     CreateGame {
+//         game_id: GameId,
+//         short_code: ShortCodeId,
+//     },
+//     DeleteGame {
+//         game_id: GameId,
+//     },
+// }
 
-#[derive(Debug, Clone)]
-enum State {
-    Game(Game),
-    ShortCode(ShortCode),
-}
+// #[derive(Debug, Clone)]
+// enum State {
+//     Game(Game),
+//     ShortCode(ShortCode),
+// }
 
-impl State {
-    fn game(&self) -> Option<&Game> {
-        match self {
-            State::Game(g) => Some(g),
-            _ => None,
-        }
-    }
+// impl State {
+//     fn game(&self) -> Option<&Game> {
+//         match self {
+//             State::Game(g) => Some(g),
+//             _ => None,
+//         }
+//     }
 
-    fn sc(&self) -> Option<&ShortCode> {
-        match self {
-            State::ShortCode(sc) => Some(sc),
-            _ => None,
-        }
-    }
-}
+//     fn sc(&self) -> Option<&ShortCode> {
+//         match self {
+//             State::ShortCode(sc) => Some(sc),
+//             _ => None,
+//         }
+//     }
+// }
 
-#[derive(Debug, Clone)]
-enum Game {
-    None,
-    Created { short_code: ShortCodeId },
-}
+// #[derive(Debug, Clone)]
+// enum Game {
+//     None,
+//     Created { short_code: ShortCodeId },
+// }
 
-impl Default for Game {
-    fn default() -> Self {
-        Game::None
-    }
-}
+// impl Default for Game {
+//     fn default() -> Self {
+//         Game::None
+//     }
+// }
 
-#[derive(Debug, Clone)]
-enum ShortCode {
-    None,
-    ForGame(GameId),
-}
+// #[derive(Debug, Clone)]
+// enum ShortCode {
+//     None,
+//     ForGame(GameId),
+// }
 
-impl Default for ShortCode {
-    fn default() -> Self {
-        ShortCode::None
-    }
-}
+// impl Default for ShortCode {
+//     fn default() -> Self {
+//         ShortCode::None
+//     }
+// }
 
-#[derive(Debug, Clone)]
-enum Response {
-    Ok,
-    GameNotFound { game_id: GameId },
-    GameAlreadyExists { game_id: GameId },
-    ShortCodeInUse { short_code: ShortCodeId },
-}
+// #[derive(Debug, Clone)]
+// enum Response {
+//     Ok,
+//     GameNotFound { game_id: GameId },
+//     GameAlreadyExists { game_id: GameId },
+//     ShortCodeInUse { short_code: ShortCodeId },
+// }
 
-fn main() {
-    let mut graph = TestCommitGraph { actions: vec![] };
-    let evolver = TestEvolver {};
+fn main() -> Result<(), anyhow::Error> {
+    // let tree = sled::open("/tmp/welcome-to-sled").expect("open");
+
+    // tree.insert("KEY1", "VAL1")?;
+    // assert_eq!(tree.get(&"KEY1"), Ok(Some(sled::IVec::from("VAL1"))));
+
+    // // range queries
+    // for kv in tree.range("KEY1".."KEY9") {}
+
+    // // deletion
+    // tree.remove(&"KEY1")?;
+
+    // // atomic compare and swap
+    // tree.compare_and_swap("KEY1", Some("VAL1"), Some("VAL2"))??;
+
+    // // block until all operations are stable on disk
+    // // (flush_async also available to get a Future)
+    // tree.flush()?;
+    // let mut graph = TestCommitGraph::new();
+    // let evolver = TestEvolver {};
 
     let game_a = || GameId("a".to_owned());
     let game_b = || GameId("b".to_owned());
     let sc_a = || ShortCodeId("A".to_owned());
 
-    let a0 = graph.propose(Action::CreateGame {
+    let a0 = VersionedAction::V1(Action::CreateGame {
         game_id: game_a(),
         short_code: sc_a(),
     });
-    graph.commit(&a0);
 
-    let a1 = graph.propose(Action::CreateGame {
-        game_id: game_b(),
-        short_code: sc_a(),
-    });
-    graph.add_predecessor(&a0, &a1);
-    graph.commit(&a1);
+    let req = LogicRequest {
+        state: None,
+        action: a0,
+    };
 
-    let a2 = graph.propose(Action::DeleteGame { game_id: game_a() });
-    graph.add_predecessor(&a0, &a2);
-    graph.commit(&a2);
+    let response = runner::LogicVersion::V1_0_0.run(&serde_json::to_string(&req)?)?;
+    println!("Response: {}", response);
 
-    let a3 = graph.propose(Action::CreateGame {
-        game_id: game_b(),
-        short_code: sc_a(),
-    });
-    graph.add_predecessor(&a2, &a3);
-    graph.commit(&a3);
+    // let a1 = graph.propose(Action::CreateGame {
+    //     game_id: game_b(),
+    //     short_code: sc_a(),
+    // });
+    // graph.add_predecessor(&a0, &a1);
+    // graph.commit(&a1);
 
-    println!("{:#?}", lib::outputs(&graph, &evolver, &CommitId(3)));
-    let mut indexer = lib::Indexer::new();
+    // let a2 = graph.propose(Action::DeleteGame { game_id: game_a() });
+    // graph.add_predecessor(&a0, &a2);
+    // graph.commit(&a2);
 
-    for commit_id in graph.all_commits() {
-        indexer.index_action(&graph, &evolver, &commit_id).unwrap();
-        println!("{:?}", indexer);
-    }
+    // let a3 = graph.propose(Action::CreateGame {
+    //     game_id: game_b(),
+    //     short_code: sc_a(),
+    // });
+    // graph.add_predecessor(&a2, &a3);
+    // graph.commit(&a3);
+
+    // println!("{:#?}", lib::outputs(&graph, &evolver, &CommitId(3)));
+    // let mut indexer = lib::Indexer::new();
+
+    // for commit_id in graph.all_commits() {
+    //     indexer.index_action(&graph, &evolver, &commit_id).unwrap();
+    //     println!("{:?}", indexer);
+    // }
+    Ok(())
 }

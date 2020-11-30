@@ -1,0 +1,8 @@
+Evolve:
+  state: null
+  action:
+    V1:
+      CreateGame:
+        game_id: A
+        short_code: a
+        

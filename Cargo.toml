@@ -1,0 +1,7 @@
+[workspace]
+
+members = [
+    "logic",
+    "proto",
+    "prototype",
+]
