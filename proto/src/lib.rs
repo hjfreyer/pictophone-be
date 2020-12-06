@@ -11,14 +11,24 @@ pub enum VersionedResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LogicResponse {
+pub enum LogicResponse {
+    Evolve(EvolveResponse),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvolveResponse {
     // #[serde(with = "base64")]
     pub state: Option<Vec<u8>>,
     pub response: VersionedResponse,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct LogicRequest {
+pub enum LogicRequest {
+    Evolve(EvolveRequest),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvolveRequest {
     pub state: Option<Vec<u8>>,
     pub action: VersionedAction,
 }

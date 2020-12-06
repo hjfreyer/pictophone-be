@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use maplit::{btreemap, btreeset};
 use proto::{
     v1::{Action, GameId, ShortCodeId},
-    LogicRequest, VersionedAction, VersionedResponse,
+    EvolveRequest, LogicRequest, VersionedAction, VersionedResponse,
 };
 
 mod runner;
@@ -610,13 +610,19 @@ fn main() -> Result<(), anyhow::Error> {
         short_code: sc_a(),
     });
 
-    let req = LogicRequest {
+    let req = LogicRequest::Evolve(EvolveRequest {
         state: None,
         action: a0,
-    };
+    });
 
-    let response = runner::LogicVersion::V1_0_0.run(&serde_json::to_string(&req)?)?;
-    println!("Response: {}", response);
+    println!("start runner");
+    let runner = runner::Runner::new()?;
+    println!("started");
+
+    for i in 0..10 {
+        let response = runner.run(runner::LogicVersion::V1_0_0, &serde_json::to_string(&req)?)?;
+        println!("Response: {}", response);
+    }
 
     // let a1 = graph.propose(Action::CreateGame {
     //     game_id: game_b(),

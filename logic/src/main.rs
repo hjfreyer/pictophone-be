@@ -1,3 +1,5 @@
+use proto::EvolveResponse;
+
 use {
     anyhow::anyhow,
     //     wasm_bindgen::prelude::*,
@@ -157,7 +159,7 @@ fn main() -> Result<(), anyhow::Error> {
     let args: Vec<String> = env::args().collect();
     let request = args.get(1).ok_or(anyhow!("no request specified"))?;
     let request: LogicRequest = serde_json::from_str(request)?;
-
+    let LogicRequest::Evolve(request) = request;
     let state: Option<State> = request
         .state
         .map(|s| serde_json::from_slice(&s))
@@ -166,17 +168,17 @@ fn main() -> Result<(), anyhow::Error> {
         VersionedAction::V1(action) => action,
     };
     let response = match evolve(state, &action) {
-        Ok(state) => LogicResponse {
+        Ok(state) => EvolveResponse {
             state: Some(serde_json::to_vec(&state)).transpose()?,
             response: VersionedResponse::V1(Response::Ok),
         },
 
-        Err(resp) => LogicResponse {
+        Err(resp) => EvolveResponse {
             state: None,
             response: VersionedResponse::V1(resp),
         },
     };
-    serde_json::to_writer(std::io::stdout(), &response)?;
+    serde_json::to_writer(std::io::stdout(), &LogicResponse::Evolve(response))?;
     Ok(())
 }
 
