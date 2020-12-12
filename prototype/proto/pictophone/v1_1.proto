@@ -1,0 +1,34 @@
+syntax = "proto3";
+package pictophone.v1_1;
+
+import "google/protobuf/any.proto";
+
+service Pictophone {
+    rpc CreateGame (CreateGameRequest) returns (Empty);
+    rpc DeleteGame (DeleteGameRequest) returns (Empty);
+
+    rpc GetGame(GetGameRequest) returns (stream GetGameResponse);
+}
+
+message CreateGameRequest {
+    string game_id = 1;
+    string short_code = 2;
+}
+
+message DeleteGameRequest {
+    string game_id = 1;
+}
+message Empty {}
+
+message GetGameRequest {
+    string game_id = 2;
+}
+
+message GetGameResponse {
+    bool exists = 1;
+    Game game = 2;
+}
+
+message Game {
+    string short_code = 1;
+}

@@ -1,11 +1,9 @@
-use proto::EvolveResponse;
-
 use {
     anyhow::anyhow,
     //     wasm_bindgen::prelude::*,
-    proto::{
-        v1::{self, Action, GameId, Response, ShortCodeId},
-        LogicRequest, LogicResponse, VersionedAction, VersionedResponse,
+    api::{
+        v1_0::{self, Action, GameId, Response, ShortCodeId},
+        EvolveResponse, LogicRequest, LogicResponse, VersionedAction, VersionedResponse,
     },
     serde::{Deserialize, Serialize},
     std::collections::BTreeMap,
@@ -83,9 +81,9 @@ struct Game {
 //     }
 // }
 
-fn evolve(state: Option<State>, action: &v1::Action) -> Result<State, v1::Response> {
+fn evolve(state: Option<State>, action: &v1_0::Action) -> Result<State, v1_0::Response> {
     match action {
-        v1::Action::CreateGame {
+        v1_0::Action::CreateGame {
             game_id,
             short_code,
         } => {
@@ -159,26 +157,31 @@ fn main() -> Result<(), anyhow::Error> {
     let args: Vec<String> = env::args().collect();
     let request = args.get(1).ok_or(anyhow!("no request specified"))?;
     let request: LogicRequest = serde_json::from_str(request)?;
-    let LogicRequest::Evolve(request) = request;
-    let state: Option<State> = request
-        .state
-        .map(|s| serde_json::from_slice(&s))
-        .transpose()?;
-    let action = match request.action {
-        VersionedAction::V1(action) => action,
-    };
-    let response = match evolve(state, &action) {
-        Ok(state) => EvolveResponse {
-            state: Some(serde_json::to_vec(&state)).transpose()?,
-            response: VersionedResponse::V1(Response::Ok),
-        },
+    match request {
+        LogicRequest::Evolve(request) => {
+            let state: Option<State> = request
+                .state
+                .map(|s| serde_json::from_slice(&s))
+                .transpose()?;
+            let action = match request.action {
+                VersionedAction::V1_0(action) => action,
+                VersionedAction::V1_1(action) => action,
+            };
+            let response = match evolve(state, &action) {
+                Ok(state) => EvolveResponse {
+                    state: Some(serde_json::to_vec(&state)).transpose()?,
+                    response: VersionedResponse::V1_0(Response::Ok),
+                },
 
-        Err(resp) => EvolveResponse {
-            state: None,
-            response: VersionedResponse::V1(resp),
+                Err(resp) => EvolveResponse {
+                    state: None,
+                    response: VersionedResponse::V1_0(resp),
+                },
+            };
+            serde_json::to_writer(std::io::stdout(), &LogicResponse::Evolve(response))?;
         },
-    };
-    serde_json::to_writer(std::io::stdout(), &LogicResponse::Evolve(response))?;
+        LogicRequest::Watch(_) => {}
+    }
     Ok(())
 }
 

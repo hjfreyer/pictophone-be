@@ -1,27 +1,19 @@
-use tempfile::NamedTempFile;
-
-use anyhow::anyhow;
-use bytes::BufMut;
-use std::{
-    io::{self, Write},
-    process::Stdio,
+use {
+    api::{LogicRequest, LogicResponse},
+    std::{fs, sync::{Arc, RwLock}},
+    wasi_common::virtfs::pipe::WritePipe,
+    wasmtime::{Engine, Linker, Module, Store},
+    wasmtime_wasi::{Wasi, WasiCtxBuilder},
 };
-use std::{
-    process::Command,
-    sync::{Arc, RwLock},
-};
-use wasi_common::virtfs::pipe::WritePipe;
-use wasmtime::{Engine, Linker, Module, Store};
-use wasmtime_wasi::{Wasi, WasiCtx, WasiCtxBuilder};
 
-const V1_0_0: &'static [u8] = include_bytes!("binaries/v1.0.0.wasm");
+// const V1_0_0: &'static [u8] = include_bytes!("binaries/v1.0.0.wasm");
 
-#[derive(Debug, Copy, Clone)]
-pub enum ApiVersion {
-    V1_0,
-}
+// #[derive(Debug, Copy, Clone)]
+// pub enum ApiVersion {
+//     V1_0,
+// }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialOrd, PartialEq, Ord, Eq)]
 pub enum LogicVersion {
     V1_0_0,
 }
@@ -33,16 +25,24 @@ pub struct Runner {
 }
 
 impl Runner {
-    pub fn new() -> Result<Self, anyhow::Error> {
+    pub fn new(bin_path: &std::path::Path) -> Result<Self, anyhow::Error> {
         let engine = Engine::default();
-        let v1_0_0module = Module::from_binary(&engine, V1_0_0)?;
+
+        let v1_0_0_bin = fs::read(bin_path.join("v1.0.0.wasm"))?;
+        let v1_0_0module = Module::from_binary(&engine, &v1_0_0_bin)?;
         Ok(Runner {
             engine,
             v1_0_0module,
         })
     }
 
-    pub fn run(&self, version: LogicVersion, input: &str) -> Result<String, anyhow::Error> {
+    pub fn run(
+        &self,
+        version: LogicVersion,
+        request: LogicRequest,
+    ) -> Result<LogicResponse, anyhow::Error> {
+        let req_str = serde_json::to_string(&request)?;
+
         let buf = Arc::new(RwLock::new(Vec::new()));
 
         {
@@ -51,7 +51,7 @@ impl Runner {
             let mut linker = Linker::new(&store);
 
             let ctx = WasiCtxBuilder::new()
-                .args(&["binname", input])
+                .args(&["binname", &req_str])
                 .stdout(stdout)
                 .build()?;
 
@@ -62,7 +62,8 @@ impl Runner {
             linker.get_default("")?.get0::<()>()?()?;
         }
         let lck = buf.read().unwrap();
-        Ok(std::str::from_utf8(&lck)?.to_owned())
+        let resp = serde_json::from_slice(&lck)?;
+        Ok(resp)
     }
 }
 

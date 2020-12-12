@@ -13,7 +13,7 @@ anyhow = "1.0.34"
 tempfile = "3.1.0"
 serde = {version= "1.0.115", features = ["derive"]}
 serde_json = "1.0.59"
-proto = { path = "../proto" } 
+api = { path = "../api" } 
 wasmtime = "0.21.0"
 wasmtime-wasi = "0.21.0"
 wasi-common = "0.21.0"
