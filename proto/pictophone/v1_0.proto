@@ -1,0 +1,57 @@
+syntax = "proto3";
+package pictophone.v1_0;
+
+import "google/protobuf/any.proto";
+
+service Pictophone {
+    rpc CreateGame (CreateGameRequest) returns (CreateGameResponse);
+    rpc DeleteGame (DeleteGameRequest) returns (DeleteGameResponse);
+}
+
+message Action {
+    oneof method {
+        CreateGameRequest create_game = 1;
+        DeleteGameRequest delete_game = 2;
+    }
+}
+
+message Response {
+    oneof method {
+        CreateGameResponse create_game = 1;
+        DeleteGameResponse delete_game = 2;
+    }
+}
+
+message CreateGameRequest {
+    string game_id = 1;
+    string short_code = 2;
+}
+
+message CreateGameResponse {
+    oneof error {
+        GameAlreadyExistsError game_already_exists = 1;
+        ShortCodeInUseError short_code_in_use = 2;
+    }
+}
+
+message GameAlreadyExistsError {
+    string game_id = 1;
+}
+
+message ShortCodeInUseError {
+    string short_code = 1;
+}
+
+message DeleteGameRequest {
+    string game_id = 1;
+}
+
+message DeleteGameResponse {
+    oneof error {
+        GameNotFoundError game_not_found = 1;
+    }
+}
+
+message GameNotFoundError {
+    string game_id = 1;
+}
