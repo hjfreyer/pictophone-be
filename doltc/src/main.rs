@@ -1,6 +1,5 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use std::{io, path::Path};
 
 // struct Descriptor {
 

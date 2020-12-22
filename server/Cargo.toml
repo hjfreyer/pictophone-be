@@ -1,5 +1,5 @@
 [package]
-name = "prototype"
+name = "server"
 version = "0.1.0"
 authors = ["Hunter Freyer <yt@hjfreyer.com>"]
 edition = "2018"

@@ -1,15 +1,11 @@
-use log::{info, warn};
+use log::{warn};
 use std::{convert::TryFrom, pin::Pin, sync::Arc};
 
 use {
-    futures::stream::TryStream,
     futures::Stream,
     protobuf::pictophone::logic as ptl,
     protobuf::pictophone::{v1_0, v1_1},
-    tokio::sync::mpsc,
     tokio::sync::Mutex,
-    tonic::transport::Server as TServer,
-    tonic::{Request, Response, Status},
 };
 
 mod protobuf;
@@ -147,13 +143,13 @@ impl ptl::DoltServer for Server {
 async fn main() -> Result<(), anyhow::Error> {
     let addr = "0.0.0.0:8080".parse()?;
     let inner = Arc::new(Mutex::new(InnerServer {
-        runner: runner::Runner::new(&std::path::PathBuf::from("prototype/src/binaries"))?,
+        runner: runner::Runner::new(&std::path::PathBuf::from("server/src/binaries"))?,
         actions: vec![],
     }));
 
     println!("Boom, running on: {}", addr);
 
-    TServer::builder()
+    tonic::transport::Server::builder()
         .add_service(v1_0::pictophone_server::PictophoneServer::new(Server {
             inner: inner.clone(),
         }))
