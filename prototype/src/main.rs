@@ -1,7 +1,12 @@
+use log::{info, warn};
+use std::{convert::TryFrom, pin::Pin, sync::Arc};
+
 use {
-    anyhow::bail,
+    futures::stream::TryStream,
+    futures::Stream,
     protobuf::pictophone::logic as ptl,
-    protobuf::pictophone::v1_0 as pt,
+    protobuf::pictophone::{v1_0, v1_1},
+    tokio::sync::mpsc,
     tokio::sync::Mutex,
     tonic::transport::Server as TServer,
     tonic::{Request, Response, Status},
@@ -15,29 +20,48 @@ struct InnerServer {
     actions: Vec<ptl::VersionedAction>,
 }
 
+fn get_logic_version(metadata: &tonic::metadata::MetadataMap) -> runner::LogicVersion {
+    const DEFAULT_IMPL: runner::LogicVersion = runner::LogicVersion::V1_0_0;
+    let x_impl_header = metadata.get("x-impl");
+    match x_impl_header {
+        Some(x) if x.as_encoded_bytes() == b"v1.0.0" => runner::LogicVersion::V1_0_0,
+        Some(x) if x.as_encoded_bytes() == b"v1.1.0" => runner::LogicVersion::V1_1_0,
+        Some(x) => {
+            warn!("user specified illegal value for x-impl: {:?}", x.to_str());
+            DEFAULT_IMPL
+        }
+        _ => DEFAULT_IMPL,
+    }
+}
+
 impl InnerServer {
+    fn state_head(&self, version: runner::LogicVersion) -> Result<Vec<u8>, anyhow::Error> {
+        self.actions
+            .iter()
+            .cloned()
+            .try_fold(vec![], |state, action| {
+                let request = ptl::Request::from(ptl::EvolveRequest {
+                    state: state.clone(),
+                    action: Some(action),
+                });
+
+                let response = self.runner.run(version, request)?;
+                let response = ptl::EvolveResponse::try_from(response)?;
+                if 0 < response.state.len() {
+                    Ok(response.state)
+                } else {
+                    Ok(state)
+                }
+            })
+    }
+
     fn handle_action(
         &mut self,
         action: ptl::VersionedAction,
+        metadata: tonic::metadata::MetadataMap,
     ) -> Result<ptl::VersionedResponse, anyhow::Error> {
-        let mut state = vec![];
-        for action in &self.actions {
-            let req = ptl::Request {
-                method: Some(ptl::request::Method::Evolve(ptl::EvolveRequest {
-                    state: state.to_owned(),
-                    action: Some(action.to_owned()),
-                })),
-            };
-
-            let res = self.runner.run(runner::LogicVersion::V1_0_0, req)?;
-            let res = match res.method {
-                Some(ptl::response::Method::Evolve(res)) => res,
-                _ => bail!("malformed response to evolve request"),
-            };
-            if 0 < res.state.len() {
-                state = res.state;
-            }
-        }
+        let version = get_logic_version(&metadata);
+        let state = self.state_head(version)?;
 
         println!("ACTION: {:?}", action);
 
@@ -48,18 +72,13 @@ impl InnerServer {
             println!("PRE-STATE: None");
         }
         let res = self.runner.run(
-            runner::LogicVersion::V1_0_0,
-            ptl::Request {
-                method: Some(ptl::request::Method::Evolve(ptl::EvolveRequest {
-                    state: state.to_owned(),
-                    action: Some(action.to_owned()),
-                })),
-            },
+            version,
+            ptl::Request::from(ptl::EvolveRequest {
+                state: state.to_owned(),
+                action: Some(action.to_owned()),
+            }),
         )?;
-        let res = match res.method {
-            Some(ptl::response::Method::Evolve(res)) => res,
-            _ => bail!("malformed response to evolve request"),
-        };
+        let res = ptl::EvolveResponse::try_from(res)?;
 
         if 0 < res.state.len() {
             let state: serde_json::Value = serde_json::from_slice(&res.state)?;
@@ -69,92 +88,78 @@ impl InnerServer {
         self.actions.push(action);
         Ok(res.response.unwrap())
     }
+
+    async fn handle_query(
+        &mut self,
+        query: ptl::VersionedQueryRequest,
+        metadata: tonic::metadata::MetadataMap,
+    ) -> Result<impl Stream<Item = Result<ptl::VersionedQueryResponse, anyhow::Error>>, anyhow::Error>
+    {
+        let version = get_logic_version(&metadata);
+        let state = self.state_head(version)?;
+
+        let response = self.runner.run(
+            version,
+            ptl::Request::from(ptl::QueryRequest {
+                state: state.to_owned(),
+                query: Some(query),
+            }),
+        )?;
+        let response = ptl::VersionedQueryResponse::try_from(response)?;
+        Ok(futures::stream::once(async { Ok(response) }))
+    }
 }
 
 struct Server {
-    inner: Mutex<InnerServer>,
+    inner: Arc<Mutex<InnerServer>>,
 }
 
 #[tonic::async_trait]
-impl pt::pictophone_server::Pictophone for Server {
-    async fn create_game(
+impl ptl::DoltServer for Server {
+    async fn handle_action(
         &self,
-        request: Request<pt::CreateGameRequest>,
-    ) -> Result<Response<pt::CreateGameResponse>, Status> {
-        use std::convert::TryFrom;
-        self.inner
-            .lock()
-            .await
-            .handle_action(ptl::VersionedAction::from(pt::Action::from(
-                request.into_inner(),
-            )))
-            .and_then(|r| Ok(pt::Response::try_from(r)?))
-            .and_then(|r| Ok(pt::CreateGameResponse::try_from(r)?))
-            .map(Response::new)
-            .map_err(|_| Status::internal("wtf"))
+        action: ptl::VersionedAction,
+        metadata: tonic::metadata::MetadataMap,
+    ) -> Result<ptl::VersionedResponse, anyhow::Error> {
+        self.inner.lock().await.handle_action(action, metadata)
     }
 
-    async fn delete_game(
+    type QueryStream = Pin<
+        Box<dyn Stream<Item = Result<ptl::VersionedQueryResponse, anyhow::Error>> + Send + Sync>,
+    >;
+
+    async fn handle_query(
         &self,
-        request: Request<pt::DeleteGameRequest>,
-    ) -> Result<Response<pt::DeleteGameResponse>, Status> {
-        use std::convert::TryFrom;
-        let action = ptl::VersionedAction::from(pt::Action::from(request.into_inner()));
-        self.inner
-            .lock()
-            .await
-            .handle_action(action)
-            .and_then(|r| Ok(pt::Response::try_from(r)?))
-            .and_then(|r| Ok(pt::DeleteGameResponse::try_from(r)?))
-            .map(Response::new)
-            .map_err(|_| Status::internal("wtf"))
+        query: ptl::VersionedQueryRequest,
+        metadata: tonic::metadata::MetadataMap,
+    ) -> Result<Self::QueryStream, anyhow::Error> {
+        Ok(Box::pin(
+            self.inner
+                .lock()
+                .await
+                .handle_query(query, metadata)
+                .await?,
+        ))
     }
-
-    // async fn join_game(
-    //     &self,
-    //     request: Request<pt::JoinGameRequest>,
-    // ) -> Result<Response<pt::Empty>, Status> {
-    //     unimplemented!()
-
-    // }
-
-    // async fn start_game(
-    //     &self,
-    //     request: Request<pt::StartGameRequest>,
-    // ) -> Result<Response<pt::Empty>, Status> {
-    //     unimplemented!()
-    // }
-    // async fn make_move(
-    //     &self,
-    //     request: Request<pt::MakeMoveRequest>,
-    // ) -> Result<Response<pt::Empty>, Status> {
-    //     unimplemented!()
-    // }
-
-    // type GetGameStream = mpsc::Receiver<Result<pt::GetGameResponse, Status>>;
-
-    // async fn get_game(
-    //     &self,
-    //     request: Request<pt::GetGameRequest>,
-    // ) -> Result<Response<Self::GetGameStream>, Status> {
-    //     unimplemented!()
-    // }
 }
 
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     let addr = "0.0.0.0:8080".parse()?;
-    let server = Server {
-        inner: Mutex::new(InnerServer {
-            runner: runner::Runner::new(&std::path::PathBuf::from("prototype/src/binaries"))?,
-            actions: vec![],
-        }),
-    };
+    let inner = Arc::new(Mutex::new(InnerServer {
+        runner: runner::Runner::new(&std::path::PathBuf::from("prototype/src/binaries"))?,
+        actions: vec![],
+    }));
 
     println!("Boom, running on: {}", addr);
 
     TServer::builder()
-        .add_service(pt::pictophone_server::PictophoneServer::new(server))
+        .add_service(v1_0::pictophone_server::PictophoneServer::new(Server {
+            inner: inner.clone(),
+        }))
+        .add_service(v1_1::pictophone_server::PictophoneServer::new(Server {
+            inner,
+        }))
         .serve(addr)
         .await?;
 

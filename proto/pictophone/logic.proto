@@ -3,6 +3,7 @@ syntax = "proto3";
 package pictophone.logic;
 
 import "pictophone/v1_0.proto";
+import "pictophone/v1_1.proto";
 
 enum ApiVersion {
     V1_0 = 0;
@@ -16,7 +17,8 @@ message EvolveRequest {
 
 message VersionedAction {
     oneof version {
-        pictophone.v1_0.Action v1_0 = 1;
+        pictophone.v1_0.Action v1p0 = 1;
+        pictophone.v1_1.Action v1p1 = 2;
     }   
 }
 
@@ -27,19 +29,41 @@ message EvolveResponse {
 
 message VersionedResponse {
     oneof version {
-        pictophone.v1_0.Response v1_0 = 1;
+        pictophone.v1_0.Response v1p0 = 1;
+        pictophone.v1_1.Response v1p1 = 2;
+    }   
+}
+
+message QueryRequest {
+    bytes state = 1;
+    VersionedQueryRequest query = 2;
+}
+
+message VersionedQueryRequest {
+    oneof version {
+        pictophone.v1_0.QueryRequest v1p0 = 1;
+        pictophone.v1_1.QueryRequest v1p1 = 2;
+    }   
+}
+
+message VersionedQueryResponse {
+    oneof version {
+        pictophone.v1_0.QueryResponse v1p0 = 1;
+        pictophone.v1_1.QueryResponse v1p1 = 2;
     }   
 }
 
 message Request {
     oneof method {
-        EvolveRequest evolve = 1;
+        EvolveRequest evolve_request = 1;
+        QueryRequest query_request = 2;
     }
 }
 
 message Response {
     oneof method {
-        EvolveResponse evolve = 1;
+        EvolveResponse evolve_response = 1;
+        VersionedQueryResponse versioned_query_response = 2;
     }
 }
 // mesage EvolveResponse {

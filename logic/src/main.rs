@@ -1,6 +1,7 @@
 use {
     proto::logic as ptl,
     proto::v1_0 as api,
+    proto::v1_1 as pt1,
     serde::{Deserialize, Serialize},
     std::collections::BTreeMap,
 };
@@ -91,25 +92,37 @@ fn delete_game(
 
 fn evolve1_0(state: Option<State>, action: &api::Action) -> (Option<State>, api::Response) {
     match &action.method {
-        Some(api::action::Method::CreateGame(request)) => {
+        Some(api::action::Method::CreateGameRequest(request)) => {
             let (state, response) = create_game(state, request)
                 .map(|s| (Some(s), api::CreateGameResponse { error: None }))
                 .unwrap_or_else(|r| (None, r));
-            let response = api::Response {
-                method: Some(api::response::Method::CreateGame(response)),
-            };
-            (state, response)
+            (state, response.into())
         }
-        Some(api::action::Method::DeleteGame(request)) => {
+        Some(api::action::Method::DeleteGameRequest(request)) => {
             let (state, response) = delete_game(state, request)
                 .map(|s| (Some(s), api::DeleteGameResponse { error: None }))
                 .unwrap_or_else(|r| (None, r));
-            let response = api::Response {
-                method: Some(api::response::Method::DeleteGame(response)),
-            };
-            (state, response)
+            (state, response.into())
         }
-        None => unimplemented!(),
+        None => panic!("unset method"),
+    }
+}
+
+fn evolve1_1(state: Option<State>, action: &pt1::Action) -> (Option<State>, pt1::Response) {
+    match &action.method {
+        Some(pt1::action::Method::CreateGameRequest(request)) => {
+            let (state, response) = create_game(state, request)
+                .map(|s| (Some(s), api::CreateGameResponse { error: None }))
+                .unwrap_or_else(|r| (None, r));
+            (state, response.into())
+        }
+        Some(pt1::action::Method::DeleteGameRequest(request)) => {
+            let (state, response) = delete_game(state, request)
+                .map(|s| (Some(s), api::DeleteGameResponse { error: None }))
+                .unwrap_or_else(|r| (None, r));
+            (state, response.into())
+        }
+        None => panic!("unset method"),
     }
 }
 
@@ -118,16 +131,65 @@ fn evolve(
     action: &ptl::VersionedAction,
 ) -> (Option<State>, ptl::VersionedResponse) {
     match &action.version {
-        Some(ptl::versioned_action::Version::V10(action)) => {
+        Some(ptl::versioned_action::Version::V1p0(action)) => {
             let (state, resp) = evolve1_0(state, action);
             (
                 state,
                 ptl::VersionedResponse {
-                    version: Some(ptl::versioned_response::Version::V10(resp)),
+                    version: Some(ptl::versioned_response::Version::V1p0(resp)),
                 },
             )
         }
-        None => unimplemented!(),
+        Some(ptl::versioned_action::Version::V1p1(action)) => {
+            let (state, resp) = evolve1_1(state, action);
+            (
+                state,
+                ptl::VersionedResponse {
+                    version: Some(ptl::versioned_response::Version::V1p1(resp)),
+                },
+            )
+        }
+        None => panic!("unset version"),
+    }
+}
+
+fn get_game(state: Option<State>, request: &pt1::GetGameRequest) -> pt1::GetGameResponse {
+    let state = match state {
+        None => return pt1::GetGameResponse { game: None },
+        Some(state) => state,
+    };
+    let game = match state.games.get(&GameId(request.game_id.to_owned())) {
+        None => return pt1::GetGameResponse { game: None },
+        Some(game) => game,
+    };
+
+    pt1::GetGameResponse {
+        game: Some(pt1::Game {
+            short_code: game.short_code.0.to_owned(),
+        }),
+    }
+}
+
+fn query(state: Option<State>, query: &ptl::VersionedQueryRequest) -> ptl::VersionedQueryResponse {
+    match &query.version {
+        Some(ptl::versioned_query_request::Version::V1p0(_)) => panic!("unset method"),
+
+        Some(ptl::versioned_query_request::Version::V1p1(request)) => match &request.method {
+            Some(pt1::query_request::Method::GetGameRequest(r)) => {
+                let r = get_game(state, &r);
+                pt1::QueryResponse::from(r).into()
+            }
+            None => panic!("unset method"),
+        },
+        None => panic!("unset version"),
+    }
+}
+
+fn parse_state(data: &[u8]) -> Result<Option<State>, anyhow::Error> {
+    if data.len() == 0 {
+        Ok(None)
+    } else {
+        Ok(serde_json::from_slice(data)?)
     }
 }
 
@@ -140,17 +202,13 @@ fn main() -> Result<(), anyhow::Error> {
     let request = ptl::Request::decode(buffer.as_slice())?;
 
     match request.method {
-        Some(ptl::request::Method::Evolve(request)) => {
-            let state = if request.state.len() == 0 {
-                None
-            } else {
-                serde_json::from_slice(&request.state)?
-            };
+        Some(ptl::request::Method::EvolveRequest(request)) => {
+            let state = parse_state(&request.state)?;
             let (state, response) = evolve(state, &request.action.unwrap());
 
             let mut resp_buf = vec![];
             let () = ptl::Response {
-                method: Some(ptl::response::Method::Evolve(ptl::EvolveResponse {
+                method: Some(ptl::response::Method::EvolveResponse(ptl::EvolveResponse {
                     state: state
                         .map(|s| serde_json::to_vec(&s))
                         .transpose()?
@@ -161,8 +219,22 @@ fn main() -> Result<(), anyhow::Error> {
             .encode(&mut resp_buf)?;
 
             let _ = std::io::stdout().lock().write(&resp_buf)?;
+            Ok(())
         }
-        _ => unimplemented!(),
+        Some(ptl::request::Method::QueryRequest(request)) => {
+            let state = parse_state(&request.state)?;
+            let response = query(state, &request.query.unwrap());
+
+            let mut resp_buf = vec![];
+            let () = ptl::Response {
+                method: Some(ptl::response::Method::VersionedQueryResponse(response)),
+            }
+            .encode(&mut resp_buf)?;
+
+            let _ = std::io::stdout().lock().write(&resp_buf)?;
+            Ok(())
+        }
+
+        None => Err(anyhow::anyhow!("no request method specified")),
     }
-    Ok(())
 }

@@ -1,32 +1,48 @@
 syntax = "proto3";
+
 package pictophone.v1_1;
 
-import "google/protobuf/any.proto";
+import "pictophone/v1_0.proto";
 
 service Pictophone {
-    rpc CreateGame (CreateGameRequest) returns (Empty);
-    rpc DeleteGame (DeleteGameRequest) returns (Empty);
+    rpc CreateGame (pictophone.v1_0.CreateGameRequest) returns (pictophone.v1_0.CreateGameResponse);
+    rpc DeleteGame (pictophone.v1_0.DeleteGameRequest) returns (pictophone.v1_0.DeleteGameResponse);
 
     rpc GetGame(GetGameRequest) returns (stream GetGameResponse);
 }
 
-message CreateGameRequest {
-    string game_id = 1;
-    string short_code = 2;
+message Action {
+    oneof method {
+        pictophone.v1_0.CreateGameRequest create_game_request = 1;
+        pictophone.v1_0.DeleteGameRequest delete_game_request = 2;
+    }
 }
 
-message DeleteGameRequest {
-    string game_id = 1;
+message Response {
+    oneof method {
+        pictophone.v1_0.CreateGameResponse create_game_response = 1;
+        pictophone.v1_0.DeleteGameResponse delete_game_response = 2;
+    }
 }
-message Empty {}
+
+message QueryRequest {
+    oneof method {
+        GetGameRequest get_game_request = 1;
+    }
+}
+
+message QueryResponse {
+    oneof method {
+        GetGameResponse get_game_response = 1;
+    }
+}
 
 message GetGameRequest {
     string game_id = 2;
 }
 
 message GetGameResponse {
-    bool exists = 1;
-    Game game = 2;
+    Game game = 1;
 }
 
 message Game {

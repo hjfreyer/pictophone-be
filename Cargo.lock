@@ -479,6 +479,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "doltc"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "prost-build",
+ "quote",
+ "tonic-build 0.3.1",
+]
+
+[[package]]
 name = "either"
 version = "1.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -591,12 +601,28 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3dcaa9ae7725d12cdb85b3ad99a434db70b468c09ded17e012d86b5c1010f7a7"
 
 [[package]]
+name = "futures"
+version = "0.3.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9b3b0c040a1fe6529d30b3c5944b280c7f0dcb2930d2c3062bca967b602583d0"
+dependencies = [
+ "futures-channel",
+ "futures-core",
+ "futures-executor",
+ "futures-io",
+ "futures-sink",
+ "futures-task",
+ "futures-util",
+]
+
+[[package]]
 name = "futures-channel"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4b7109687aa4e177ef6fe84553af6280ef2778bdb7783ba44c9dc3399110fe64"
 dependencies = [
  "futures-core",
+ "futures-sink",
 ]
 
 [[package]]
@@ -604,6 +630,35 @@ name = "futures-core"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "847ce131b72ffb13b6109a221da9ad97a64cbe48feb1028356b836b47b8f1748"
+
+[[package]]
+name = "futures-executor"
+version = "0.3.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4caa2b2b68b880003057c1dd49f1ed937e38f22fcf6c212188a121f08cf40a65"
+dependencies = [
+ "futures-core",
+ "futures-task",
+ "futures-util",
+]
+
+[[package]]
+name = "futures-io"
+version = "0.3.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "611834ce18aaa1bd13c4b374f5d653e1027cf99b6b502584ff8c9a64413b30bb"
+
+[[package]]
+name = "futures-macro"
+version = "0.3.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "77408a692f1f97bcc61dc001d752e00643408fbc922e4d634c655df50d595556"
+dependencies = [
+ "proc-macro-hack",
+ "proc-macro2",
+ "quote",
+ "syn",
+]
 
 [[package]]
 name = "futures-sink"
@@ -616,6 +671,9 @@ name = "futures-task"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c554eb5bf48b2426c4771ab68c6b14468b6e76cc90996f528c3338d761a4d0d"
+dependencies = [
+ "once_cell",
+]
 
 [[package]]
 name = "futures-util"
@@ -623,10 +681,18 @@ version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d304cff4a7b99cfb7986f7d43fbe93d175e72e704a8860787cc95e9ffd85cbd2"
 dependencies = [
+ "futures-channel",
  "futures-core",
+ "futures-io",
+ "futures-macro",
+ "futures-sink",
  "futures-task",
+ "memchr",
  "pin-project 1.0.2",
  "pin-utils",
+ "proc-macro-hack",
+ "proc-macro-nested",
+ "slab",
 ]
 
 [[package]]
@@ -1101,6 +1167,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "paste"
+version = "1.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c5d65c4d95931acda4498f675e332fcbdc9a06705cd07086c510e9b6009cd1c1"
+
+[[package]]
 name = "percent-encoding"
 version = "2.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1181,6 +1253,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ac74c624d6b2d21f425f752262f42188365d7b8ff1aff74c82e45136510a4857"
 
 [[package]]
+name = "proc-macro-hack"
+version = "0.5.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dbf0c48bc1d91375ae5c3cd81e3722dff1abcf81a30960240640d223f59fe0e5"
+
+[[package]]
+name = "proc-macro-nested"
+version = "0.1.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eba180dafb9038b050a4c280019bbedf9f2467b61e5d892dcad585bb57aadc5a"
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1246,7 +1330,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "bytes 0.6.0",
+ "doltc",
+ "futures",
+ "log",
  "maplit",
+ "paste",
  "prost",
  "prost-types",
  "serde",
@@ -1256,7 +1344,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "tonic",
- "tonic-build",
+ "tonic-build 0.2.0",
  "wasi-common",
  "wasmtime",
  "wasmtime-wasi",
@@ -1279,9 +1367,9 @@ checksum = "a1d01941d82fa2ab50be1e79e6714289dd7cde78eba4c074bc5a4374f650dfe0"
 
 [[package]]
 name = "quote"
-version = "1.0.7"
+version = "1.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa563d17ecb180e500da1cfd2b028310ac758de548efdd203e18f283af693f37"
+checksum = "991431c3519a3f36861882da93630ce66b52918dcf1b8e2fd66b397fc96f28df"
 dependencies = [
  "proc-macro2",
 ]
@@ -1877,6 +1965,18 @@ name = "tonic-build"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "71d8d21cb568e802d77055ab7fcd43f0992206de5028de95c8d3a41118d32e8e"
+dependencies = [
+ "proc-macro2",
+ "prost-build",
+ "quote",
+ "syn",
+]
+
+[[package]]
+name = "tonic-build"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19970cf58f3acc820962be74c4021b8bbc8e8a1c4e3a02095d0aa60cde5f3633"
 dependencies = [
  "proc-macro2",
  "prost-build",

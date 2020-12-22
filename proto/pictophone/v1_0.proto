@@ -1,7 +1,6 @@
 syntax = "proto3";
-package pictophone.v1_0;
 
-import "google/protobuf/any.proto";
+package pictophone.v1_0;
 
 service Pictophone {
     rpc CreateGame (CreateGameRequest) returns (CreateGameResponse);
@@ -10,16 +9,22 @@ service Pictophone {
 
 message Action {
     oneof method {
-        CreateGameRequest create_game = 1;
-        DeleteGameRequest delete_game = 2;
+        CreateGameRequest create_game_request = 1;
+        DeleteGameRequest delete_game_request = 2;
     }
 }
 
 message Response {
     oneof method {
-        CreateGameResponse create_game = 1;
-        DeleteGameResponse delete_game = 2;
+        CreateGameResponse create_game_response = 1;
+        DeleteGameResponse delete_game_response = 2;
     }
+}
+
+message QueryRequest {
+}
+
+message QueryResponse {
 }
 
 message CreateGameRequest {
@@ -29,8 +34,8 @@ message CreateGameRequest {
 
 message CreateGameResponse {
     oneof error {
-        GameAlreadyExistsError game_already_exists = 1;
-        ShortCodeInUseError short_code_in_use = 2;
+        GameAlreadyExistsError game_already_exists_error = 1;
+        ShortCodeInUseError short_code_in_use_error = 2;
     }
 }
 
@@ -48,7 +53,7 @@ message DeleteGameRequest {
 
 message DeleteGameResponse {
     oneof error {
-        GameNotFoundError game_not_found = 1;
+        GameNotFoundError game_not_found_error = 1;
     }
 }
 
