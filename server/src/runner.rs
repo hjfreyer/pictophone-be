@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use log::trace;
+
 use {
     crate::protobuf::pictophone::logic::{Request, Response},
     std::{
@@ -9,48 +11,54 @@ use {
     wasi_common::virtfs::pipe::{ReadPipe, WritePipe},
     wasmtime::{Engine, Linker, Module, Store},
     wasmtime_wasi::{Wasi, WasiCtxBuilder},
+    log::info,
 };
 
-#[derive(Debug, Copy, Clone, PartialOrd, PartialEq, Ord, Eq, Hash)]
-pub enum LogicVersion {
-    V1_0_0,
-    V1_1_0,
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct BinaryVersion {
+    semver: String,
 }
 
-impl LogicVersion {
-    const ALL: [Self; 2] = [Self::V1_0_0, Self::V1_1_0];
-    // fn all() -> {
-
-    // }
-
-    fn filename(self) -> &'static str {
-        match self {
-            LogicVersion::V1_0_0 => "v1.0.0.wasm",
-            LogicVersion::V1_1_0 => "v1.1.0.wasm",
+impl BinaryVersion {
+    pub fn from_semver(semver: &str) -> Option<BinaryVersion> {
+        macro_rules! declare_semver {
+            ($($semver:literal, )*) => {
+                match semver {
+                    $(
+                        $semver => Some(BinaryVersion{semver: $semver.to_owned()}),
+                    )*
+                    _ => None,
+                }
+            };
         }
+
+        declare_semver!("1.0.0", "1.1.0", )
+    }
+
+    fn filename(&self) -> String {
+        format!("v{}.wasm", self.semver)
+    }
+}
+
+impl Default for BinaryVersion {
+    fn default() -> Self {
+        BinaryVersion::from_semver("1.1.0").unwrap()
     }
 }
 
 pub struct Runner {
+    bin_path: std::path::PathBuf,
     engine: Engine,
-    modules: HashMap<LogicVersion, Module>,
+    modules: RwLock<HashMap<BinaryVersion, Module>>,
 }
 
 impl Runner {
     pub fn new(bin_path: &std::path::Path) -> Result<Self, anyhow::Error> {
-        let engine = Engine::default();
-
-        let mut modules = HashMap::<LogicVersion, Module>::new();
-        for version in &LogicVersion::ALL {
-            let bin = fs::read(bin_path.join(version.filename()))?;
-            let module = Module::from_binary(&engine, &bin)?;
-            modules.insert(*version, module);
-        }
-        Ok(Runner { engine, modules })
+        Ok(Runner {bin_path: bin_path.to_owned(), engine:Engine::default(), modules: RwLock::new(HashMap::<BinaryVersion, Module>::new()) })
     }
 
-    pub fn run(&self, version: LogicVersion, request: Request) -> Result<Response, anyhow::Error> {
-        println!("Running version: {:?}", version);
+    pub fn run(&self, version: &BinaryVersion, request: Request) -> Result<Response, anyhow::Error> {
+        trace!(target: "runner", "Running version: {:?}", version);
         let buf = Arc::new(RwLock::new(Vec::new()));
 
         let mut req_buf = vec![];
@@ -73,13 +81,25 @@ impl Runner {
             let wasi = Wasi::new(&store, ctx);
             wasi.add_to_linker(&mut linker)?;
 
-            let module = self.modules.get(&version).unwrap();
+            let module = self.load_module(version)?;
 
-            linker.module("", module)?;
+            linker.module("", &module)?;
             linker.get_default("")?.get0::<()>()?()?;
         }
         let lck = buf.read().unwrap();
         let resp = Response::decode(&**lck)?;
         Ok(resp)
+    }
+
+    fn load_module(&self, version: &BinaryVersion) -> anyhow::Result<Module> {
+        if let Some(module)  = self.modules.read().unwrap().get(version) {
+            return Ok(module.to_owned())
+        }
+        info!(target: "runner", "loading module {}", version.semver);
+        let mut lock = self.modules.write().unwrap();
+        let bin = fs::read(self.bin_path.join(version.filename()))?;
+        let module = Module::from_binary(&self.engine, &bin)?;
+        lock.insert(version.to_owned(), module.to_owned());
+        Ok(module)
     }
 }
