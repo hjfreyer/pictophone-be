@@ -1,19 +1,57 @@
+use futures::Stream;
 use log::{info, trace, warn};
+use protobuf::pictophone::logic as ptl;
+use protobuf::pictophone::{v1_0, v1_1};
 use std::{convert::TryFrom, pin::Pin, sync::Arc};
-
-use {
-    futures::Stream,
-    protobuf::pictophone::logic as ptl,
-    protobuf::pictophone::{v1_0, v1_1},
-    tokio::sync::Mutex,
-};
+use tokio::sync::{broadcast, RwLock};
 
 mod protobuf;
 mod runner;
 
-struct InnerServer {
+struct AOVec<T> {
+    vec: RwLock<Vec<T>>,
+    watch_sink: broadcast::Sender<usize>,
+}
+
+impl<T: Clone> AOVec<T> {
+    fn new() -> Self {
+        let (watch_sink, _) = broadcast::channel(16);
+        Self {
+            vec: RwLock::new(vec![]),
+            watch_sink,
+        }
+    }
+
+    async fn push(&self, t: T) -> usize {
+        let mut lock = self.vec.write().await;
+        lock.push(t);
+        let _ = self.watch_sink.send(lock.len()); // Ignore error when there's no open receivers.
+        lock.len()
+    }
+
+    async fn watch(&self) -> impl Stream<Item = usize> {
+        use futures::StreamExt;
+        // There's a race condition here. All offsets should get covered, but not necessarily exactly once, or in the right order.
+        let subscription = self
+            .watch_sink
+            .subscribe()
+            .into_stream()
+            .filter_map(|r| async { r.ok() });
+
+        let initial_offset = self.vec.read().await.len();
+
+        futures::stream::once(futures::future::ready(initial_offset)).chain(subscription)
+    }
+
+    async fn take(&self, count: usize) -> Vec<T> {
+        // I could probably avoid the clone here by using a deque.
+        self.vec.read().await.iter().take(count).cloned().collect()
+    }
+}
+
+struct Server {
     runner: runner::Runner,
-    actions: Vec<ptl::VersionedAction>,
+    actions: AOVec<ptl::VersionedAction>,
 }
 
 fn get_binary_version(metadata: &tonic::metadata::MetadataMap) -> runner::BinaryVersion {
@@ -30,12 +68,15 @@ fn get_binary_version(metadata: &tonic::metadata::MetadataMap) -> runner::Binary
         .unwrap_or_default()
 }
 
-impl InnerServer {
-    fn state_head(&mut self, version: &runner::BinaryVersion) -> Result<Vec<u8>, anyhow::Error> {
-        self.actions
-            .iter()
-            .cloned()
-            .try_fold(vec![], |state, action| {
+impl Server {
+    async fn state_until(
+        &self,
+        version: &runner::BinaryVersion,
+        action_count: usize,
+    ) -> Result<(Vec<u8>, Option<ptl::VersionedResponse>), anyhow::Error> {
+        self.actions.take(action_count).await.into_iter().try_fold(
+            (vec![], None),
+            |(state, _prev_resp), action| {
                 let request = ptl::Request::from(ptl::EvolveRequest {
                     state: state.clone(),
                     action: Some(action),
@@ -44,98 +85,67 @@ impl InnerServer {
                 let response = self.runner.run(version, request)?;
                 let response = ptl::EvolveResponse::try_from(response)?;
                 if 0 < response.state.len() {
-                    Ok(response.state)
+                    Ok((response.state, response.response))
                 } else {
-                    Ok(state)
+                    Ok((state, response.response))
                 }
-            })
+            },
+        )
     }
-
-    fn handle_action(
-        &mut self,
-        action: ptl::VersionedAction,
-        metadata: tonic::metadata::MetadataMap,
-    ) -> Result<ptl::VersionedResponse, anyhow::Error> {
-        let version = get_binary_version(&metadata);
-        let state = self.state_head(&version)?;
-
-        trace!("ACTION: {:?}", action);
-
-        if 0 < state.len() {
-            let state: serde_json::Value = serde_json::from_slice(&state)?;
-            trace!("PRE-STATE: {:?}", state);
-        } else {
-            trace!("PRE-STATE: None");
-        }
-        let res = self.runner.run(
-            &version,
-            ptl::Request::from(ptl::EvolveRequest {
-                state: state.to_owned(),
-                action: Some(action.to_owned()),
-            }),
-        )?;
-        let res = ptl::EvolveResponse::try_from(res)?;
-
-        if 0 < res.state.len() {
-            let state: serde_json::Value = serde_json::from_slice(&res.state)?;
-            trace!("POST-STATE: {:?}", state);
-        }
-
-        self.actions.push(action);
-        Ok(res.response.unwrap())
-    }
-
-    async fn handle_query(
-        &mut self,
-        query: ptl::VersionedQueryRequest,
-        metadata: tonic::metadata::MetadataMap,
-    ) -> Result<impl Stream<Item = Result<ptl::VersionedQueryResponse, anyhow::Error>>, anyhow::Error>
-    {
-        let version = get_binary_version(&metadata);
-        let state = self.state_head(&version)?;
-
-        let response = self.runner.run(
-            &version,
-            ptl::Request::from(ptl::QueryRequest {
-                state: state.to_owned(),
-                query: Some(query),
-            }),
-        )?;
-        let response = ptl::VersionedQueryResponse::try_from(response)?;
-        Ok(futures::stream::once(async { Ok(response) }))
-    }
-}
-
-struct Server {
-    inner: Arc<Mutex<InnerServer>>,
 }
 
 #[tonic::async_trait]
-impl ptl::DoltServer for Server {
+impl ptl::DoltServer for std::sync::Arc<Server> {
     async fn handle_action(
         &self,
         action: ptl::VersionedAction,
         metadata: tonic::metadata::MetadataMap,
     ) -> Result<ptl::VersionedResponse, anyhow::Error> {
-        self.inner.lock().await.handle_action(action, metadata)
+        trace!("ACTION: {:?}", action);
+        let action_count = self.actions.push(action).await;
+
+        let version = get_binary_version(&metadata);
+        let (last_state, last_resp) = self.state_until(&version, action_count).await?;
+
+        if 0 < last_state.len() {
+            let state: serde_json::Value = serde_json::from_slice(&last_state)?;
+            trace!("POST-STATE: {:?}", state);
+        }
+
+        last_resp.ok_or_else(|| anyhow::anyhow!("last action didn't return a response"))
     }
 
     type QueryStream = Pin<
         Box<dyn Stream<Item = Result<ptl::VersionedQueryResponse, anyhow::Error>> + Send + Sync>,
     >;
-
     async fn handle_query(
         &self,
         query: ptl::VersionedQueryRequest,
         metadata: tonic::metadata::MetadataMap,
     ) -> Result<Self::QueryStream, anyhow::Error> {
-        Ok(Box::pin(
-            self.inner
-                .lock()
-                .await
-                .handle_query(query, metadata)
-                .await?,
-        ))
+        use futures::StreamExt;
+        let version = get_binary_version(&metadata);
+        let this = self.clone();
+        let result = self.actions.watch().await.flat_map(move |action_count| {
+            let this = this.clone();
+            let query = query.clone();
+            let version = version.clone();
+            futures::stream::once(async move {
+                let (state, _) = this.state_until(&version, action_count).await?;
+
+                let response = this.runner.run(
+                    &version,
+                    ptl::Request::from(ptl::QueryRequest {
+                        state: state.to_owned(),
+                        query: Some(query),
+                    }),
+                )?;
+                let response = ptl::VersionedQueryResponse::try_from(response)?;
+                Ok(response)
+            })
+        });
+
+        Ok(Box::pin(result))
     }
 }
 
@@ -144,20 +154,19 @@ async fn main() -> Result<(), anyhow::Error> {
     env_logger::init();
 
     let addr = "0.0.0.0:8080".parse()?;
-    let inner = Arc::new(Mutex::new(InnerServer {
+
+    let server = Arc::new(Server {
         runner: runner::Runner::new(&std::path::PathBuf::from("server/src/binaries"))?,
-        actions: vec![],
-    }));
+        actions: AOVec::new(),
+    });
 
     info!("Boom, running on: {}", addr);
 
     tonic::transport::Server::builder()
-        .add_service(v1_0::pictophone_server::PictophoneServer::new(Server {
-            inner: inner.clone(),
-        }))
-        .add_service(v1_1::pictophone_server::PictophoneServer::new(Server {
-            inner,
-        }))
+        .add_service(v1_0::pictophone_server::PictophoneServer::new(
+            server.clone(),
+        ))
+        .add_service(v1_1::pictophone_server::PictophoneServer::new(server))
         .serve(addr)
         .await?;
 
