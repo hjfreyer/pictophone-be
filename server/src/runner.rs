@@ -4,6 +4,7 @@ use log::trace;
 
 use {
     crate::protobuf::pictophone::logic::{Request, Response},
+    log::info,
     std::{
         fs,
         sync::{Arc, RwLock},
@@ -11,7 +12,6 @@ use {
     wasi_common::virtfs::pipe::{ReadPipe, WritePipe},
     wasmtime::{Engine, Linker, Module, Store},
     wasmtime_wasi::{Wasi, WasiCtxBuilder},
-    log::info,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -32,7 +32,7 @@ impl BinaryVersion {
             };
         }
 
-        declare_semver!("1.0.0", "1.1.0", )
+        declare_semver!("1.0.0", "1.1.0",)
     }
 
     fn filename(&self) -> String {
@@ -54,10 +54,18 @@ pub struct Runner {
 
 impl Runner {
     pub fn new(bin_path: &std::path::Path) -> Result<Self, anyhow::Error> {
-        Ok(Runner {bin_path: bin_path.to_owned(), engine:Engine::default(), modules: RwLock::new(HashMap::<BinaryVersion, Module>::new()) })
+        Ok(Runner {
+            bin_path: bin_path.to_owned(),
+            engine: Engine::default(),
+            modules: RwLock::new(HashMap::<BinaryVersion, Module>::new()),
+        })
     }
 
-    pub fn run(&self, version: &BinaryVersion, request: Request) -> Result<Response, anyhow::Error> {
+    pub fn run(
+        &self,
+        version: &BinaryVersion,
+        request: Request,
+    ) -> Result<Response, anyhow::Error> {
         trace!(target: "runner", "Running version: {:?}", version);
         let buf = Arc::new(RwLock::new(Vec::new()));
 
@@ -92,8 +100,8 @@ impl Runner {
     }
 
     fn load_module(&self, version: &BinaryVersion) -> anyhow::Result<Module> {
-        if let Some(module)  = self.modules.read().unwrap().get(version) {
-            return Ok(module.to_owned())
+        if let Some(module) = self.modules.read().unwrap().get(version) {
+            return Ok(module.to_owned());
         }
         info!(target: "runner", "loading module {}", version.semver);
         let mut lock = self.modules.write().unwrap();
