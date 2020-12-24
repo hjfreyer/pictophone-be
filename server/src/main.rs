@@ -153,10 +153,13 @@ impl ptl::DoltServer for std::sync::Arc<Server> {
 async fn main() -> Result<(), anyhow::Error> {
     env_logger::init();
 
-    let addr = "0.0.0.0:8080".parse()?;
+    let port = std::env::var("PORT").unwrap_or("8080".to_owned());
+    let wasm_path = std::env::var("WASM_PATH").unwrap_or("binaries".to_owned());
+
+    let addr = format!("0.0.0.0:{}", port).parse()?;
 
     let server = Arc::new(Server {
-        runner: runner::Runner::new(&std::path::PathBuf::from("server/src/binaries"))?,
+        runner: runner::Runner::new(&std::path::PathBuf::from(wasm_path))?,
         actions: AOVec::new(),
     });
 
