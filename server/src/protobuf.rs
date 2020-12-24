@@ -224,7 +224,7 @@ pub mod pictophone {
                 self.handle_action(request.into_inner().into(), metadata)
                     .await
                     .and_then(|r| Ok(tonic::Response::new(r.try_into()?)))
-                    .map_err(|_| tonic::Status::internal("wtf"))
+                    .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))
             }
 
             async fn delete_game(
@@ -236,7 +236,7 @@ pub mod pictophone {
                 self.handle_action(request.into_inner().into(), metadata)
                     .await
                     .and_then(|r| Ok(tonic::Response::new(r.try_into()?)))
-                    .map_err(|_| tonic::Status::internal("wtf"))
+                    .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))
             }
         }
     }
@@ -290,7 +290,7 @@ pub mod pictophone {
                 self.handle_action(request.into_inner().into(), metadata)
                     .await
                     .and_then(|r| Ok(tonic::Response::new(r.try_into()?)))
-                    .map_err(|_| tonic::Status::internal("wtf"))
+                    .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))
             }
 
             async fn delete_game(
@@ -303,7 +303,7 @@ pub mod pictophone {
                 self.handle_action(request.into_inner().into(), metadata)
                     .await
                     .and_then(|r| Ok(tonic::Response::new(r.try_into()?)))
-                    .map_err(|_| tonic::Status::internal("wtf"))
+                    .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))
             }
 
             type GetGameStream = std::pin::Pin<
@@ -327,12 +327,12 @@ pub mod pictophone {
                 let stream = self
                     .handle_query(request.into_inner().into(), metadata)
                     .await
-                    .map_err(|_| tonic::Status::internal("wtf"))?;
+                    .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))?;
                 let x = stream
                     .map(|response| -> Result<GetGameResponse, anyhow::Error> {
                         Ok(response?.try_into()?)
                     })
-                    .map_err(|_| tonic::Status::internal("wtf"));
+                    .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)));
 
                 Ok(tonic::Response::new(Box::pin(x)))
             }
