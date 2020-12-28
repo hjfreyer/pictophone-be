@@ -3,55 +3,14 @@ use log::{info, trace, warn};
 use protobuf::pictophone::logic as ptl;
 use protobuf::pictophone::{v1_0, v1_1};
 use std::{convert::TryFrom, pin::Pin, sync::Arc};
-use tokio::sync::{broadcast, RwLock};
 
+mod aovec;
 mod protobuf;
 mod runner;
 
-struct AOVec<T> {
-    vec: RwLock<Vec<T>>,
-    watch_sink: broadcast::Sender<usize>,
-}
-
-impl<T: Clone> AOVec<T> {
-    fn new() -> Self {
-        let (watch_sink, _) = broadcast::channel(16);
-        Self {
-            vec: RwLock::new(vec![]),
-            watch_sink,
-        }
-    }
-
-    async fn push(&self, t: T) -> usize {
-        let mut lock = self.vec.write().await;
-        lock.push(t);
-        let _ = self.watch_sink.send(lock.len()); // Ignore error when there's no open receivers.
-        lock.len()
-    }
-
-    async fn watch(&self) -> impl Stream<Item = usize> {
-        use futures::StreamExt;
-        // There's a race condition here. All offsets should get covered, but not necessarily exactly once, or in the right order.
-        let subscription = self
-            .watch_sink
-            .subscribe()
-            .into_stream()
-            .filter_map(|r| async { r.ok() });
-
-        let initial_offset = self.vec.read().await.len();
-
-        futures::stream::once(futures::future::ready(initial_offset)).chain(subscription)
-    }
-
-    async fn take(&self, count: usize) -> Vec<T> {
-        // I could probably avoid the clone here by using a deque.
-        self.vec.read().await.iter().take(count).cloned().collect()
-    }
-}
-
 struct Server {
     runner: runner::Runner,
-    actions: AOVec<ptl::VersionedAction>,
+    actions: aovec::AOVec<ptl::VersionedAction>,
 }
 
 fn get_binary_version(metadata: &tonic::metadata::MetadataMap) -> runner::BinaryVersion {
@@ -160,7 +119,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let server = Arc::new(Server {
         runner: runner::Runner::new(&std::path::PathBuf::from(wasm_path))?,
-        actions: AOVec::new(),
+        actions: aovec::AOVec::new(),
     });
 
     info!("Boom, running on: {}", addr);
