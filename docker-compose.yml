@@ -1,0 +1,15 @@
+version: "3.9"  # optional since v1.27.0
+services:
+  grpc:
+    image: gcr.io/pictophone-test/pictophone-be
+    build: .
+    environment:
+      - RUST_LOG=info,server=trace
+    ports:
+      - "9090:8080"
+  envoy:
+    image: envoyproxy/envoy:v1.16.1
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./envoy.yaml:/etc/envoy/envoy.yaml:ro 
