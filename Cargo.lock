@@ -1656,6 +1656,7 @@ dependencies = [
  "paste",
  "prost",
  "prost-types",
+ "scopeguard",
  "serde",
  "serde_json",
  "thiserror",

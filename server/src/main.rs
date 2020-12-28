@@ -85,7 +85,13 @@ impl ptl::DoltServer for std::sync::Arc<Server> {
         use futures::StreamExt;
         let version = get_binary_version(&metadata);
         let this = self.clone();
+
+        trace!("Query START");
+        let _guard = scopeguard::guard((), |_| {
+            trace!("Query END");
+        });
         let result = self.actions.watch().await.flat_map(move |action_count| {
+            &_guard;  // Force capture of _guard;
             let this = this.clone();
             let query = query.clone();
             let version = version.clone();
