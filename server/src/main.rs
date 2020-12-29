@@ -5,6 +5,7 @@ use protobuf::pictophone::{v1_0, v1_1};
 use std::{convert::TryFrom, pin::Pin, sync::Arc};
 
 mod aovec;
+mod config;
 mod protobuf;
 mod runner;
 
@@ -91,7 +92,7 @@ impl ptl::DoltServer for std::sync::Arc<Server> {
             trace!("Query END");
         });
         let result = self.actions.watch().await.flat_map(move |action_count| {
-            &_guard;  // Force capture of _guard;
+            &_guard; // Force capture of _guard;
             let this = this.clone();
             let query = query.clone();
             let version = version.clone();
@@ -118,13 +119,11 @@ impl ptl::DoltServer for std::sync::Arc<Server> {
 async fn main() -> Result<(), anyhow::Error> {
     env_logger::init();
 
-    let port = std::env::var("PORT").unwrap_or("8080".to_owned());
-    let wasm_path = std::env::var("WASM_PATH").unwrap_or("binaries".to_owned());
-
-    let addr = format!("0.0.0.0:{}", port).parse()?;
+    let config = config::Config::new()?;
+    let addr = format!("0.0.0.0:{}", config.port).parse()?;
 
     let server = Arc::new(Server {
-        runner: runner::Runner::new(&std::path::PathBuf::from(wasm_path))?,
+        runner: runner::Runner::new(&std::path::PathBuf::from(config.wasm_path))?,
         actions: aovec::AOVec::new(),
     });
 
