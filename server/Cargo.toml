@@ -26,6 +26,9 @@ log = "0.4.11"
 env_logger = "0.8.2"
 scopeguard = "1.1.0"
 config = "0.10.1"
+itertools = "0.10.0"
+rustls = "0.19.0"
+base64 = "0.13.0"
 
 [build-dependencies]
 tonic-build = "0.2"

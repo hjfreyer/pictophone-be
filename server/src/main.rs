@@ -5,6 +5,7 @@ use protobuf::pictophone::{v1_0, v1_1};
 use std::{convert::TryFrom, pin::Pin, sync::Arc};
 
 mod aovec;
+mod auth;
 mod config;
 mod protobuf;
 mod runner;
