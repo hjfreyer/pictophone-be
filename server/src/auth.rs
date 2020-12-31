@@ -23,9 +23,7 @@ use rustls::{
     PrivateKey,
 };
 use serde::{Deserialize, Serialize};
-// use url::form_urlencoded;
 
-const GRANT_TYPE: &str = "urn:ietf:params:oauth:grant-type:jwt-bearer";
 const GOOGLE_RS256_HEAD: &str = r#"{"alg":"RS256","typ":"JWT"}"#;
 
 /// Encodes s as Base64
@@ -141,7 +139,6 @@ impl JWTSigner {
     }
 
     fn sign_claims(&self, claims: &Claims) -> Result<String, rustls::TLSError> {
-        println!("CLAIMS: {:?}", claims);
         let mut jwt_head = Self::encode_claims(claims);
         let signature = self.signer.sign(jwt_head.as_bytes())?;
         jwt_head.push_str(".");
