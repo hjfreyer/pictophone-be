@@ -6,7 +6,7 @@ WORKDIR /usr/src
 RUN USER=root cargo new server
 
 COPY server/Cargo.toml /usr/src/server/
-COPY server/Cargo.lock /usr/src/server/
+COPY Cargo.lock /usr/src/server/
 
 RUN cargo build --release --manifest-path server/Cargo.toml
 
