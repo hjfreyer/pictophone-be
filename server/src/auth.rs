@@ -23,6 +23,13 @@ use rustls::{
     PrivateKey,
 };
 use serde::{Deserialize, Serialize};
+use tokio::sync::RwLock;
+
+#[derive(Debug, Clone)]
+pub struct Token {
+    pub token: String,
+    pub expiration: time::SystemTime,
+}
 
 const GOOGLE_RS256_HEAD: &str = r#"{"alg":"RS256","typ":"JWT"}"#;
 
@@ -94,29 +101,40 @@ struct Claims<'a> {
     scope: String,
 }
 
-impl<'a> Claims<'a> {
-    fn new<T>(key: &'a ServiceAccountKey, scopes: &[T], subject: Option<&'a str>) -> Self
-    where
-        T: AsRef<str>,
-    {
+fn unix_time_secs(t: time::SystemTime) -> u64 {
+    t.duration_since(time::SystemTime::UNIX_EPOCH)
         // If for some weird reason the system time is before the unix epoch...
         // just set the time to 0 and let the remote server figure out what to
         // do about that. Seems better than panicking.
-        let now = time::SystemTime::now()
-            .duration_since(time::SystemTime::UNIX_EPOCH)
-            .unwrap_or_else(|_| time::Duration::from_secs(0));
-        let expiry = now + time::Duration::from_secs(3600);
+        .unwrap_or_default()
+        .as_secs()
+}
+
+impl<'a> Claims<'a> {
+    fn new<T>(
+        key: &'a ServiceAccountKey,
+        audience: &'a str,
+        scopes: &[T],
+    ) -> (Self, time::SystemTime)
+    where
+        T: AsRef<str>,
+    {
         use itertools::Itertools;
+        let now = time::SystemTime::now();
+        let expiry = now + time::Duration::from_secs(3600);
 
         let scope = scopes.iter().map(|t| t.as_ref().to_owned()).join(" ");
-        Claims {
-            iss: &key.client_email,
-            aud: &"https://firestore.googleapis.com/",
-            exp: expiry.as_secs(),
-            iat: now.as_secs(),
-            subject: Some(&key.client_email),
-            scope,
-        }
+        (
+            Claims {
+                iss: &key.client_email,
+                aud: audience,
+                exp: unix_time_secs(expiry),
+                iat: unix_time_secs(now),
+                subject: Some(&key.client_email),
+                scope,
+            },
+            expiry,
+        )
     }
 }
 
@@ -157,35 +175,66 @@ impl JWTSigner {
     }
 }
 
-pub struct ServiceAccountFlowOpts {
-    pub(crate) key: ServiceAccountKey,
-    pub(crate) subject: Option<String>,
-}
-
-/// ServiceAccountFlow can fetch oauth tokens using a service account.
-pub struct ServiceAccountFlow {
+pub struct ServiceAccountTokenSource {
     key: ServiceAccountKey,
-    subject: Option<String>,
     signer: JWTSigner,
+    audience: String,
+    scopes: Vec<String>,
 }
 
-impl ServiceAccountFlow {
-    pub(crate) fn new(opts: ServiceAccountFlowOpts) -> Result<Self, io::Error> {
-        let signer = JWTSigner::new(&opts.key.private_key)?;
-        Ok(ServiceAccountFlow {
-            key: opts.key,
-            subject: opts.subject,
-            signer,
+impl ServiceAccountTokenSource {
+    pub fn new(
+        key: ServiceAccountKey,
+        audience: String,
+        scopes: Vec<String>,
+    ) -> anyhow::Result<Self> {
+        Ok(Self {
+            signer: JWTSigner::new(&key.private_key)?,
+            key,
+            audience,
+            scopes,
         })
     }
 
-    /// Send a request for a new Bearer token to the OAuth provider.
-    pub(crate) fn token<T>(&self, scopes: &[T]) -> Result<String, anyhow::Error>
-    where
-        T: AsRef<str>,
-    {
-        let claims = Claims::new(&self.key, scopes, self.subject.as_ref().map(|x| x.as_str()));
+    pub fn token(&self) -> anyhow::Result<Token> {
+        let (claims, expiry) = Claims::new(&self.key, &self.audience, &self.scopes);
         let signed = self.signer.sign_claims(&claims)?;
-        Ok(signed)
+        Ok(Token {
+            token: signed,
+            expiration: expiry,
+        })
+    }
+}
+
+pub struct CachedTokenSource {
+    source: ServiceAccountTokenSource,
+    cache: RwLock<Option<Token>>,
+}
+
+impl CachedTokenSource {
+    pub fn new(source: ServiceAccountTokenSource) -> Self {
+        Self {
+            source,
+            cache: RwLock::new(None),
+        }
+    }
+
+    pub async fn token(&self) -> anyhow::Result<Token> {
+        {
+            let lock = self.cache.read().await;
+            if let Some(token) = lock.as_ref() {
+                if time::SystemTime::now() < token.expiration - time::Duration::from_secs(5 * 60) {
+                    return Ok(token.clone());
+                }
+            }
+        }
+        // If we've made it here, the token isn't suitable for some reason. Get a new one.
+        // TODO: potential thundering herd issue here. Shrug.
+        {
+            let mut lock = self.cache.write().await;
+            let token = self.source.token()?;
+            *lock = Some(token.clone());
+            Ok(token)
+        }
     }
 }

@@ -1,6 +1,8 @@
+use crate::protobuf::google::firestore::v1 as fs;
 use anyhow::bail;
 use datastore::Datastore;
-use futures::Stream;
+use fs::firestore_client::FirestoreClient;
+use futures::{executor::block_on, Stream};
 use log::{info, trace, warn};
 use protobuf::pictophone::logic as ptl;
 use protobuf::pictophone::{v1_0, v1_1};
@@ -10,9 +12,6 @@ use tonic::{
     transport::{ClientTlsConfig, Endpoint},
     Request,
 };
-
-use crate::protobuf::google::firestore::v1 as fs;
-use fs::firestore_client::FirestoreClient;
 
 mod aovec;
 mod auth;
@@ -162,21 +161,22 @@ async fn main() -> Result<(), anyhow::Error> {
     let config = config::Config::new()?;
     let addr = format!("0.0.0.0:{}", config.port).parse()?;
 
-    let saw = auth::ServiceAccountFlow::new(auth::ServiceAccountFlowOpts {
-        key: serde_json::from_str(&config.auth_key)?,
-        subject: None,
-    })?;
+    let token_source = auth::CachedTokenSource::new(auth::ServiceAccountTokenSource::new(
+        serde_json::from_str(&config.auth_key)?,
+        "https://firestore.googleapis.com/".to_owned(),
+        vec!["https://www.googleapis.com/auth/cloud-platform".to_owned()],
+    )?);
 
     let channel = firestore_endpoint().connect().await?;
 
-    // TODO: refresh jwt.
-    let jwt = saw
-        .token(&["https://www.googleapis.com/auth/cloud-platform"])
-        .map_err(|e| tonic::Status::internal(format!("error: {:#}", e)))?;
     let firestore = FirestoreClient::with_interceptor(channel, move |mut req: Request<()>| {
+        // Deadlock potential here?
+        let token = block_on(token_source.token())
+            .map_err(|e| tonic::Status::internal(format!("authentication error: {:#}", e)))?;
+
         req.metadata_mut().insert(
             "authorization",
-            MetadataValue::from_str(&format!("Bearer {}", jwt))
+            MetadataValue::from_str(&format!("Bearer {}", token.token))
                 .map_err(|e| tonic::Status::internal(format!("invalid metadata: {:#}", e)))?,
         );
         Ok(req)
