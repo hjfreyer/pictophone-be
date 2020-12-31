@@ -1,18 +1,30 @@
+use anyhow::bail;
+use datastore::Datastore;
 use futures::Stream;
 use log::{info, trace, warn};
 use protobuf::pictophone::logic as ptl;
 use protobuf::pictophone::{v1_0, v1_1};
 use std::{convert::TryFrom, pin::Pin, sync::Arc};
+use tonic::{
+    metadata::MetadataValue,
+    transport::{ClientTlsConfig, Endpoint},
+    Request,
+};
+
+use crate::protobuf::google::firestore::v1 as fs;
+use fs::firestore_client::FirestoreClient;
 
 mod aovec;
 mod auth;
 mod config;
+mod datastore;
 mod protobuf;
 mod runner;
+mod util;
 
-struct Server {
+struct Server<DS: Datastore + Send + Sync + 'static> {
     runner: runner::Runner,
-    actions: aovec::AOVec<ptl::VersionedAction>,
+    datastore: DS,
 }
 
 fn get_binary_version(metadata: &tonic::metadata::MetadataMap) -> runner::BinaryVersion {
@@ -29,44 +41,65 @@ fn get_binary_version(metadata: &tonic::metadata::MetadataMap) -> runner::Binary
         .unwrap_or_default()
 }
 
-impl Server {
-    async fn state_until(
-        &self,
+impl<DS: Datastore + Send + Sync> Server<DS> {
+    async fn state_stream(
+        self: std::sync::Arc<Self>,
         version: &runner::BinaryVersion,
-        action_count: usize,
-    ) -> Result<(Vec<u8>, Option<ptl::VersionedResponse>), anyhow::Error> {
-        self.actions.take(action_count).await.into_iter().try_fold(
-            (vec![], None),
-            |(state, _prev_resp), action| {
-                let request = ptl::Request::from(ptl::EvolveRequest {
-                    state: state.clone(),
-                    action: Some(action),
-                });
+    ) -> anyhow::Result<impl Stream<Item = anyhow::Result<(Vec<u8>, Option<ptl::VersionedResponse>)>>>
+    {
+        use futures::StreamExt;
+        let version = version.to_owned();
+        Ok(self
+            .datastore
+            .watch_log()
+            .await?
+            .scan(vec![], move |state, action| {
+                futures::future::ready(Some((|| {
+                    let action = action?;
+                    let request = ptl::Request::from(ptl::EvolveRequest {
+                        state: state.clone(),
+                        action: Some(action),
+                    });
 
-                let response = self.runner.run(version, request)?;
-                let response = ptl::EvolveResponse::try_from(response)?;
-                if 0 < response.state.len() {
-                    Ok((response.state, response.response))
-                } else {
-                    Ok((state, response.response))
-                }
-            },
-        )
+                    let response = self.runner.run(&version, request)?;
+                    let response = ptl::EvolveResponse::try_from(response)?;
+                    if 0 < response.state.len() {
+                        *state = response.state;
+                        Ok((state.clone(), response.response))
+                    } else {
+                        Ok((state.clone(), response.response))
+                    }
+                })()))
+            }))
     }
 }
 
 #[tonic::async_trait]
-impl ptl::DoltServer for std::sync::Arc<Server> {
+impl<DS: Datastore + Send + Sync> ptl::DoltServer for std::sync::Arc<Server<DS>> {
     async fn handle_action(
         &self,
         action: ptl::VersionedAction,
         metadata: tonic::metadata::MetadataMap,
     ) -> Result<ptl::VersionedResponse, anyhow::Error> {
+        use futures::StreamExt;
         trace!("ACTION: {:?}", action);
-        let action_count = self.actions.push(action).await;
+        let action_count = self.datastore.push_action(action).await?;
 
         let version = get_binary_version(&metadata);
-        let (last_state, last_resp) = self.state_until(&version, action_count).await?;
+        let mut states: Vec<(Vec<u8>, Option<ptl::VersionedResponse>)> = self
+            .clone()
+            .state_stream(&version)
+            .await?
+            .filter_map(|s| async { s.ok() })
+            .skip(action_count - 1)
+            .take(1)
+            .collect()
+            .await;
+        let (last_state, last_resp) = if let Some((state, resp)) = states.pop() {
+            (state, resp)
+        } else {
+            bail!("state stream ended early")
+        };
 
         if 0 < last_state.len() {
             let state: serde_json::Value = serde_json::from_slice(&last_state)?;
@@ -92,28 +125,34 @@ impl ptl::DoltServer for std::sync::Arc<Server> {
         let _guard = scopeguard::guard((), |_| {
             trace!("Query END");
         });
-        let result = self.actions.watch().await.flat_map(move |action_count| {
-            &_guard; // Force capture of _guard;
-            let this = this.clone();
-            let query = query.clone();
-            let version = version.clone();
-            futures::stream::once(async move {
-                let (state, _) = this.state_until(&version, action_count).await?;
+        let result = self
+            .clone()
+            .state_stream(&version)
+            .await?
+            .filter_map(|r| async { r.ok() })
+            .map(move |(state, _resp)| {
+                &_guard; // Force capture of _guard;
 
                 let response = this.runner.run(
                     &version,
                     ptl::Request::from(ptl::QueryRequest {
-                        state: state.to_owned(),
-                        query: Some(query),
+                        state,
+                        query: Some(query.to_owned()),
                     }),
                 )?;
-                let response = ptl::VersionedQueryResponse::try_from(response)?;
-                Ok(response)
-            })
-        });
+                Ok(ptl::VersionedQueryResponse::try_from(response)?)
+            });
 
         Ok(Box::pin(result))
     }
+}
+
+const ENDPOINT: &str = "https://firestore.googleapis.com";
+
+fn firestore_endpoint() -> Endpoint {
+    Endpoint::new(ENDPOINT)
+        .unwrap()
+        .tls_config(ClientTlsConfig::new().domain_name("firestore.googleapis.com"))
 }
 
 #[tokio::main]
@@ -123,9 +162,32 @@ async fn main() -> Result<(), anyhow::Error> {
     let config = config::Config::new()?;
     let addr = format!("0.0.0.0:{}", config.port).parse()?;
 
+    let saw = auth::ServiceAccountFlow::new(auth::ServiceAccountFlowOpts {
+        key: serde_json::from_str(&config.auth_key)?,
+        subject: None,
+    })?;
+
+    let channel = firestore_endpoint().connect().await?;
+
+    // TODO: refresh jwt.
+    let jwt = saw
+        .token(&["https://www.googleapis.com/auth/cloud-platform"])
+        .map_err(|e| tonic::Status::internal(format!("error: {:#}", e)))?;
+    let firestore = FirestoreClient::with_interceptor(channel, move |mut req: Request<()>| {
+        req.metadata_mut().insert(
+            "authorization",
+            MetadataValue::from_str(&format!("Bearer {}", jwt))
+                .map_err(|e| tonic::Status::internal(format!("invalid metadata: {:#}", e)))?,
+        );
+        Ok(req)
+    });
+
     let server = Arc::new(Server {
         runner: runner::Runner::new(&std::path::PathBuf::from(config.wasm_path))?,
-        actions: aovec::AOVec::new(),
+        datastore: datastore::firestore(
+            firestore,
+            "projects/pictophone-test/databases/(default)".to_owned(),
+        ),
     });
 
     info!("Boom, running on: {}", addr);

@@ -340,19 +340,19 @@ pub mod pictophone {
     }
 }
 
-// pub mod google {
-//     pub mod firestore {
-//         pub mod v1 {
-//             tonic::include_proto!("google.firestore.v1");
-//         }
-//     }
-//     pub mod rpc {
-//         tonic::include_proto!("google.rpc");
-//     }
-//     pub mod r#type {
-//         tonic::include_proto!("google.r#type");
-//     }
-// }
+pub mod google {
+    pub mod firestore {
+        pub mod v1 {
+            tonic::include_proto!("google.firestore.v1");
+        }
+    }
+    pub mod rpc {
+        tonic::include_proto!("google.rpc");
+    }
+    pub mod r#type {
+        tonic::include_proto!("google.r#type");
+    }
+}
 
 // pub mod pictophone {
 //     pub mod v1_0 {
