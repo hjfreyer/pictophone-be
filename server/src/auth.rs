@@ -16,6 +16,7 @@
 
 use std::{io, time};
 
+use anyhow::bail;
 use rustls::{
     self,
     internal::pemfile,
@@ -29,6 +30,18 @@ use tokio::sync::RwLock;
 pub struct Token {
     pub token: String,
     pub expiration: time::SystemTime,
+}
+
+#[tonic::async_trait]
+pub trait Source {
+    async fn token(&self) -> anyhow::Result<Token>;
+}
+
+#[tonic::async_trait]
+impl<S: Source + Send + Sync + ?Sized> Source for Box<S> {
+    async fn token(&self) -> anyhow::Result<Token> {
+        S::token(self).await
+    }
 }
 
 const GOOGLE_RS256_HEAD: &str = r#"{"alg":"RS256","typ":"JWT"}"#;
@@ -195,8 +208,11 @@ impl ServiceAccountTokenSource {
             scopes,
         })
     }
+}
 
-    pub fn token(&self) -> anyhow::Result<Token> {
+#[tonic::async_trait]
+impl Source for ServiceAccountTokenSource {
+    async fn token(&self) -> anyhow::Result<Token> {
         let (claims, expiry) = Claims::new(&self.key, &self.audience, &self.scopes);
         let signed = self.signer.sign_claims(&claims)?;
         Ok(Token {
@@ -206,13 +222,52 @@ impl ServiceAccountTokenSource {
     }
 }
 
-pub struct CachedTokenSource {
-    source: ServiceAccountTokenSource,
+pub struct InstanceTokenSource {
+    scopes: Vec<String>,
+}
+
+impl InstanceTokenSource {
+    pub fn new(scopes: Vec<String>) -> anyhow::Result<Self> {
+        Ok(Self { scopes })
+    }
+}
+
+const URL: &str =
+    "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token";
+
+#[derive(Deserialize, Debug)]
+struct TokenResponse {
+    access_token: String,
+    expires_in: u32,
+    token_type: String,
+}
+
+#[tonic::async_trait]
+impl Source for InstanceTokenSource {
+    async fn token(&self) -> anyhow::Result<Token> {
+        let response = ureq::get(URL)
+            .query("scopes", &self.scopes.join(","))
+            .set("Metadata-Flavor", "Google")
+            .call();
+        if !response.ok() {
+            bail!("bad response from auth")
+        }
+
+        let response: TokenResponse = serde_json::from_str(&response.into_string()?)?;
+        Ok(Token {
+            token: response.access_token,
+            expiration: time::SystemTime::now() + time::Duration::from_secs(45 * 60),
+        })
+    }
+}
+
+pub struct CachedTokenSource<S> {
+    source: S,
     cache: RwLock<Option<Token>>,
 }
 
-impl CachedTokenSource {
-    pub fn new(source: ServiceAccountTokenSource) -> Self {
+impl<S: Source> CachedTokenSource<S> {
+    pub fn new(source: S) -> Self {
         Self {
             source,
             cache: RwLock::new(None),
@@ -232,7 +287,7 @@ impl CachedTokenSource {
         // TODO: potential thundering herd issue here. Shrug.
         {
             let mut lock = self.cache.write().await;
-            let token = self.source.token()?;
+            let token = self.source.token().await?;
             *lock = Some(token.clone());
             Ok(token)
         }

@@ -1,0 +1,3 @@
+port=8080
+wasm_path="/data/wasm/"
+[credential_source.InstanceMetadata]

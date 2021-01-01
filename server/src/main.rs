@@ -1,5 +1,5 @@
 use crate::protobuf::google::firestore::v1 as fs;
-use anyhow::bail;
+use anyhow::{bail, Context};
 use datastore::Datastore;
 use fs::firestore_client::FirestoreClient;
 use futures::{executor::block_on, Stream};
@@ -154,20 +154,42 @@ fn firestore_endpoint() -> Endpoint {
         .tls_config(ClientTlsConfig::new().domain_name("firestore.googleapis.com"))
 }
 
+fn token_source(config: &config::Config) -> anyhow::Result<Box<dyn auth::Source + Send + Sync>> {
+    match &config.credential_source {
+        config::CredentialSource::Literal { auth_key } => {
+            Ok(Box::new(auth::ServiceAccountTokenSource::new(
+                serde_json::from_str(auth_key)?,
+                "https://firestore.googleapis.com/".to_owned(),
+                vec!["https://www.googleapis.com/auth/cloud-platform".to_owned()],
+            )?))
+        }
+
+        config::CredentialSource::InstanceMetadata => {
+            Ok(Box::new(auth::InstanceTokenSource::new(vec![
+                "https://www.googleapis.com/auth/cloud-platform".to_owned(),
+            ])?))
+        }
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), anyhow::Error> {
     env_logger::init();
 
     let config = config::Config::new()?;
+
+    info!("Starting with config: {:#?}", config);
+
     let addr = format!("0.0.0.0:{}", config.port).parse()?;
 
-    let token_source = auth::CachedTokenSource::new(auth::ServiceAccountTokenSource::new(
-        serde_json::from_str(&config.auth_key)?,
-        "https://firestore.googleapis.com/".to_owned(),
-        vec!["https://www.googleapis.com/auth/cloud-platform".to_owned()],
-    )?);
+    let token_source = auth::CachedTokenSource::new(
+        token_source(&config).context("while setting up token thing")?,
+    );
 
-    let channel = firestore_endpoint().connect().await?;
+    let channel = firestore_endpoint()
+        .connect()
+        .await
+        .context("while connecting to firestore")?;
 
     let firestore = FirestoreClient::with_interceptor(channel, move |mut req: Request<()>| {
         // Deadlock potential here?
