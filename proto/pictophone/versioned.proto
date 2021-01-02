@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package pictophone.versioned;
+
+import "pictophone/v1_0.proto";
+import "pictophone/v1_1.proto";
+
+message ActionRequest {
+    oneof version {
+        pictophone.v1_0.ActionRequest v1p0 = 1;
+        pictophone.v1_1.ActionRequest v1p1 = 2;
+    }   
+}
+
+message ActionResponse {
+    oneof version {
+        pictophone.v1_0.ActionResponse v1p0 = 1;
+        pictophone.v1_1.ActionResponse v1p1 = 2;
+    }   
+}
+
+message QueryRequest {
+    oneof version {
+        pictophone.v1_0.QueryRequest v1p0 = 1;
+        pictophone.v1_1.QueryRequest v1p1 = 2;
+    }   
+}
+
+message QueryResponse {
+    oneof version {
+        pictophone.v1_0.QueryResponse v1p0 = 1;
+        pictophone.v1_1.QueryResponse v1p1 = 2;
+    }   
+}

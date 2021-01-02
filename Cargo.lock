@@ -1053,11 +1053,13 @@ name = "logic"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "paste",
  "prost",
  "prost-build",
  "prost-types",
  "serde 1.0.118",
  "serde_json",
+ "thiserror",
 ]
 
 [[package]]

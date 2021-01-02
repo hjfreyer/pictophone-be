@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use log::trace;
 
 use {
-    crate::protobuf::pictophone::logic::{Request, Response},
+    crate::protobuf::pictophone::dolt::{Request, Response},
     log::info,
     std::{
         fs,
@@ -32,7 +32,7 @@ impl BinaryVersion {
             };
         }
 
-        declare_semver!("1.0.0", "1.1.0",)
+        declare_semver!("1.0.0",)
     }
 
     fn filename(&self) -> String {
@@ -42,7 +42,7 @@ impl BinaryVersion {
 
 impl Default for BinaryVersion {
     fn default() -> Self {
-        BinaryVersion::from_semver("1.1.0").unwrap()
+        BinaryVersion::from_semver("1.0.0").unwrap()
     }
 }
 

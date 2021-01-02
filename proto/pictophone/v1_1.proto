@@ -11,14 +11,14 @@ service Pictophone {
     rpc GetGame(GetGameRequest) returns (stream GetGameResponse);
 }
 
-message Action {
+message ActionRequest {
     oneof method {
         pictophone.v1_0.CreateGameRequest create_game_request = 1;
         pictophone.v1_0.DeleteGameRequest delete_game_request = 2;
     }
 }
 
-message Response {
+message ActionResponse {
     oneof method {
         pictophone.v1_0.CreateGameResponse create_game_response = 1;
         pictophone.v1_0.DeleteGameResponse delete_game_response = 2;

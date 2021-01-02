@@ -1,13 +1,30 @@
+#[derive(thiserror::Error, Debug)]
+#[error("wrong oneof selected")]
+pub struct WrongOneofSelected();
+
 macro_rules! oneof_convert {
-    ($container_type:ident, $enum_field:ident, $container_enum:ty, $($element_type:ident, )*) => {
-        oneof_convert!($container_type, $enum_field, $container_enum, $(($element_type, $element_type),)*);
+    ($container_type:ident, $oneof_field:ident, $($elem_type:ident, )*) => {
+        oneof_convert!($container_type, $oneof_field, $(($elem_type, $elem_type), )*);
     };
-    ($container_type:ident, $enum_field:ident, $container_enum:ty, $(($element_type:ty, $element_enum:ident), )*) => {
+    ($container_type:ident, $oneof_field:ident, $(($elem_type:ty, $elem_field_name:ident), )*) => {
         $(
-            impl From<$element_type> for $container_type {
-                fn from(e: $element_type) -> Self {
-                    Self {
-                        $enum_field: Some(<$container_enum>::$element_enum(e)),
+            paste::paste!{
+                impl From<$elem_type> for $container_type {
+                    fn from(e: $elem_type) -> Self {
+                        Self {
+                            $oneof_field: Some([<$container_type:snake>] ::[<$oneof_field:camel>]::$elem_field_name(e)),
+                        }
+                    }
+                }
+
+
+                impl std::convert::TryFrom<$container_type> for $elem_type {
+                    type Error = $crate::proto::WrongOneofSelected;
+                    fn try_from(value: $container_type) -> Result<Self, Self::Error> {
+                        match value.$oneof_field {
+                            Some([<$container_type:snake>] ::[<$oneof_field:camel>]::$elem_field_name(e)) => Ok(e),
+                            _ => Err($crate::proto::WrongOneofSelected()),
+                        }
                     }
                 }
             }
@@ -21,28 +38,15 @@ pub mod v1_0 {
     oneof_convert!(
         CreateGameResponse,
         error,
-        create_game_response::Error,
         GameAlreadyExistsError,
         ShortCodeInUseError,
     );
-    oneof_convert!(
-        DeleteGameResponse,
-        error,
-        delete_game_response::Error,
-        GameNotFoundError,
-    );
+    oneof_convert!(DeleteGameResponse, error, GameNotFoundError,);
 
+    oneof_convert!(ActionRequest, method, CreateGameRequest, DeleteGameRequest,);
     oneof_convert!(
-        Action,
+        ActionResponse,
         method,
-        action::Method,
-        CreateGameRequest,
-        DeleteGameRequest,
-    );
-    oneof_convert!(
-        Response,
-        method,
-        response::Method,
         CreateGameResponse,
         DeleteGameResponse,
     );
@@ -52,59 +56,55 @@ pub mod v1_1 {
     include!(concat!(env!("OUT_DIR"), "/pictophone.v1_1.rs"));
 
     oneof_convert!(
-        Action,
+        ActionRequest,
         method,
-        action::Method,
         (super::v1_0::CreateGameRequest, CreateGameRequest),
         (super::v1_0::DeleteGameRequest, DeleteGameRequest),
     );
     oneof_convert!(
-        Response,
+        ActionResponse,
         method,
-        response::Method,
         (super::v1_0::CreateGameResponse, CreateGameResponse),
         (super::v1_0::DeleteGameResponse, DeleteGameResponse),
     );
 
-    oneof_convert!(
-        QueryResponse,
-        method,
-        query_response::Method,
-        GetGameResponse,
-    );
+    oneof_convert!(QueryResponse, method, GetGameResponse,);
 }
 
-pub mod logic {
-    include!(concat!(env!("OUT_DIR"), "/pictophone.logic.rs"));
+pub mod dolt {
+    include!(concat!(env!("OUT_DIR"), "/pictophone.dolt.rs"));
+
+    oneof_convert!(Request, method, ActionRequest, QueryRequest,);
+    oneof_convert!(Response, method, ActionResponse, QueryResponse,);
+}
+
+pub mod versioned {
+    include!(concat!(env!("OUT_DIR"), "/pictophone.versioned.rs"));
 
     oneof_convert!(
-        VersionedAction,
+        ActionRequest,
         version,
-        versioned_action::Version,
-        (super::v1_0::Action, V1p0),
-        (super::v1_1::Action, V1p1),
+        (super::v1_0::ActionRequest, V1p0),
+        (super::v1_1::ActionRequest, V1p1),
     );
 
     oneof_convert!(
-        VersionedResponse,
+        ActionResponse,
         version,
-        versioned_response::Version,
-        (super::v1_0::Response, V1p0),
-        (super::v1_1::Response, V1p1),
+        (super::v1_0::ActionResponse, V1p0),
+        (super::v1_1::ActionResponse, V1p1),
     );
 
     oneof_convert!(
-        VersionedQueryRequest,
+        QueryRequest,
         version,
-        versioned_query_request::Version,
         (super::v1_0::QueryRequest, V1p0),
         (super::v1_1::QueryRequest, V1p1),
     );
 
     oneof_convert!(
-        VersionedQueryResponse,
+        QueryResponse,
         version,
-        versioned_query_response::Version,
         (super::v1_0::QueryResponse, V1p0),
         (super::v1_1::QueryResponse, V1p1),
     );

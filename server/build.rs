@@ -4,8 +4,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .format(false)
         .compile(
             &[
-                "../proto/pictophone/v1_0.proto",
-                "../proto/pictophone/logic.proto",
+                "../proto/pictophone/versioned.proto",
+                "../proto/pictophone/dolt.proto",
             ],
             &["../proto"],
         )?;
@@ -17,14 +17,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &["../proto/google/firestore/v1/firestore.proto"],
             &["../proto"],
         )?;
-
-    // doltc::compile(
-    //     &[
-    //         "../proto/pictophone/v1_0.proto",
-    //         "../proto/pictophone/logic.proto",
-    //     ],
-    //     &["../proto"],
-    // )?;
 
     Ok(())
 }

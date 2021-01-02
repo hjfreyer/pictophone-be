@@ -2,27 +2,6 @@
 #[error("wrong oneof selected")]
 pub struct WrongOneofSelected();
 
-// // method_new!(Paste);
-// macro_rules! oneof_convert {
-//     // ($container_type:ident, $enum_field:ident, $container_enum:ty, $($element_type:ident, )*) => {
-//     //     oneof_convert!($container_type, $enum_field, $container_enum, $(($element_type, $element_type),)*);
-//     // };
-//     ($container_mod:path, $container_type:ident, $enum_field:ident, $(($element_mod:path, $element_type:ident), )*) => {
-//         $(
-//             paste::paste!{
-//                 impl From<EvolveRequest> for [<$container_mod :: $container_type>] {
-//                     fn from(e: $element_type) -> Self {
-//                         Self {
-//                             $enum_field: Some(<$container_enum>::$element_enum(e)),
-//                         }
-//                     }
-//                 }
-//             }
-//         )*
-//     };
-// }
-
-// method_new!(Paste);
 macro_rules! oneof_convert {
     ($container_type:ident, $oneof_field:ident, $($elem_type:ident, )*) => {
         oneof_convert!($container_type, $oneof_field, $(($elem_type, $elem_type), )*);
@@ -57,28 +36,30 @@ macro_rules! oneof_convert {
 }
 
 pub mod pictophone {
-    pub mod logic {
-        tonic::include_proto!("pictophone.logic");
+    pub mod versioned {
+        use std::convert::TryFrom;
+
+        tonic::include_proto!("pictophone.versioned");
 
         macro_rules! version {
             ($version_mod:ident, $version_enum:ident) => {
                 oneof_convert!(
-                    VersionedAction,
+                    ActionRequest,
                     version,
-                    (super::$version_mod::Action, $version_enum),
+                    (super::$version_mod::ActionRequest, $version_enum),
                 );
                 oneof_convert!(
-                    VersionedResponse,
+                    ActionResponse,
                     version,
-                    (super::$version_mod::Response, $version_enum),
+                    (super::$version_mod::ActionResponse, $version_enum),
                 );
                 oneof_convert!(
-                    VersionedQueryRequest,
+                    QueryRequest,
                     version,
                     (super::$version_mod::QueryRequest, $version_enum),
                 );
                 oneof_convert!(
-                    VersionedQueryResponse,
+                    QueryResponse,
                     version,
                     (super::$version_mod::QueryResponse, $version_enum),
                 );
@@ -88,96 +69,86 @@ pub mod pictophone {
         version!(v1_0, V1p0);
         version!(v1_1, V1p1);
 
-        oneof_convert!(Request, method, EvolveRequest, QueryRequest,);
-        oneof_convert!(Response, method, EvolveResponse, VersionedQueryResponse,);
+        macro_rules! serialize {
+            ($name:ident) => {
+                paste::paste!{
+                    impl TryFrom<$name> for super::dolt::[<Versioned $name Bytes>] {
+                        type Error = prost::EncodeError;
+
+                        fn try_from(value: $name) -> Result<Self, Self::Error> {
+                            use prost::Message;
+                            let mut bytes = vec![];
+                            value.encode(&mut bytes)?;
+                            Ok(Self::new(bytes))
+                        }
+                    }
+
+
+                    impl TryFrom<super::dolt::[<Versioned $name Bytes>]> for $name  {
+                        type Error = prost::DecodeError;
+
+                        fn try_from(value: super::dolt::[<Versioned $name Bytes>]) -> Result<Self, Self::Error> {
+                            use prost::Message;
+                            Self::decode(value.into_bytes().as_slice())
+                        }
+                    }
+                }
+            };
+        }
+
+        serialize!(ActionRequest);
+        serialize!(ActionResponse);
+        serialize!(QueryRequest);
+        serialize!(QueryResponse);
+    }
+
+    pub mod dolt {
+        tonic::include_proto!("pictophone.dolt");
+
+        oneof_convert!(Request, method, ActionRequest, QueryRequest,);
+        oneof_convert!(Response, method, ActionResponse, QueryResponse,);
+
+        macro_rules! typed_bytes {
+            ($name:ident) => {
+                paste::paste! {
+                    #[derive(Debug, Clone)]
+                    pub struct $name(Vec<u8>);
+
+                    impl $name {
+                        pub fn new(bytes: Vec<u8>) -> Self {
+                            Self(bytes)
+                        }
+
+                        pub fn into_bytes(self) -> Vec<u8> {
+                            self.0
+                        }
+                    }
+                }
+            };
+        }
+
+        typed_bytes!(VersionedActionRequestBytes);
+        typed_bytes!(VersionedActionResponseBytes);
+        typed_bytes!(VersionedQueryRequestBytes);
+        typed_bytes!(VersionedQueryResponseBytes);
 
         #[tonic::async_trait]
-        pub trait DoltServer: Send + Sync + 'static {
+        pub trait Server: Send + Sync + 'static {
             async fn handle_action(
                 &self,
-                action: VersionedAction,
+                action: VersionedActionRequestBytes,
                 metadata: tonic::metadata::MetadataMap,
-            ) -> Result<VersionedResponse, anyhow::Error>;
+            ) -> Result<VersionedActionResponseBytes, anyhow::Error>;
 
-            type QueryStream: futures::Stream<Item = Result<VersionedQueryResponse, anyhow::Error>>
+            type QueryStream: futures::Stream<Item = Result<VersionedQueryResponseBytes, anyhow::Error>>
                 + Send
                 + Sync;
 
             async fn handle_query(
                 &self,
-                query: VersionedQueryRequest,
+                query: VersionedQueryRequestBytes,
                 metadata: tonic::metadata::MetadataMap,
             ) -> Result<Self::QueryStream, anyhow::Error>;
-        }
-
-        #[tonic::async_trait]
-        impl<T: DoltServer> super::v1_0::DoltServer for T {
-            async fn handle_action(
-                &self,
-                action: super::v1_0::Action,
-                metadata: tonic::metadata::MetadataMap,
-            ) -> Result<super::v1_0::Response, anyhow::Error> {
-                use std::convert::TryInto;
-                DoltServer::handle_action(self, action.into(), metadata)
-                    .await
-                    .and_then(|r| Ok(r.try_into()?))
-            }
-
-            type QueryStream = std::pin::Pin<
-                Box<
-                    dyn futures::Stream<Item = Result<super::v1_0::QueryResponse, anyhow::Error>>
-                        + Send
-                        + Sync,
-                >,
-            >;
-
-            async fn handle_query(
-                &self,
-                query: super::v1_0::QueryRequest,
-                metadata: tonic::metadata::MetadataMap,
-            ) -> Result<Self::QueryStream, anyhow::Error> {
-                use futures::stream::StreamExt;
-                use std::convert::TryInto;
-                let res = DoltServer::handle_query(self, query.into(), metadata)
-                    .await?
-                    .map(|response| Ok(response?.try_into()?));
-                Ok(Box::pin(res))
-            }
-        }
-
-        #[tonic::async_trait]
-        impl<T: DoltServer> super::v1_1::DoltServer for T {
-            async fn handle_action(
-                &self,
-                action: super::v1_1::Action,
-                metadata: tonic::metadata::MetadataMap,
-            ) -> Result<super::v1_1::Response, anyhow::Error> {
-                use std::convert::TryInto;
-                DoltServer::handle_action(self, action.into(), metadata)
-                    .await
-                    .and_then(|r| Ok(r.try_into()?))
-            }
-
-            type QueryStream = std::pin::Pin<
-                Box<
-                    dyn futures::Stream<Item = Result<super::v1_1::QueryResponse, anyhow::Error>>
-                        + Send
-                        + Sync,
-                >,
-            >;
-
-            async fn handle_query(
-                &self,
-                query: super::v1_1::QueryRequest,
-                metadata: tonic::metadata::MetadataMap,
-            ) -> Result<Self::QueryStream, anyhow::Error> {
-                use futures::stream::StreamExt;
-                use std::convert::TryInto;
-                let res = DoltServer::handle_query(self, query.into(), metadata)
-                    .await?
-                    .map(|response| Ok(response?.try_into()?));
-                Ok(Box::pin(res))
-            }
         }
     }
 
@@ -192,51 +163,70 @@ pub mod pictophone {
         );
         oneof_convert!(DeleteGameResponse, error, GameNotFoundError,);
 
-        oneof_convert!(Action, method, CreateGameRequest, DeleteGameRequest,);
-        oneof_convert!(Response, method, CreateGameResponse, DeleteGameResponse,);
+        oneof_convert!(ActionRequest, method, CreateGameRequest, DeleteGameRequest,);
+        oneof_convert!(
+            ActionResponse,
+            method,
+            CreateGameResponse,
+            DeleteGameResponse,
+        );
 
         #[tonic::async_trait]
-        pub trait DoltServer: Send + Sync + 'static {
-            async fn handle_action(
-                &self,
-                action: Action,
-                metadata: tonic::metadata::MetadataMap,
-            ) -> Result<Response, anyhow::Error>;
-
-            type QueryStream: futures::Stream<Item = Result<QueryResponse, anyhow::Error>>
-                + Send
-                + Sync;
-            async fn handle_query(
-                &self,
-                query: QueryRequest,
-                metadata: tonic::metadata::MetadataMap,
-            ) -> Result<Self::QueryStream, anyhow::Error>;
-        }
-
-        #[tonic::async_trait]
-        impl<T: DoltServer> pictophone_server::Pictophone for T {
+        impl<T: super::dolt::Server> pictophone_server::Pictophone for T {
             async fn create_game(
                 &self,
                 request: tonic::Request<CreateGameRequest>,
             ) -> Result<tonic::Response<CreateGameResponse>, tonic::Status> {
+                use std::convert::TryFrom;
                 use std::convert::TryInto;
                 let metadata = request.metadata().to_owned();
-                self.handle_action(request.into_inner().into(), metadata)
-                    .await
-                    .and_then(|r| Ok(tonic::Response::new(r.try_into()?)))
-                    .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))
+
+                let versioned = super::versioned::ActionRequest::from(ActionRequest::from(
+                    request.into_inner(),
+                ));
+
+                self.handle_action(
+                    versioned
+                        .try_into()
+                        .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))?,
+                    metadata,
+                )
+                .await
+                .and_then(|r| {
+                    Ok(tonic::Response::new(
+                        ActionResponse::try_from(super::versioned::ActionResponse::try_from(r)?)?
+                            .try_into()?,
+                    ))
+                })
+                .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))
             }
 
             async fn delete_game(
                 &self,
                 request: tonic::Request<DeleteGameRequest>,
             ) -> Result<tonic::Response<DeleteGameResponse>, tonic::Status> {
+                use std::convert::TryFrom;
                 use std::convert::TryInto;
                 let metadata = request.metadata().to_owned();
-                self.handle_action(request.into_inner().into(), metadata)
-                    .await
-                    .and_then(|r| Ok(tonic::Response::new(r.try_into()?)))
-                    .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))
+
+                let versioned = super::versioned::ActionRequest::from(ActionRequest::from(
+                    request.into_inner(),
+                ));
+
+                self.handle_action(
+                    versioned
+                        .try_into()
+                        .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))?,
+                    metadata,
+                )
+                .await
+                .and_then(|r| {
+                    Ok(tonic::Response::new(
+                        ActionResponse::try_from(super::versioned::ActionResponse::try_from(r)?)?
+                            .try_into()?,
+                    ))
+                })
+                .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))
             }
         }
     }
@@ -248,49 +238,47 @@ pub mod pictophone {
         oneof_convert!(QueryResponse, method, GetGameResponse,);
 
         oneof_convert!(
-            Action,
+            ActionRequest,
             method,
             (super::v1_0::CreateGameRequest, CreateGameRequest),
             (super::v1_0::DeleteGameRequest, DeleteGameRequest),
         );
         oneof_convert!(
-            Response,
+            ActionResponse,
             method,
             (super::v1_0::CreateGameResponse, CreateGameResponse),
             (super::v1_0::DeleteGameResponse, DeleteGameResponse),
         );
 
         #[tonic::async_trait]
-        pub trait DoltServer: Send + Sync + 'static {
-            async fn handle_action(
-                &self,
-                action: Action,
-                metadata: tonic::metadata::MetadataMap,
-            ) -> Result<Response, anyhow::Error>;
-
-            type QueryStream: futures::Stream<Item = Result<QueryResponse, anyhow::Error>>
-                + Send
-                + Sync;
-            async fn handle_query(
-                &self,
-                query: QueryRequest,
-                metadata: tonic::metadata::MetadataMap,
-            ) -> Result<Self::QueryStream, anyhow::Error>;
-        }
-
-        #[tonic::async_trait]
-        impl<T: DoltServer> pictophone_server::Pictophone for T {
+        impl<T: super::dolt::Server> pictophone_server::Pictophone for T {
             async fn create_game(
                 &self,
                 request: tonic::Request<super::v1_0::CreateGameRequest>,
             ) -> Result<tonic::Response<super::v1_0::CreateGameResponse>, tonic::Status>
             {
+                use std::convert::TryFrom;
                 use std::convert::TryInto;
                 let metadata = request.metadata().to_owned();
-                self.handle_action(request.into_inner().into(), metadata)
-                    .await
-                    .and_then(|r| Ok(tonic::Response::new(r.try_into()?)))
-                    .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))
+
+                let versioned = super::versioned::ActionRequest::from(ActionRequest::from(
+                    request.into_inner(),
+                ));
+
+                self.handle_action(
+                    versioned
+                        .try_into()
+                        .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))?,
+                    metadata,
+                )
+                .await
+                .and_then(|r| {
+                    Ok(tonic::Response::new(
+                        ActionResponse::try_from(super::versioned::ActionResponse::try_from(r)?)?
+                            .try_into()?,
+                    ))
+                })
+                .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))
             }
 
             async fn delete_game(
@@ -298,12 +286,28 @@ pub mod pictophone {
                 request: tonic::Request<super::v1_0::DeleteGameRequest>,
             ) -> Result<tonic::Response<super::v1_0::DeleteGameResponse>, tonic::Status>
             {
+                use std::convert::TryFrom;
                 use std::convert::TryInto;
                 let metadata = request.metadata().to_owned();
-                self.handle_action(request.into_inner().into(), metadata)
-                    .await
-                    .and_then(|r| Ok(tonic::Response::new(r.try_into()?)))
-                    .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))
+
+                let versioned = super::versioned::ActionRequest::from(ActionRequest::from(
+                    request.into_inner(),
+                ));
+
+                self.handle_action(
+                    versioned
+                        .try_into()
+                        .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))?,
+                    metadata,
+                )
+                .await
+                .and_then(|r| {
+                    Ok(tonic::Response::new(
+                        ActionResponse::try_from(super::versioned::ActionResponse::try_from(r)?)?
+                            .try_into()?,
+                    ))
+                })
+                .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))
             }
 
             type GetGameStream = std::pin::Pin<
@@ -313,7 +317,6 @@ pub mod pictophone {
                         + Sync,
                 >,
             >;
-            // tokio::sync::mpsc::Receiver<Result<GetGameResponse, tonic::Status>>;
 
             async fn get_game(
                 &self,
@@ -321,20 +324,33 @@ pub mod pictophone {
             ) -> Result<tonic::Response<Self::GetGameStream>, tonic::Status> {
                 use futures::StreamExt;
                 use futures::TryStreamExt;
+                use std::convert::TryFrom;
                 use std::convert::TryInto;
                 let metadata = request.metadata().to_owned();
 
+                let versioned =
+                    super::versioned::QueryRequest::from(QueryRequest::from(request.into_inner()));
+
                 let stream = self
-                    .handle_query(request.into_inner().into(), metadata)
+                    .handle_query(
+                        versioned.try_into().map_err(|e| {
+                            tonic::Status::internal(format!("Internal error: {:#}", e))
+                        })?,
+                        metadata,
+                    )
                     .await
-                    .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))?;
-                let x = stream
+                    .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))?
                     .map(|response| -> Result<GetGameResponse, anyhow::Error> {
-                        Ok(response?.try_into()?)
+                        Ok(
+                            QueryResponse::try_from(super::versioned::QueryResponse::try_from(
+                                response?,
+                            )?)?
+                            .try_into()?,
+                        )
                     })
                     .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)));
 
-                Ok(tonic::Response::new(Box::pin(x)))
+                Ok(tonic::Response::new(Box::pin(stream)))
             }
         }
     }
@@ -353,15 +369,3 @@ pub mod google {
         tonic::include_proto!("google.r#type");
     }
 }
-
-// pub mod pictophone {
-//     pub mod v1_0 {
-//         include!(concat!(env!("OUT_DIR"), "/pictophone.v1_0.rs"));
-//     }
-//     pub mod logic {
-//         include!(concat!(env!("OUT_DIR"), "/pictophone.logic.rs"));
-//     }
-//     // pub mod v1_1 {
-//     //     include!(concat!(env!("OUT_DIR"), "/pictophone.v1_1.rs"));
-//     // }
-// }

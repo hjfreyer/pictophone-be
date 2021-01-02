@@ -1,7 +1,8 @@
 use {
-    proto::logic as ptl,
+    proto::dolt as dpb,
     proto::v1_0 as api,
     proto::v1_1 as pt1,
+    proto::versioned as vpb,
     serde::{Deserialize, Serialize},
     std::collections::BTreeMap,
 };
@@ -90,15 +91,18 @@ fn delete_game(
     Ok(state)
 }
 
-fn evolve1_0(state: Option<State>, action: &api::Action) -> (Option<State>, api::Response) {
+fn evolve1_0(
+    state: Option<State>,
+    action: &api::ActionRequest,
+) -> (Option<State>, api::ActionResponse) {
     match &action.method {
-        Some(api::action::Method::CreateGameRequest(request)) => {
+        Some(api::action_request::Method::CreateGameRequest(request)) => {
             let (state, response) = create_game(state, request)
                 .map(|s| (Some(s), api::CreateGameResponse { error: None }))
                 .unwrap_or_else(|r| (None, r));
             (state, response.into())
         }
-        Some(api::action::Method::DeleteGameRequest(request)) => {
+        Some(api::action_request::Method::DeleteGameRequest(request)) => {
             let (state, response) = delete_game(state, request)
                 .map(|s| (Some(s), api::DeleteGameResponse { error: None }))
                 .unwrap_or_else(|r| (None, r));
@@ -108,15 +112,18 @@ fn evolve1_0(state: Option<State>, action: &api::Action) -> (Option<State>, api:
     }
 }
 
-fn evolve1_1(state: Option<State>, action: &pt1::Action) -> (Option<State>, pt1::Response) {
+fn evolve1_1(
+    state: Option<State>,
+    action: &pt1::ActionRequest,
+) -> (Option<State>, pt1::ActionResponse) {
     match &action.method {
-        Some(pt1::action::Method::CreateGameRequest(request)) => {
+        Some(pt1::action_request::Method::CreateGameRequest(request)) => {
             let (state, response) = create_game(state, request)
                 .map(|s| (Some(s), api::CreateGameResponse { error: None }))
                 .unwrap_or_else(|r| (None, r));
             (state, response.into())
         }
-        Some(pt1::action::Method::DeleteGameRequest(request)) => {
+        Some(pt1::action_request::Method::DeleteGameRequest(request)) => {
             let (state, response) = delete_game(state, request)
                 .map(|s| (Some(s), api::DeleteGameResponse { error: None }))
                 .unwrap_or_else(|r| (None, r));
@@ -128,24 +135,24 @@ fn evolve1_1(state: Option<State>, action: &pt1::Action) -> (Option<State>, pt1:
 
 fn evolve(
     state: Option<State>,
-    action: &ptl::VersionedAction,
-) -> (Option<State>, ptl::VersionedResponse) {
+    action: &vpb::ActionRequest,
+) -> (Option<State>, vpb::ActionResponse) {
     match &action.version {
-        Some(ptl::versioned_action::Version::V1p0(action)) => {
+        Some(vpb::action_request::Version::V1p0(action)) => {
             let (state, resp) = evolve1_0(state, action);
             (
                 state,
-                ptl::VersionedResponse {
-                    version: Some(ptl::versioned_response::Version::V1p0(resp)),
+                vpb::ActionResponse {
+                    version: Some(vpb::action_response::Version::V1p0(resp)),
                 },
             )
         }
-        Some(ptl::versioned_action::Version::V1p1(action)) => {
+        Some(vpb::action_request::Version::V1p1(action)) => {
             let (state, resp) = evolve1_1(state, action);
             (
                 state,
-                ptl::VersionedResponse {
-                    version: Some(ptl::versioned_response::Version::V1p1(resp)),
+                vpb::ActionResponse {
+                    version: Some(vpb::action_response::Version::V1p1(resp)),
                 },
             )
         }
@@ -170,11 +177,11 @@ fn get_game(state: Option<State>, request: &pt1::GetGameRequest) -> pt1::GetGame
     }
 }
 
-fn query(state: Option<State>, query: &ptl::VersionedQueryRequest) -> ptl::VersionedQueryResponse {
+fn query(state: Option<State>, query: &vpb::QueryRequest) -> vpb::QueryResponse {
     match &query.version {
-        Some(ptl::versioned_query_request::Version::V1p0(_)) => panic!("unset method"),
+        Some(vpb::query_request::Version::V1p0(_)) => panic!("unset method"),
 
-        Some(ptl::versioned_query_request::Version::V1p1(request)) => match &request.method {
+        Some(vpb::query_request::Version::V1p1(request)) => match &request.method {
             Some(pt1::query_request::Method::GetGameRequest(r)) => {
                 let r = get_game(state, &r);
                 pt1::QueryResponse::from(r).into()
@@ -199,21 +206,25 @@ fn main() -> Result<(), anyhow::Error> {
     use std::io::{Read, Write};
     let _ = std::io::stdin().read_to_end(&mut buffer)?;
 
-    let request = ptl::Request::decode(buffer.as_slice())?;
+    let request = dpb::Request::decode(buffer.as_slice())?;
 
     match request.method {
-        Some(ptl::request::Method::EvolveRequest(request)) => {
+        Some(dpb::request::Method::ActionRequest(request)) => {
             let state = parse_state(&request.state)?;
-            let (state, response) = evolve(state, &request.action.unwrap());
+            let action = vpb::ActionRequest::decode(request.action.as_slice())?;
+            let (state, action_response) = evolve(state, &action);
+
+            let mut action_response_buf = vec![];
+            let () = action_response.encode(&mut action_response_buf)?;
 
             let mut resp_buf = vec![];
-            let () = ptl::Response {
-                method: Some(ptl::response::Method::EvolveResponse(ptl::EvolveResponse {
+            let () = dpb::Response {
+                method: Some(dpb::response::Method::ActionResponse(dpb::ActionResponse {
                     state: state
                         .map(|s| serde_json::to_vec(&s))
                         .transpose()?
                         .unwrap_or_else(|| vec![]),
-                    response: Some(response),
+                    response: action_response_buf,
                 })),
             }
             .encode(&mut resp_buf)?;
@@ -221,14 +232,19 @@ fn main() -> Result<(), anyhow::Error> {
             let _ = std::io::stdout().lock().write(&resp_buf)?;
             Ok(())
         }
-        Some(ptl::request::Method::QueryRequest(request)) => {
+        Some(dpb::request::Method::QueryRequest(request)) => {
             let state = parse_state(&request.state)?;
-            let response = query(state, &request.query.unwrap());
+            let query_msg = vpb::QueryRequest::decode(request.query.as_slice())?;
+            let versioned_query_response = query(state, &query_msg);
+
+            let mut versioned_query_response_bytes = vec![];
+            let () = versioned_query_response.encode(&mut versioned_query_response_bytes)?;
 
             let mut resp_buf = vec![];
-            let () = ptl::Response {
-                method: Some(ptl::response::Method::VersionedQueryResponse(response)),
-            }
+
+            let () = dpb::Response::from(dpb::QueryResponse {
+                response: versioned_query_response_bytes,
+            })
             .encode(&mut resp_buf)?;
 
             let _ = std::io::stdout().lock().write(&resp_buf)?;

@@ -1,6 +1,6 @@
-use crate::aovec;
 use crate::protobuf::google::firestore::v1 as fs;
-use crate::protobuf::pictophone::logic as ptl;
+use crate::{aovec, protobuf::pictophone::dolt::VersionedActionRequestBytes};
+// use crate::protobuf::pictophone::logic as ptl;
 use crate::util;
 use anyhow::bail;
 use fs::firestore_client::FirestoreClient;
@@ -11,9 +11,9 @@ use std::pin::Pin;
 
 #[tonic::async_trait]
 pub trait Datastore {
-    async fn push_action(&self, action: ptl::VersionedAction) -> anyhow::Result<usize>;
+    async fn push_action(&self, action: VersionedActionRequestBytes) -> anyhow::Result<usize>;
 
-    type LogStream: Stream<Item = anyhow::Result<ptl::VersionedAction>> + Send + Sync;
+    type LogStream: Stream<Item = anyhow::Result<VersionedActionRequestBytes>> + Send + Sync;
     async fn watch_log(&self) -> anyhow::Result<Self::LogStream>;
 }
 
@@ -24,17 +24,17 @@ pub fn local() -> Local {
 }
 
 pub struct Local {
-    actions: aovec::AOVec<ptl::VersionedAction>,
+    actions: aovec::AOVec<VersionedActionRequestBytes>,
 }
 
 #[tonic::async_trait]
 impl Datastore for Local {
-    async fn push_action(&self, action: ptl::VersionedAction) -> anyhow::Result<usize> {
+    async fn push_action(&self, action: VersionedActionRequestBytes) -> anyhow::Result<usize> {
         Ok(self.actions.push(action).await)
     }
 
     type LogStream =
-        Pin<Box<dyn Stream<Item = anyhow::Result<ptl::VersionedAction>> + Send + Sync>>;
+        Pin<Box<dyn Stream<Item = anyhow::Result<VersionedActionRequestBytes>> + Send + Sync>>;
 
     async fn watch_log(&self) -> anyhow::Result<Self::LogStream> {
         todo!()
@@ -63,7 +63,7 @@ impl Firestore {
     async fn fetch_log(
         &self,
         consistency_selector: Option<fs::get_document_request::ConsistencySelector>,
-    ) -> anyhow::Result<Vec<ptl::VersionedAction>> {
+    ) -> anyhow::Result<Vec<VersionedActionRequestBytes>> {
         let req = fs::GetDocumentRequest {
             name: self.doc_name(),
             mask: None,
@@ -80,7 +80,9 @@ impl Firestore {
 
     async fn read_modify_write_log<R, F>(&self, mut f: F) -> anyhow::Result<R>
     where
-        F: FnMut(Vec<ptl::VersionedAction>) -> anyhow::Result<(R, Vec<ptl::VersionedAction>)>,
+        F: FnMut(
+            Vec<VersionedActionRequestBytes>,
+        ) -> anyhow::Result<(R, Vec<VersionedActionRequestBytes>)>,
     {
         let mut client = self.client.to_owned();
         loop {
@@ -124,7 +126,7 @@ impl Firestore {
 
     async fn watch_log_impl(
         &self,
-    ) -> anyhow::Result<impl Stream<Item = anyhow::Result<ptl::VersionedAction>>> {
+    ) -> anyhow::Result<impl Stream<Item = anyhow::Result<VersionedActionRequestBytes>>> {
         use futures::StreamExt;
         use futures::TryStreamExt;
 
@@ -167,11 +169,11 @@ impl Firestore {
             });
 
         let mut emitted_through = 0;
-        Ok(
-            log_updates.flat_map(move |actions: anyhow::Result<Vec<ptl::VersionedAction>>| {
+        Ok(log_updates.flat_map(
+            move |actions: anyhow::Result<Vec<VersionedActionRequestBytes>>| {
                 futures::stream::iter(match actions {
                     Ok(actions) => {
-                        let new_actions: Vec<anyhow::Result<ptl::VersionedAction>> = actions
+                        let new_actions: Vec<anyhow::Result<VersionedActionRequestBytes>> = actions
                             .as_slice()[emitted_through..]
                             .iter()
                             .cloned()
@@ -182,19 +184,18 @@ impl Firestore {
                     }
                     Err(e) => vec![Err(e)],
                 })
-            }),
-        )
+            },
+        ))
     }
 
-    fn log_to_doc(&self, actions: &[ptl::VersionedAction]) -> anyhow::Result<fs::Document> {
+    fn log_to_doc(&self, actions: &[VersionedActionRequestBytes]) -> anyhow::Result<fs::Document> {
         let encoded_actions = actions
             .iter()
             .map(|action| -> anyhow::Result<fs::Value> {
-                use prost::Message;
-                let mut bytes = vec![];
-                let () = action.encode(&mut bytes)?;
                 Ok(fs::Value {
-                    value_type: Some(fs::value::ValueType::BytesValue(bytes)),
+                    value_type: Some(fs::value::ValueType::BytesValue(
+                        action.clone().into_bytes(),
+                    )),
                 })
             })
             .collect::<anyhow::Result<Vec<fs::Value>>>()?;
@@ -212,7 +213,7 @@ impl Firestore {
     }
 }
 
-fn doc_to_log(doc: &fs::Document) -> anyhow::Result<Vec<ptl::VersionedAction>> {
+fn doc_to_log(doc: &fs::Document) -> anyhow::Result<Vec<VersionedActionRequestBytes>> {
     let actions = match doc.fields.get("actions") {
         Some(fs::Value {
             value_type: Some(fs::value::ValueType::ArrayValue(actions)),
@@ -223,20 +224,19 @@ fn doc_to_log(doc: &fs::Document) -> anyhow::Result<Vec<ptl::VersionedAction>> {
 
     actions
         .iter()
-        .map(|value| -> anyhow::Result<ptl::VersionedAction> {
-            use prost::Message;
+        .map(|value| -> anyhow::Result<VersionedActionRequestBytes> {
             let bytes = match &value.value_type {
                 Some(fs::value::ValueType::BytesValue(b)) => b,
                 Some(_) => bail!("non-bytes value"),
                 None => bail!("unset value in array"),
             };
-            Ok(ptl::VersionedAction::decode(bytes.as_slice())?)
+            Ok(VersionedActionRequestBytes::new(bytes.to_owned()))
         })
         .collect()
 }
 #[tonic::async_trait]
 impl Datastore for Firestore {
-    async fn push_action(&self, action: ptl::VersionedAction) -> anyhow::Result<usize> {
+    async fn push_action(&self, action: VersionedActionRequestBytes) -> anyhow::Result<usize> {
         self.read_modify_write_log(|mut log| {
             log.push(action.clone());
             Ok((log.len(), log))
@@ -245,7 +245,7 @@ impl Datastore for Firestore {
     }
 
     type LogStream =
-        Pin<Box<dyn Stream<Item = anyhow::Result<ptl::VersionedAction>> + Send + Sync>>;
+        Pin<Box<dyn Stream<Item = anyhow::Result<VersionedActionRequestBytes>> + Send + Sync>>;
 
     async fn watch_log(&self) -> anyhow::Result<Self::LogStream> {
         Ok(Box::pin(self.watch_log_impl().await?))

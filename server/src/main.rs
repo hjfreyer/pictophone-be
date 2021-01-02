@@ -4,9 +4,10 @@ use datastore::Datastore;
 use fs::firestore_client::FirestoreClient;
 use futures::{executor::block_on, Stream};
 use log::{info, trace, warn};
-use protobuf::pictophone::logic as ptl;
+use protobuf::pictophone::dolt as dpb;
+use protobuf::pictophone::versioned as vpb;
 use protobuf::pictophone::{v1_0, v1_1};
-use std::{convert::TryFrom, pin::Pin, sync::Arc};
+use std::{pin::Pin, sync::Arc};
 use tonic::{
     metadata::MetadataValue,
     transport::{ClientTlsConfig, Endpoint},
@@ -40,52 +41,102 @@ fn get_binary_version(metadata: &tonic::metadata::MetadataMap) -> runner::Binary
         .unwrap_or_default()
 }
 
+#[derive(Debug, Clone)]
+pub struct StateBytes(Vec<u8>);
+
+impl StateBytes {
+    pub fn new(bytes: Vec<u8>) -> Self {
+        Self(bytes)
+    }
+
+    pub fn into_bytes(self) -> Vec<u8> {
+        self.0
+    }
+}
+
+impl AsRef<[u8]> for StateBytes {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}
+
 impl<DS: Datastore + Send + Sync> Server<DS> {
     async fn state_stream(
         self: std::sync::Arc<Self>,
         version: &runner::BinaryVersion,
-    ) -> anyhow::Result<impl Stream<Item = anyhow::Result<(Vec<u8>, Option<ptl::VersionedResponse>)>>>
-    {
+    ) -> anyhow::Result<
+        impl Stream<Item = anyhow::Result<(StateBytes, dpb::VersionedActionResponseBytes)>>,
+    > {
         use futures::StreamExt;
+        use prost::Message;
         let version = version.to_owned();
-        Ok(self
-            .datastore
-            .watch_log()
-            .await?
-            .scan(vec![], move |state, action| {
-                futures::future::ready(Some((|| {
-                    let action = action?;
-                    let request = ptl::Request::from(ptl::EvolveRequest {
-                        state: state.clone(),
-                        action: Some(action),
-                    });
+        Ok(self.datastore.watch_log().await?.scan(
+            StateBytes::new(vec![]),
+            move |state_bytes, action_bytes| {
+                futures::future::ready({
+                    let result = (|| {
+                        use std::convert::TryFrom;
+                        use std::convert::TryInto;
 
-                    let response = self.runner.run(&version, request)?;
-                    let response = ptl::EvolveResponse::try_from(response)?;
-                    if 0 < response.state.len() {
-                        *state = response.state;
-                        Ok((state.clone(), response.response))
-                    } else {
-                        Ok((state.clone(), response.response))
-                    }
-                })()))
-            }))
+                        let action_bytes = action_bytes?;
+                        let request = dpb::Request::from(dpb::ActionRequest {
+                            state: state_bytes.clone().into_bytes(),
+                            action: action_bytes.into_bytes(),
+                        });
+
+                        let response = self.runner.run(&version, request)?;
+                        let response = dpb::ActionResponse::try_from(response)?;
+
+                        let new_state_bytes = StateBytes::new(response.state);
+                        if !new_state_bytes.as_ref().is_empty() {
+                            *state_bytes = new_state_bytes
+                        };
+                        let response_bytes =
+                            dpb::VersionedActionResponseBytes::new(response.response);
+
+                        Ok((state_bytes.clone(), response_bytes))
+                    })();
+                    Some(result)
+                })
+            },
+        ))
+
+        // futures::future::ready(Some((|| {
+        //     use std::convert::TryInto;
+        //     let action = action?;
+        //     // let mut action_buffer = vec![];
+        //     // let () = action.encode(&mut action_buffer)?;
+        //     let bytes : dpb::VersionedActionRequestBytes = action.try_into()?;
+        //     let request = dpb::Request::from(dpb::ActionRequest {
+        //         state: state.clone(),
+        //         action: bytes.into_bytes(),
+        //     });
+
+        //     let response = self.runner.run(&version, request)?;
+        //     let response = dpb::ActionResponse::try_from(response)?;
+        //     if 0 < response.state.len() {
+        //         *state = response.state;
+        //         Ok((state.clone(), response.response))
+        //     } else {
+        //         Ok((state.clone(), response.response))
+        //     }
+        // })()))
     }
 }
 
 #[tonic::async_trait]
-impl<DS: Datastore + Send + Sync> ptl::DoltServer for std::sync::Arc<Server<DS>> {
+impl<DS: Datastore + Send + Sync> dpb::Server for std::sync::Arc<Server<DS>> {
     async fn handle_action(
         &self,
-        action: ptl::VersionedAction,
+        action: dpb::VersionedActionRequestBytes,
         metadata: tonic::metadata::MetadataMap,
-    ) -> Result<ptl::VersionedResponse, anyhow::Error> {
+    ) -> Result<dpb::VersionedActionResponseBytes, anyhow::Error> {
         use futures::StreamExt;
         trace!("ACTION: {:?}", action);
         let action_count = self.datastore.push_action(action).await?;
 
         let version = get_binary_version(&metadata);
-        let mut states: Vec<(Vec<u8>, Option<ptl::VersionedResponse>)> = self
+        let mut states: Vec<(StateBytes, dpb::VersionedActionResponseBytes)> = self
             .clone()
             .state_stream(&version)
             .await?
@@ -100,23 +151,28 @@ impl<DS: Datastore + Send + Sync> ptl::DoltServer for std::sync::Arc<Server<DS>>
             bail!("state stream ended early")
         };
 
-        if 0 < last_state.len() {
-            let state: serde_json::Value = serde_json::from_slice(&last_state)?;
+        if !last_state.as_ref().is_empty() {
+            let state: serde_json::Value = serde_json::from_slice(last_state.as_ref())?;
             trace!("POST-STATE: {:?}", state);
         }
 
-        last_resp.ok_or_else(|| anyhow::anyhow!("last action didn't return a response"))
+        Ok(last_resp)
     }
 
     type QueryStream = Pin<
-        Box<dyn Stream<Item = Result<ptl::VersionedQueryResponse, anyhow::Error>> + Send + Sync>,
+        Box<
+            dyn Stream<Item = Result<dpb::VersionedQueryResponseBytes, anyhow::Error>>
+                + Send
+                + Sync,
+        >,
     >;
     async fn handle_query(
         &self,
-        query: ptl::VersionedQueryRequest,
+        query: dpb::VersionedQueryRequestBytes,
         metadata: tonic::metadata::MetadataMap,
     ) -> Result<Self::QueryStream, anyhow::Error> {
         use futures::StreamExt;
+        use std::convert::TryFrom;
         let version = get_binary_version(&metadata);
         let this = self.clone();
 
@@ -134,12 +190,13 @@ impl<DS: Datastore + Send + Sync> ptl::DoltServer for std::sync::Arc<Server<DS>>
 
                 let response = this.runner.run(
                     &version,
-                    ptl::Request::from(ptl::QueryRequest {
-                        state,
-                        query: Some(query.to_owned()),
+                    dpb::Request::from(dpb::QueryRequest {
+                        state: state.into_bytes(),
+                        query: query.to_owned().into_bytes(),
                     }),
                 )?;
-                Ok(ptl::VersionedQueryResponse::try_from(response)?)
+                let response = dpb::QueryResponse::try_from(response)?;
+                Ok(dpb::VersionedQueryResponseBytes::new(response.response))
             });
 
         Ok(Box::pin(result))
