@@ -17,7 +17,7 @@ impl Config {
     pub fn new() -> anyhow::Result<Self> {
         let mut res = config::Config::new();
         res.merge(config::File::with_name("/data/config.toml").required(false))?
-            .merge(config::File::with_name("config/local.toml").required(false))?
+            .merge(config::File::with_name("config/server/local.toml").required(false))?
             .merge(config::Environment::with_prefix("server"))?;
 
         Ok(res.try_into()?)
