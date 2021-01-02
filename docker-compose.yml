@@ -2,14 +2,18 @@ version: "3.9"  # optional since v1.27.0
 services:
   grpc:
     image: gcr.io/pictophone-test/pictophone-be
-    build: .
+    build: 
+      context: .
+      dockerfile: ./config/server/Dockerfile
     environment:
       - RUST_LOG=info,server=trace
     ports:
       - "9090:8080"
-  envoy:
-    image: envoyproxy/envoy:v1.16.1
+  grpcwebproxy:
+    image: gcr.io/pictophone-test/grpcwebproxy
+    build: ./config/grpcwebproxy/
+    command:
+      - --backend_addr=grpc:8080
+      - --backend_tls=false
     ports:
       - "8080:8080"
-    volumes:
-      - ./envoy.yaml:/etc/envoy/envoy.yaml:ro 

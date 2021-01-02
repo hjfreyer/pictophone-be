@@ -33,7 +33,8 @@ ENV RUST_LOG=info,server=trace
 WORKDIR /usr/src/app
 
 COPY --from=builder /usr/src/server/target/release/server /usr/local/bin/
+
 COPY binaries/ /data/wasm/
-COPY config/prod.toml /data/config.toml
+COPY config/server/prod.toml /data/config.toml
 
 CMD ["/usr/local/bin/server"]
