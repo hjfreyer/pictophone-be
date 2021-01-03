@@ -1851,6 +1851,7 @@ dependencies = [
  "scopeguard",
  "serde 1.0.118",
  "serde_json",
+ "sync_wrapper",
  "thiserror",
  "tokio",
  "tonic",
@@ -1996,6 +1997,14 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-xid",
+]
+
+[[package]]
+name = "sync_wrapper"
+version = "0.1.0"
+source = "git+https://github.com/akiradeveloper/sync_wrapper.git?branch=default-impl#44e3b53bf2c300b3b3f8f94e0db325ce92990fc2"
+dependencies = [
+ "futures-core",
 ]
 
 [[package]]

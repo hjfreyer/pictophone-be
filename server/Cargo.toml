@@ -30,6 +30,7 @@ itertools = "0.10.0"
 rustls = "0.19.0"
 base64 = "0.13.0"
 ureq = "1.5.4"
+sync_wrapper = { git = "https://github.com/akiradeveloper/sync_wrapper.git", branch = "default-impl" }
 
 [build-dependencies]
 tonic-build = "0.2"

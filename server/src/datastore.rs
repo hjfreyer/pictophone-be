@@ -13,7 +13,7 @@ use std::pin::Pin;
 pub trait Datastore {
     async fn push_action(&self, action: VersionedActionRequestBytes) -> anyhow::Result<usize>;
 
-    type LogStream: Stream<Item = anyhow::Result<VersionedActionRequestBytes>> + Send + Sync;
+    type LogStream: Stream<Item = anyhow::Result<VersionedActionRequestBytes>> + Send + Sync + Unpin;
     async fn watch_log(&self) -> anyhow::Result<Self::LogStream>;
 }
 
