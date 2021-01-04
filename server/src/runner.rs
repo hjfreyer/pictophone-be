@@ -16,7 +16,6 @@ use {
     wasmtime_wasi::{Wasi, WasiCtxBuilder},
 };
 
-
 pub struct Runner<P> {
     provider: P,
     engine: Engine,

@@ -1,9 +1,9 @@
-use crate::{protobuf::pictophone::dolt::VersionedActionRequestBytes, util::aovec};
-use googapis::google::firestore::v1 as fs;
 use crate::util;
+use crate::{protobuf::pictophone::dolt::VersionedActionRequestBytes, util::aovec};
 use anyhow::bail;
 use fs::firestore_client::FirestoreClient;
 use futures::Stream;
+use googapis::google::firestore::v1 as fs;
 use log::{trace, warn};
 use maplit::hashmap;
 use std::pin::Pin;
