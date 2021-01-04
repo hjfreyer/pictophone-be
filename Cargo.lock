@@ -1812,6 +1812,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_bytes"
+version = "0.11.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16ae07dd2f88a366f15bd0632ba725227018c69a1c8550a927324f8eb8368bb9"
+dependencies = [
+ "serde 1.0.118",
+]
+
+[[package]]
 name = "serde_derive"
 version = "1.0.118"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1862,6 +1871,7 @@ dependencies = [
  "config",
  "env_logger 0.8.2",
  "futures",
+ "googapis",
  "itertools 0.10.0",
  "log",
  "maplit",
@@ -1871,6 +1881,8 @@ dependencies = [
  "rustls 0.19.0",
  "scopeguard",
  "serde 1.0.118",
+ "serde_bytes",
+ "serde_firestore",
  "serde_json",
  "sync_wrapper",
  "thiserror",

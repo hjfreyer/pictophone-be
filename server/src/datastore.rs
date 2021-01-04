@@ -1,6 +1,5 @@
-use crate::protobuf::google::firestore::v1 as fs;
-use crate::{util::aovec, protobuf::pictophone::dolt::VersionedActionRequestBytes};
-// use crate::protobuf::pictophone::logic as ptl;
+use crate::{protobuf::pictophone::dolt::VersionedActionRequestBytes, util::aovec};
+use googapis::google::firestore::v1 as fs;
 use crate::util;
 use anyhow::bail;
 use fs::firestore_client::FirestoreClient;
@@ -54,6 +53,11 @@ pub fn firestore(
 pub struct Firestore {
     client: FirestoreClient<tonic::transport::Channel>,
     database_name: String,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct Root {
+    actions: Vec<serde_bytes::ByteBuf>,
 }
 
 impl Firestore {
@@ -214,25 +218,12 @@ impl Firestore {
 }
 
 fn doc_to_log(doc: &fs::Document) -> anyhow::Result<Vec<VersionedActionRequestBytes>> {
-    let actions = match doc.fields.get("actions") {
-        Some(fs::Value {
-            value_type: Some(fs::value::ValueType::ArrayValue(actions)),
-        }) => &actions.values,
-        Some(_) => bail!("malformed actions field"),
-        None => return Ok(vec![]),
-    };
-
-    actions
-        .iter()
-        .map(|value| -> anyhow::Result<VersionedActionRequestBytes> {
-            let bytes = match &value.value_type {
-                Some(fs::value::ValueType::BytesValue(b)) => b,
-                Some(_) => bail!("non-bytes value"),
-                None => bail!("unset value in array"),
-            };
-            Ok(VersionedActionRequestBytes::new(bytes.to_owned()))
-        })
-        .collect()
+    let actions: Root = serde_firestore::from_doc(doc)?;
+    Ok(actions
+        .actions
+        .into_iter()
+        .map(|b| VersionedActionRequestBytes::new(b.into_vec()))
+        .collect())
 }
 #[tonic::async_trait]
 impl Datastore for Firestore {

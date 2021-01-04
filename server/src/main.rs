@@ -1,8 +1,8 @@
-use crate::protobuf::google::firestore::v1 as fs;
 use anyhow::{bail, Context};
 use datastore::Datastore;
 use fs::firestore_client::FirestoreClient;
 use futures::{executor::block_on, Stream};
+use googapis::google::firestore::v1 as fs;
 use log::{error, info, trace, warn};
 use protobuf::pictophone::dolt as dpb;
 use protobuf::pictophone::versioned as vpb;
@@ -110,13 +110,17 @@ where
                     }
                     None => return None,
                 };
-                Some(match Self::fold_state(&this.runner, &version, &mut state_bytes, action_bytes).await {
-                    Ok((state_bytes, response_bytes)) => (
-                        Ok((state_bytes.clone(), response_bytes)),
-                        (this, version, state_bytes, log_stream_tail),
-                    ),
-                    Err(e) => (Err(e), (this, version, state_bytes, log_stream_tail)),
-                })
+                Some(
+                    match Self::fold_state(&this.runner, &version, &mut state_bytes, action_bytes)
+                        .await
+                    {
+                        Ok((state_bytes, response_bytes)) => (
+                            Ok((state_bytes.clone(), response_bytes)),
+                            (this, version, state_bytes, log_stream_tail),
+                        ),
+                        Err(e) => (Err(e), (this, version, state_bytes, log_stream_tail)),
+                    },
+                )
             },
         ))
     }
