@@ -14,7 +14,6 @@ use tonic::{
     Request,
 };
 
-mod aovec;
 mod auth;
 mod binaries;
 mod config;

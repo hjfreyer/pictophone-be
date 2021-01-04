@@ -1,5 +1,5 @@
 use crate::protobuf::google::firestore::v1 as fs;
-use crate::{aovec, protobuf::pictophone::dolt::VersionedActionRequestBytes};
+use crate::{util::aovec, protobuf::pictophone::dolt::VersionedActionRequestBytes};
 // use crate::protobuf::pictophone::logic as ptl;
 use crate::util;
 use anyhow::bail;

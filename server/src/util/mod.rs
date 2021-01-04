@@ -3,6 +3,8 @@ use std::pin::Pin;
 use futures::Stream;
 use log::trace;
 
+pub mod aovec;
+
 pub struct TracedValue<T>(T, String);
 
 impl<T> TracedValue<T> {
