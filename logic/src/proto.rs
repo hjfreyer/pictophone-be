@@ -32,43 +32,41 @@ macro_rules! oneof_convert {
     };
 }
 
-pub mod v1_0 {
-    include!(concat!(env!("OUT_DIR"), "/pictophone.v1_0.rs"));
+pub mod v0_1 {
+    include!(concat!(env!("OUT_DIR"), "/pictophone.v0_1.rs"));
 
-    oneof_convert!(
-        CreateGameResponse,
-        error,
-        GameAlreadyExistsError,
-        ShortCodeInUseError,
-    );
-    oneof_convert!(DeleteGameResponse, error, GameNotFoundError,);
-
-    oneof_convert!(ActionRequest, method, CreateGameRequest, DeleteGameRequest,);
-    oneof_convert!(
-        ActionResponse,
-        method,
-        CreateGameResponse,
-        DeleteGameResponse,
-    );
-}
-
-pub mod v1_1 {
-    include!(concat!(env!("OUT_DIR"), "/pictophone.v1_1.rs"));
+    oneof_convert!(QueryRequest, method, GetGameRequest,);
+    oneof_convert!(QueryResponse, method, GetGameResponse,);
 
     oneof_convert!(
         ActionRequest,
         method,
-        (super::v1_0::CreateGameRequest, CreateGameRequest),
-        (super::v1_0::DeleteGameRequest, DeleteGameRequest),
+        JoinGameRequest,
+        StartGameRequest,
+        MakeMoveRequest,
     );
     oneof_convert!(
         ActionResponse,
         method,
-        (super::v1_0::CreateGameResponse, CreateGameResponse),
-        (super::v1_0::DeleteGameResponse, DeleteGameResponse),
+        JoinGameResponse,
+        StartGameResponse,
+        MakeMoveResponse,
     );
 
-    oneof_convert!(QueryResponse, method, GetGameResponse,);
+    oneof_convert!(
+        JoinGameResponse,
+        error,
+        GameAlreadyStartedError,
+        UnknownError,
+    );
+
+    oneof_convert!(
+        MakeMoveResponse,
+        error,
+        UnknownError,
+        NotYourTurnError,
+        IncorrectSubmissionKindError,
+    );
 }
 
 pub mod dolt {
@@ -81,31 +79,30 @@ pub mod dolt {
 pub mod versioned {
     include!(concat!(env!("OUT_DIR"), "/pictophone.versioned.rs"));
 
-    oneof_convert!(
-        ActionRequest,
-        version,
-        (super::v1_0::ActionRequest, V1p0),
-        (super::v1_1::ActionRequest, V1p1),
-    );
+    macro_rules! version {
+        ($version_mod:ident, $version_enum:ident) => {
+            oneof_convert!(
+                ActionRequest,
+                version,
+                (super::$version_mod::ActionRequest, $version_enum),
+            );
+            oneof_convert!(
+                ActionResponse,
+                version,
+                (super::$version_mod::ActionResponse, $version_enum),
+            );
+            oneof_convert!(
+                QueryRequest,
+                version,
+                (super::$version_mod::QueryRequest, $version_enum),
+            );
+            oneof_convert!(
+                QueryResponse,
+                version,
+                (super::$version_mod::QueryResponse, $version_enum),
+            );
+        };
+    }
 
-    oneof_convert!(
-        ActionResponse,
-        version,
-        (super::v1_0::ActionResponse, V1p0),
-        (super::v1_1::ActionResponse, V1p1),
-    );
-
-    oneof_convert!(
-        QueryRequest,
-        version,
-        (super::v1_0::QueryRequest, V1p0),
-        (super::v1_1::QueryRequest, V1p1),
-    );
-
-    oneof_convert!(
-        QueryResponse,
-        version,
-        (super::v1_0::QueryResponse, V1p0),
-        (super::v1_1::QueryResponse, V1p1),
-    );
+    version!(v0_1, V0p1);
 }

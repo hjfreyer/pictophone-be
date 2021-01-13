@@ -118,8 +118,7 @@ pub fn from_doc<'a, T>(doc: &'a dto::Document) -> Result<T, Error>
 where
     T: Deserialize<'a>,
 {
-    let mut deserializer = DocDeserializer { doc };
-    T::deserialize(deserializer)
+    T::deserialize(DocDeserializer { doc })
 }
 
 pub struct DocDeserializer<'de> {

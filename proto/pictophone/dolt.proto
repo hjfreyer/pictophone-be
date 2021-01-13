@@ -3,17 +3,17 @@ syntax = "proto3";
 package pictophone.dolt;
 
 message ActionRequest {
-    bytes state = 1;
+    State state = 1;
     bytes action = 2;
 }
 
 message ActionResponse {
-    bytes state = 1;
+    State state = 1;
     bytes response = 2;
 }
 
 message QueryRequest {
-    bytes state = 1;
+    State state = 1;
     bytes query = 2;
 }
 
@@ -33,4 +33,8 @@ message Response {
         ActionResponse action_response = 1;
         QueryResponse query_response = 2;
     }
+}
+
+message State {
+    bytes serialized = 1;
 }

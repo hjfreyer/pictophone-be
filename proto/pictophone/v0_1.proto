@@ -1,0 +1,165 @@
+syntax = "proto3";
+
+package pictophone.v0_1;
+
+service Pictophone {
+    rpc JoinGame(JoinGameRequest) returns (JoinGameResponse);
+    rpc StartGame(StartGameRequest) returns (StartGameResponse);
+    rpc MakeMove(MakeMoveRequest) returns (MakeMoveResponse);
+    
+    rpc GetGame(GetGameRequest) returns (stream GetGameResponse);
+}
+
+message ActionRequest {
+    oneof method {
+        JoinGameRequest join_game_request = 1;
+        StartGameRequest start_game_request = 2;
+        MakeMoveRequest make_move_request = 3;
+    }
+}
+
+message ActionResponse {
+    oneof method {
+        JoinGameResponse join_game_response = 1;
+        StartGameResponse start_game_response = 2;
+        MakeMoveResponse make_move_response = 3;
+    }
+}
+
+message QueryRequest {
+    oneof method {
+        GetGameRequest get_game_request = 1;
+    }
+}
+
+message QueryResponse {
+    oneof method {
+        GetGameResponse get_game_response = 1;
+    }
+}
+
+message JoinGameRequest {
+    string game_id = 1;
+    string player_id = 2;
+}
+
+message JoinGameResponse {
+    oneof error {
+        UnknownError unknown_error = 1;
+        GameAlreadyStartedError game_already_started_error = 2;
+    }
+}
+
+message StartGameRequest {
+    string game_id = 1;
+    string player_id = 2;
+}
+
+message StartGameResponse {
+    oneof error {
+        UnknownError unknown_error = 1;
+        GameAlreadyStartedError game_already_started_error = 2;
+        PlayerNotInGameError player_not_in_game_error = 3;
+    }
+}
+
+message MakeMoveRequest {
+    string game_id = 1;
+    string player_id = 2;
+    
+    oneof submission {
+        string word = 3;
+        string drawing_id = 4;
+    }
+}
+
+message MakeMoveResponse {
+    oneof error {
+        UnknownError unknown_error = 1;
+        NotYourTurnError not_your_turn_error = 2;
+        IncorrectSubmissionKindError incorrect_submission_kind_error = 3;
+    }
+}
+
+message GetGameRequest {
+    string game_id = 1;
+    string player_id = 2;
+}
+
+message GetGameResponse {
+    oneof error {
+        UnknownError unknown_error = 1;
+        PlayerNotInGameError player_not_in_game_error = 2;
+    }
+
+    Game game = 3;
+}
+
+message Game {
+    repeated string player_ids = 1;
+
+    message Unstarted {}
+    message ReadyForInitialPrompt {}
+    message Blocked {}
+    message ReadyForResponse {
+        oneof prompt {
+            string word = 1;
+            string drawing_id = 2;
+        }
+    }
+    message Complete {
+        repeated Sequence sequences = 1;
+    }
+
+    oneof state {
+        Unstarted unstarted = 2;
+        ReadyForInitialPrompt ready_for_initial_prompt = 3; 
+        Blocked blocked = 4;
+        ReadyForResponse ready_for_response = 5;
+        Complete complete = 6;
+    }
+}
+
+message Sequence {
+    message Entry {
+        string player_id = 1;
+
+        oneof submission {
+            string word = 2;
+            string drawing_id = 3;
+        }
+    }
+
+    repeated Entry entries = 1;
+}
+
+// Errors
+// ======
+message UnknownError {
+    string error = 1;
+}
+
+message GameAlreadyStartedError {
+    string game_id = 1;
+}
+
+message PlayerNotInGameError {
+    string game_id = 1;
+    string player_id = 2;
+}
+
+message NotYourTurnError {
+    string game_id = 1;
+    string player_id = 2;
+}
+
+message IncorrectSubmissionKindError {
+    SubmissionKind wanted = 1;
+    SubmissionKind got = 2;
+}
+
+enum SubmissionKind {
+    SUBMISSION_KIND_UNSPECIFIED = 0;
+    WORD = 1;
+    DRAWING = 2;
+}

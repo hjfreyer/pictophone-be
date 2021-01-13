@@ -5,8 +5,6 @@ use futures::{executor::block_on, Stream};
 use googapis::google::firestore::v1 as fs;
 use log::{error, info, trace, warn};
 use protobuf::pictophone::dolt as dpb;
-use protobuf::pictophone::versioned as vpb;
-use protobuf::pictophone::{v1_0, v1_1};
 use std::{pin::Pin, sync::Arc};
 use tonic::{
     metadata::MetadataValue,
@@ -65,20 +63,20 @@ where
         action_bytes: dpb::VersionedActionRequestBytes,
     ) -> anyhow::Result<(StateBytes, dpb::VersionedActionResponseBytes)> {
         use std::convert::TryFrom;
-        use std::convert::TryInto;
 
         let request = dpb::Request::from(dpb::ActionRequest {
-            state: state_bytes.clone().into_bytes(),
+            state: Some(dpb::State {
+                serialized: state_bytes.clone().into_bytes(),
+            }),
             action: action_bytes.into_bytes(),
         });
 
         let response = runner.run(version, request).await?;
         let response = dpb::ActionResponse::try_from(response)?;
 
-        let new_state_bytes = StateBytes::new(response.state);
-        if !new_state_bytes.as_ref().is_empty() {
-            *state_bytes = new_state_bytes
-        };
+        if let Some(new_state_bytes) = response.state {
+            *state_bytes = StateBytes(new_state_bytes.serialized);
+        }
         let response_bytes = dpb::VersionedActionResponseBytes::new(response.response);
 
         Ok((state_bytes.clone(), response_bytes))
@@ -91,8 +89,6 @@ where
         impl Stream<Item = anyhow::Result<(StateBytes, dpb::VersionedActionResponseBytes)>>,
     > {
         use futures::StreamExt;
-        use futures::TryStreamExt;
-        use prost::Message;
         let this = self.clone();
         let version = version.to_owned();
         let state_bytes = StateBytes::new(vec![]);
@@ -212,7 +208,9 @@ where
                         .run(
                             &version,
                             dpb::Request::from(dpb::QueryRequest {
-                                state: state.into_bytes(),
+                                state: Some(dpb::State {
+                                    serialized: state.into_bytes(),
+                                }),
                                 query: query.into_bytes(),
                             }),
                         )
@@ -299,10 +297,7 @@ async fn main() -> Result<(), anyhow::Error> {
     info!("Boom, running on: {}", addr);
 
     tonic::transport::Server::builder()
-        .add_service(v1_0::pictophone_server::PictophoneServer::new(
-            server.clone(),
-        ))
-        .add_service(v1_1::pictophone_server::PictophoneServer::new(server))
+        .add_service(protobuf::pictophone::v0_1::pictophone_server::PictophoneServer::new(server))
         .serve(addr)
         .await?;
 

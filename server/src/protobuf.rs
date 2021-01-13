@@ -17,7 +17,6 @@ macro_rules! oneof_convert {
                     }
                 }
 
-
                 impl std::convert::TryFrom<$container_type> for $elem_type {
                     type Error = $crate::protobuf::WrongOneofSelected;
                     fn try_from(value: $container_type) -> Result<Self, Self::Error> {
@@ -66,8 +65,7 @@ pub mod pictophone {
             };
         }
 
-        version!(v1_0, V1p0);
-        version!(v1_1, V1p1);
+        version!(v0_1, V0p1);
 
         macro_rules! serialize {
             ($name:ident) => {
@@ -152,87 +150,8 @@ pub mod pictophone {
         }
     }
 
-    pub mod v1_0 {
-        tonic::include_proto!("pictophone.v1_0");
-
-        oneof_convert!(
-            CreateGameResponse,
-            error,
-            GameAlreadyExistsError,
-            ShortCodeInUseError,
-        );
-        oneof_convert!(DeleteGameResponse, error, GameNotFoundError,);
-
-        oneof_convert!(ActionRequest, method, CreateGameRequest, DeleteGameRequest,);
-        oneof_convert!(
-            ActionResponse,
-            method,
-            CreateGameResponse,
-            DeleteGameResponse,
-        );
-
-        #[tonic::async_trait]
-        impl<T: super::dolt::Server> pictophone_server::Pictophone for T {
-            async fn create_game(
-                &self,
-                request: tonic::Request<CreateGameRequest>,
-            ) -> Result<tonic::Response<CreateGameResponse>, tonic::Status> {
-                use std::convert::TryFrom;
-                use std::convert::TryInto;
-                let metadata = request.metadata().to_owned();
-
-                let versioned = super::versioned::ActionRequest::from(ActionRequest::from(
-                    request.into_inner(),
-                ));
-
-                self.handle_action(
-                    versioned
-                        .try_into()
-                        .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))?,
-                    metadata,
-                )
-                .await
-                .and_then(|r| {
-                    Ok(tonic::Response::new(
-                        ActionResponse::try_from(super::versioned::ActionResponse::try_from(r)?)?
-                            .try_into()?,
-                    ))
-                })
-                .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))
-            }
-
-            async fn delete_game(
-                &self,
-                request: tonic::Request<DeleteGameRequest>,
-            ) -> Result<tonic::Response<DeleteGameResponse>, tonic::Status> {
-                use std::convert::TryFrom;
-                use std::convert::TryInto;
-                let metadata = request.metadata().to_owned();
-
-                let versioned = super::versioned::ActionRequest::from(ActionRequest::from(
-                    request.into_inner(),
-                ));
-
-                self.handle_action(
-                    versioned
-                        .try_into()
-                        .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))?,
-                    metadata,
-                )
-                .await
-                .and_then(|r| {
-                    Ok(tonic::Response::new(
-                        ActionResponse::try_from(super::versioned::ActionResponse::try_from(r)?)?
-                            .try_into()?,
-                    ))
-                })
-                .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))
-            }
-        }
-    }
-
-    pub mod v1_1 {
-        tonic::include_proto!("pictophone.v1_1");
+    pub mod v0_1 {
+        tonic::include_proto!("pictophone.v0_1");
 
         oneof_convert!(QueryRequest, method, GetGameRequest,);
         oneof_convert!(QueryResponse, method, GetGameResponse,);
@@ -240,74 +159,69 @@ pub mod pictophone {
         oneof_convert!(
             ActionRequest,
             method,
-            (super::v1_0::CreateGameRequest, CreateGameRequest),
-            (super::v1_0::DeleteGameRequest, DeleteGameRequest),
+            JoinGameRequest,
+            StartGameRequest,
+            MakeMoveRequest,
         );
         oneof_convert!(
             ActionResponse,
             method,
-            (super::v1_0::CreateGameResponse, CreateGameResponse),
-            (super::v1_0::DeleteGameResponse, DeleteGameResponse),
+            JoinGameResponse,
+            StartGameResponse,
+            MakeMoveResponse,
         );
+
+        macro_rules! action_body {
+            ($self:expr, $request:expr) => {{
+                use std::convert::TryFrom;
+                use std::convert::TryInto;
+                let metadata = $request.metadata().to_owned();
+
+                let versioned = super::versioned::ActionRequest::from(ActionRequest::from(
+                    $request.into_inner(),
+                ));
+
+                $self
+                    .handle_action(
+                        versioned.try_into().map_err(|e| {
+                            tonic::Status::internal(format!("Internal error: {:#}", e))
+                        })?,
+                        metadata,
+                    )
+                    .await
+                    .and_then(|r| {
+                        Ok(tonic::Response::new(
+                            ActionResponse::try_from(super::versioned::ActionResponse::try_from(
+                                r,
+                            )?)?
+                            .try_into()?,
+                        ))
+                    })
+                    .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))
+            }};
+        }
 
         #[tonic::async_trait]
         impl<T: super::dolt::Server> pictophone_server::Pictophone for T {
-            async fn create_game(
+            async fn join_game(
                 &self,
-                request: tonic::Request<super::v1_0::CreateGameRequest>,
-            ) -> Result<tonic::Response<super::v1_0::CreateGameResponse>, tonic::Status>
-            {
-                use std::convert::TryFrom;
-                use std::convert::TryInto;
-                let metadata = request.metadata().to_owned();
-
-                let versioned = super::versioned::ActionRequest::from(ActionRequest::from(
-                    request.into_inner(),
-                ));
-
-                self.handle_action(
-                    versioned
-                        .try_into()
-                        .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))?,
-                    metadata,
-                )
-                .await
-                .and_then(|r| {
-                    Ok(tonic::Response::new(
-                        ActionResponse::try_from(super::versioned::ActionResponse::try_from(r)?)?
-                            .try_into()?,
-                    ))
-                })
-                .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))
+                request: tonic::Request<JoinGameRequest>,
+            ) -> Result<tonic::Response<JoinGameResponse>, tonic::Status> {
+                action_body!(self, request)
             }
 
-            async fn delete_game(
+            async fn start_game(
                 &self,
-                request: tonic::Request<super::v1_0::DeleteGameRequest>,
-            ) -> Result<tonic::Response<super::v1_0::DeleteGameResponse>, tonic::Status>
-            {
-                use std::convert::TryFrom;
-                use std::convert::TryInto;
-                let metadata = request.metadata().to_owned();
+                request: tonic::Request<StartGameRequest>,
+            ) -> Result<tonic::Response<StartGameResponse>, tonic::Status> {
+                action_body!(self, request)
+            }
 
-                let versioned = super::versioned::ActionRequest::from(ActionRequest::from(
-                    request.into_inner(),
-                ));
-
-                self.handle_action(
-                    versioned
-                        .try_into()
-                        .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))?,
-                    metadata,
-                )
-                .await
-                .and_then(|r| {
-                    Ok(tonic::Response::new(
-                        ActionResponse::try_from(super::versioned::ActionResponse::try_from(r)?)?
-                            .try_into()?,
-                    ))
-                })
-                .map_err(|e| tonic::Status::internal(format!("Internal error: {:#}", e)))
+            async fn make_move(
+                &self,
+                request: tonic::Request<MakeMoveRequest>,
+            ) -> Result<tonic::Response<MakeMoveResponse>, tonic::Status> {
+                action_body!(self, request)
             }
 
             type GetGameStream = std::pin::Pin<
@@ -353,19 +267,5 @@ pub mod pictophone {
                 Ok(tonic::Response::new(Box::pin(stream)))
             }
         }
-    }
-}
-
-pub mod google {
-    pub mod firestore {
-        pub mod v1 {
-            tonic::include_proto!("google.firestore.v1");
-        }
-    }
-    pub mod rpc {
-        tonic::include_proto!("google.rpc");
-    }
-    pub mod r#type {
-        tonic::include_proto!("google.r#type");
     }
 }
