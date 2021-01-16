@@ -57,6 +57,7 @@ pub struct Firestore {
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct Root {
+    #[serde(default)]
     actions: Vec<serde_bytes::ByteBuf>,
 }
 

@@ -1,6 +1,9 @@
 #[derive(thiserror::Error, Debug)]
-#[error("wrong oneof selected")]
-pub struct WrongOneofSelected();
+#[error("wrong oneof selected: wanted {wanted}, got {got}")]
+pub struct WrongOneofSelected {
+    wanted: &'static str,
+    got: String,
+}
 
 macro_rules! oneof_convert {
     ($container_type:ident, $oneof_field:ident, $($elem_type:ident, )*) => {
@@ -22,11 +25,11 @@ macro_rules! oneof_convert {
                     fn try_from(value: $container_type) -> Result<Self, Self::Error> {
                         match value.$oneof_field {
                             Some([<$container_type:snake>] ::[<$oneof_field:camel>]::$elem_field_name(e)) => Ok(e),
-                            _ => Err($crate::protobuf::WrongOneofSelected()),
+                            _ => Err($crate::protobuf::WrongOneofSelected{
+                                wanted: stringify!([<$container_type:snake>] ::[<$oneof_field:camel>]::$elem_field_name),
+                                got:format!("{:?}", value),
+                            }),
                         }
-                        // Self {
-                        //     method: Some([<$container_type:snake>] ::[<$oneof_field:camel>] ::Evolve(e)),
-                        // }
                     }
                 }
             }

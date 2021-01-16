@@ -51,6 +51,18 @@ impl AsRef<[u8]> for StateBytes {
     }
 }
 
+impl From<StateBytes> for dpb::State {
+    fn from(s: StateBytes) -> Self {
+        Self { serialized: s.0 }
+    }
+}
+
+impl From<dpb::State> for StateBytes {
+    fn from(s: dpb::State) -> Self {
+        Self::new(s.serialized)
+    }
+}
+
 impl<P, DS> Server<P, DS>
 where
     P: binaries::Provider + Send + Sync + 'static,
@@ -59,14 +71,14 @@ where
     async fn fold_state(
         runner: &runner::Runner<P>,
         version: &Option<binaries::Version>,
-        state_bytes: &mut StateBytes,
+        state_bytes: Option<StateBytes>,
         action_bytes: dpb::VersionedActionRequestBytes,
-    ) -> anyhow::Result<(StateBytes, dpb::VersionedActionResponseBytes)> {
+    ) -> anyhow::Result<(Option<StateBytes>, dpb::VersionedActionResponseBytes)> {
         use std::convert::TryFrom;
 
         let request = dpb::Request::from(dpb::ActionRequest {
-            state: Some(dpb::State {
-                serialized: state_bytes.clone().into_bytes(),
+            state: state_bytes.as_ref().map(|b| dpb::State {
+                serialized: b.clone().into_bytes(),
             }),
             action: action_bytes.into_bytes(),
         });
@@ -74,30 +86,34 @@ where
         let response = runner.run(version, request).await?;
         let response = dpb::ActionResponse::try_from(response)?;
 
-        if let Some(new_state_bytes) = response.state {
-            *state_bytes = StateBytes(new_state_bytes.serialized);
-        }
+        let new_state_bytes: Option<StateBytes> = response.state.map(StateBytes::from);
         let response_bytes = dpb::VersionedActionResponseBytes::new(response.response);
 
-        Ok((state_bytes.clone(), response_bytes))
+        Ok((new_state_bytes.or(state_bytes), response_bytes))
     }
 
     async fn state_stream(
         self: std::sync::Arc<Self>,
         version: Option<binaries::Version>,
     ) -> anyhow::Result<
-        impl Stream<Item = anyhow::Result<(StateBytes, dpb::VersionedActionResponseBytes)>>,
+        impl Stream<Item = anyhow::Result<(Option<StateBytes>, dpb::VersionedActionResponseBytes)>>,
     > {
         use futures::StreamExt;
-        let this = self.clone();
-        let version = version.to_owned();
-        let state_bytes = StateBytes::new(vec![]);
 
-        let log_stream = self.datastore.watch_log().await?;
-
-        Ok(futures::stream::unfold(
-            (this, version, state_bytes, log_stream),
-            |(this, version, mut state_bytes, log_stream)| async move {
+        let res = futures::stream::unfold(
+            (
+                self.clone(),
+                version.to_owned(),
+                None,
+                self.datastore.watch_log().await?,
+            ),
+            |(this, version, state_bytes, log_stream)| async move {
+                trace!(
+                    "State: {:?}",
+                    state_bytes
+                        .as_ref()
+                        .map(|s: &StateBytes| std::str::from_utf8(&s.0))
+                );
                 let (action_bytes, log_stream_tail) = log_stream.into_future().await;
                 let action_bytes = match action_bytes {
                     Some(Ok(action_bytes)) => action_bytes,
@@ -107,18 +123,18 @@ where
                     None => return None,
                 };
                 Some(
-                    match Self::fold_state(&this.runner, &version, &mut state_bytes, action_bytes)
-                        .await
+                    match Self::fold_state(&this.runner, &version, state_bytes, action_bytes).await
                     {
                         Ok((state_bytes, response_bytes)) => (
                             Ok((state_bytes.clone(), response_bytes)),
                             (this, version, state_bytes, log_stream_tail),
                         ),
-                        Err(e) => (Err(e), (this, version, state_bytes, log_stream_tail)),
+                        Err(e) => (Err(e), (this, version, None, log_stream_tail)),
                     },
                 )
             },
-        ))
+        );
+        Ok(util::end_after_error(res))
     }
 }
 
@@ -135,28 +151,28 @@ where
         metadata: tonic::metadata::MetadataMap,
     ) -> Result<dpb::VersionedActionResponseBytes, anyhow::Error> {
         use futures::StreamExt;
+        use futures::TryStreamExt;
         trace!("Received Action: {:?}", action);
         let action_count = self.datastore.push_action(action).await?;
         trace!("Action committed");
 
         let version = get_binary_version(&metadata);
-        let mut states: Vec<(StateBytes, dpb::VersionedActionResponseBytes)> = self
-            .clone()
-            .state_stream(version)
-            .await?
-            .filter_map(|s| {
-                futures::future::ready(match s {
-                    Ok(s) => Some(s),
-                    Err(e) => {
-                        error!("swallowing error in handle_action: {:?}", e);
-                        None
-                    }
+        let mut states: Vec<(Option<StateBytes>, dpb::VersionedActionResponseBytes)> =
+            util::end_after_error(self.clone().state_stream(version).await?)
+                .inspect_err(|e| error!("swallowing error in handle_action: {:?}", e))
+                .filter_map(|s| {
+                    futures::future::ready(match s {
+                        Ok(s) => Some(s),
+                        Err(e) => {
+                            error!("swallowing error in handle_action: {:?}", e);
+                            None
+                        }
+                    })
                 })
-            })
-            .skip(action_count - 1)
-            .take(1)
-            .collect()
-            .await;
+                .skip(action_count - 1)
+                .take(1)
+                .collect()
+                .await;
         trace!("State integration completed");
         let (last_state, last_resp) = if let Some((state, resp)) = states.pop() {
             (state, resp)
@@ -164,9 +180,8 @@ where
             bail!("state stream ended early")
         };
 
-        if !last_state.as_ref().is_empty() {
-            let state: serde_json::Value = serde_json::from_slice(last_state.as_ref())?;
-            trace!("POST-STATE: {:?}", state);
+        if let Some(state) = last_state {
+            trace!("POST-STATE: {:?}", std::str::from_utf8(state.as_ref()));
         }
 
         Ok(last_resp)
@@ -208,8 +223,8 @@ where
                         .run(
                             &version,
                             dpb::Request::from(dpb::QueryRequest {
-                                state: Some(dpb::State {
-                                    serialized: state.into_bytes(),
+                                state: state.map(|s| dpb::State {
+                                    serialized: s.into_bytes(),
                                 }),
                                 query: query.into_bytes(),
                             }),
@@ -285,7 +300,7 @@ async fn main() -> Result<(), anyhow::Error> {
 
     let server = Arc::new(Server {
         runner: runner::Runner::new(binaries::Filesystem::new(
-            binaries::Version::new("1.0.0".to_owned()),
+            binaries::Version::new("0.1.0".to_owned()),
             std::path::PathBuf::from(config.wasm_path),
         ))?,
         datastore: datastore::firestore(

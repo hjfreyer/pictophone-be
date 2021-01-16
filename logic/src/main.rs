@@ -63,7 +63,7 @@ enum Submission {
 fn handle_join_game(
     state: Option<State>,
     request: api::JoinGameRequest,
-) -> Result<Option<State>, api::JoinGameResponse> {
+) -> Result<Option<State>, api::join_game_response::Error> {
     let player_id = PlayerId(request.player_id);
     let mut state = state.unwrap_or_default();
     let game = state
@@ -87,7 +87,7 @@ fn handle_join_game(
 fn handle_start_game(
     state: Option<State>,
     request: api::StartGameRequest,
-) -> Result<Option<State>, api::StartGameResponse> {
+) -> Result<Option<State>, api::start_game_response::Error> {
     let mut state = state.unwrap_or_default();
     let game = state
         .games
@@ -98,6 +98,14 @@ fn handle_start_game(
         Game::Started { .. } => return Ok(None),
         Game::Unstarted { players } => players,
     };
+
+    if !players.contains(&PlayerId(request.player_id.to_owned())) {
+        return Err(api::PlayerNotInGameError {
+            game_id: request.game_id,
+            player_id: request.player_id,
+        }
+        .into());
+    }
 
     *game = Game::Started {
         players: players
@@ -115,7 +123,7 @@ fn handle_start_game(
 fn handle_make_move(
     state: Option<State>,
     request: api::MakeMoveRequest,
-) -> Result<Option<State>, api::MakeMoveResponse> {
+) -> Result<Option<State>, api::make_move_response::Error> {
     let mut state = state.unwrap_or_default();
     let game = state
         .games
@@ -326,23 +334,44 @@ fn handle_parsed_action(
     let vpb::action_request::Version::V0p1(action_request) =
         request.version.expect("no version specified");
 
-    let result: Result<Option<State>, api::ActionResponse> = match action_request.method {
-        Some(api::action_request::Method::JoinGameRequest(request)) => {
-            handle_join_game(state, request).map_err(|r| r.into())
+    let (new_state, response): (Option<State>, api::action_response::Method) =
+        match action_request.method {
+            Some(api::action_request::Method::JoinGameRequest(request)) => {
+                let (state, response) = handle_join_game(state, request)
+                    .map(|state| (state, Default::default()))
+                    .unwrap_or_else(|error| (None, error.into()));
+                (
+                    state,
+                    api::action_response::Method::JoinGameResponse(response),
+                )
+            }
+            Some(api::action_request::Method::StartGameRequest(request)) => {
+                let (state, response) = handle_start_game(state, request)
+                    .map(|state| (state, Default::default()))
+                    .unwrap_or_else(|error| (None, error.into()));
+                (
+                    state,
+                    api::action_response::Method::StartGameResponse(response),
+                )
+            }
+            Some(api::action_request::Method::MakeMoveRequest(request)) => {
+                let (state, response) = handle_make_move(state, request)
+                    .map(|state| (state, Default::default()))
+                    .unwrap_or_else(|error| (None, error.into()));
+                (
+                    state,
+                    api::action_response::Method::MakeMoveResponse(response),
+                )
+            }
+            None => bail!("no method specified"),
+        };
+    Ok((
+        new_state,
+        api::ActionResponse {
+            method: Some(response),
         }
-        Some(api::action_request::Method::StartGameRequest(request)) => {
-            handle_start_game(state, request).map_err(|r| r.into())
-        }
-        Some(api::action_request::Method::MakeMoveRequest(request)) => {
-            handle_make_move(state, request).map_err(|r| r.into())
-        }
-        None => bail!("no method specified"),
-    };
-    let (new_state, response) = result
-        .map(|s| (s, Default::default()))
-        .unwrap_or_else(|e| (None, e));
-
-    Ok((new_state, response.into()))
+        .into(),
+    ))
 }
 
 fn handle_parsed_query(

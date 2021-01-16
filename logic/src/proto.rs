@@ -7,8 +7,8 @@ macro_rules! oneof_convert {
         oneof_convert!($container_type, $oneof_field, $(($elem_type, $elem_type), )*);
     };
     ($container_type:ident, $oneof_field:ident, $(($elem_type:ty, $elem_field_name:ident), )*) => {
-        $(
-            paste::paste!{
+        paste::paste!{
+            $(
                 impl From<$elem_type> for $container_type {
                     fn from(e: $elem_type) -> Self {
                         Self {
@@ -27,8 +27,49 @@ macro_rules! oneof_convert {
                         }
                     }
                 }
+            )*
+            oneof_enum_convert!([<$container_type:snake>] ::[<$oneof_field:camel>], $(($elem_type, $elem_field_name), )*);
+            single_field_convert!($container_type, [<$container_type:snake>] ::[<$oneof_field:camel>], $oneof_field);
+        }
+    };
+}
+
+macro_rules! oneof_enum_convert {
+    ($enum_type:ty, $($elem_type:ident, )*) => {
+        oneof_enum_convert!($enum_type, $(($elem_type, $elem_type), )*);
+    };
+    ($enum_type:ty, $(($elem_type:ty, $elem_field_name:ident), )*) => {
+        paste::paste!{
+            $(
+                impl From<$elem_type> for $enum_type {
+                    fn from(e: $elem_type) -> Self {
+                        $enum_type::$elem_field_name(e)
+                    }
+                }
+
+                impl std::convert::TryFrom<$enum_type> for $elem_type {
+                    type Error = $crate::proto::WrongOneofSelected;
+                    fn try_from(value: $enum_type) -> Result<Self, Self::Error> {
+                        match value {
+                            $enum_type :: $elem_field_name(e) => Ok(e),
+                            _ => Err($crate::proto::WrongOneofSelected()),
+                        }
+                    }
+                }
+            )*
+        }
+    };
+}
+
+macro_rules! single_field_convert {
+    ($container_type:ty, $field_type:ty, $field_name:ident) => {
+        paste::paste! {
+            impl From<$field_type> for $container_type {
+                fn from(value: $field_type) -> Self {
+                    Self { $field_name: Some(value) }
+                }
             }
-        )*
+        }
     };
 }
 
@@ -59,6 +100,8 @@ pub mod v0_1 {
         GameAlreadyStartedError,
         UnknownError,
     );
+
+    oneof_convert!(StartGameResponse, error, UnknownError, PlayerNotInGameError,);
 
     oneof_convert!(
         MakeMoveResponse,

@@ -58,8 +58,7 @@ message StartGameRequest {
 message StartGameResponse {
     oneof error {
         UnknownError unknown_error = 1;
-        GameAlreadyStartedError game_already_started_error = 2;
-        PlayerNotInGameError player_not_in_game_error = 3;
+        PlayerNotInGameError player_not_in_game_error = 2;
     }
 }
 
