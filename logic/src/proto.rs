@@ -113,7 +113,7 @@ pub mod v0_1 {
 }
 
 pub mod dolt {
-    include!(concat!(env!("OUT_DIR"), "/pictophone.dolt.rs"));
+    include!(concat!(env!("OUT_DIR"), "/dolt.rs"));
 
     oneof_convert!(Request, method, ActionRequest, QueryRequest,);
     oneof_convert!(Response, method, ActionResponse, QueryResponse,);

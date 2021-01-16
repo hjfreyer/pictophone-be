@@ -1,6 +1,6 @@
 syntax = "proto3";
 
-package pictophone.dolt;
+package dolt;
 
 message ActionRequest {
     State state = 1;

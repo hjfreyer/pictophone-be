@@ -21,11 +21,11 @@ macro_rules! oneof_convert {
                 }
 
                 impl std::convert::TryFrom<$container_type> for $elem_type {
-                    type Error = $crate::protobuf::WrongOneofSelected;
+                    type Error = $crate::proto::WrongOneofSelected;
                     fn try_from(value: $container_type) -> Result<Self, Self::Error> {
                         match value.$oneof_field {
                             Some([<$container_type:snake>] ::[<$oneof_field:camel>]::$elem_field_name(e)) => Ok(e),
-                            _ => Err($crate::protobuf::WrongOneofSelected{
+                            _ => Err($crate::proto::WrongOneofSelected{
                                 wanted: stringify!([<$container_type:snake>] ::[<$oneof_field:camel>]::$elem_field_name),
                                 got:format!("{:?}", value),
                             }),
@@ -35,6 +35,56 @@ macro_rules! oneof_convert {
             }
         )*
     };
+}
+
+pub mod dolt {
+    tonic::include_proto!("dolt");
+
+    oneof_convert!(Request, method, ActionRequest, QueryRequest,);
+    oneof_convert!(Response, method, ActionResponse, QueryResponse,);
+
+    macro_rules! typed_bytes {
+        ($name:ident) => {
+            paste::paste! {
+                #[derive(Debug, Clone)]
+                pub struct $name(Vec<u8>);
+
+                impl $name {
+                    pub fn new(bytes: Vec<u8>) -> Self {
+                        Self(bytes)
+                    }
+
+                    pub fn into_bytes(self) -> Vec<u8> {
+                        self.0
+                    }
+                }
+            }
+        };
+    }
+
+    typed_bytes!(VersionedActionRequestBytes);
+    typed_bytes!(VersionedActionResponseBytes);
+    typed_bytes!(VersionedQueryRequestBytes);
+    typed_bytes!(VersionedQueryResponseBytes);
+
+    #[tonic::async_trait]
+    pub trait Server: Send + Sync + 'static {
+        async fn handle_action(
+            &self,
+            action: VersionedActionRequestBytes,
+            metadata: tonic::metadata::MetadataMap,
+        ) -> Result<VersionedActionResponseBytes, anyhow::Error>;
+
+        type QueryStream: futures::Stream<Item = Result<VersionedQueryResponseBytes, anyhow::Error>>
+            + Send
+            + Sync;
+
+        async fn handle_query(
+            &self,
+            query: VersionedQueryRequestBytes,
+            metadata: tonic::metadata::MetadataMap,
+        ) -> Result<Self::QueryStream, anyhow::Error>;
+    }
 }
 
 pub mod pictophone {
@@ -73,7 +123,7 @@ pub mod pictophone {
         macro_rules! serialize {
             ($name:ident) => {
                 paste::paste!{
-                    impl TryFrom<$name> for super::dolt::[<Versioned $name Bytes>] {
+                    impl TryFrom<$name> for super::super::dolt::[<Versioned $name Bytes>] {
                         type Error = prost::EncodeError;
 
                         fn try_from(value: $name) -> Result<Self, Self::Error> {
@@ -85,10 +135,10 @@ pub mod pictophone {
                     }
 
 
-                    impl TryFrom<super::dolt::[<Versioned $name Bytes>]> for $name  {
+                    impl TryFrom<super::super::dolt::[<Versioned $name Bytes>]> for $name  {
                         type Error = prost::DecodeError;
 
-                        fn try_from(value: super::dolt::[<Versioned $name Bytes>]) -> Result<Self, Self::Error> {
+                        fn try_from(value: super::super::dolt::[<Versioned $name Bytes>]) -> Result<Self, Self::Error> {
                             use prost::Message;
                             Self::decode(value.into_bytes().as_slice())
                         }
@@ -101,56 +151,6 @@ pub mod pictophone {
         serialize!(ActionResponse);
         serialize!(QueryRequest);
         serialize!(QueryResponse);
-    }
-
-    pub mod dolt {
-        tonic::include_proto!("pictophone.dolt");
-
-        oneof_convert!(Request, method, ActionRequest, QueryRequest,);
-        oneof_convert!(Response, method, ActionResponse, QueryResponse,);
-
-        macro_rules! typed_bytes {
-            ($name:ident) => {
-                paste::paste! {
-                    #[derive(Debug, Clone)]
-                    pub struct $name(Vec<u8>);
-
-                    impl $name {
-                        pub fn new(bytes: Vec<u8>) -> Self {
-                            Self(bytes)
-                        }
-
-                        pub fn into_bytes(self) -> Vec<u8> {
-                            self.0
-                        }
-                    }
-                }
-            };
-        }
-
-        typed_bytes!(VersionedActionRequestBytes);
-        typed_bytes!(VersionedActionResponseBytes);
-        typed_bytes!(VersionedQueryRequestBytes);
-        typed_bytes!(VersionedQueryResponseBytes);
-
-        #[tonic::async_trait]
-        pub trait Server: Send + Sync + 'static {
-            async fn handle_action(
-                &self,
-                action: VersionedActionRequestBytes,
-                metadata: tonic::metadata::MetadataMap,
-            ) -> Result<VersionedActionResponseBytes, anyhow::Error>;
-
-            type QueryStream: futures::Stream<Item = Result<VersionedQueryResponseBytes, anyhow::Error>>
-                + Send
-                + Sync;
-
-            async fn handle_query(
-                &self,
-                query: VersionedQueryRequestBytes,
-                metadata: tonic::metadata::MetadataMap,
-            ) -> Result<Self::QueryStream, anyhow::Error>;
-        }
     }
 
     pub mod v0_1 {
@@ -205,7 +205,7 @@ pub mod pictophone {
         }
 
         #[tonic::async_trait]
-        impl<T: super::dolt::Server> pictophone_server::Pictophone for T {
+        impl<T: super::super::dolt::Server> pictophone_server::Pictophone for T {
             async fn join_game(
                 &self,
                 request: tonic::Request<JoinGameRequest>,

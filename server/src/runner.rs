@@ -5,7 +5,7 @@ use anyhow::anyhow;
 use log::trace;
 
 use {
-    crate::protobuf::pictophone::dolt::{Request, Response},
+    crate::proto::dolt::{Request, Response},
     log::info,
     std::{
         fs,

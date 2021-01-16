@@ -1,5 +1,5 @@
 use crate::util;
-use crate::{protobuf::pictophone::dolt::VersionedActionRequestBytes, util::aovec};
+use crate::{proto::dolt::VersionedActionRequestBytes, util::aovec};
 use anyhow::bail;
 use fs::firestore_client::FirestoreClient;
 use futures::Stream;

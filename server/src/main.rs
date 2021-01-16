@@ -4,7 +4,7 @@ use fs::firestore_client::FirestoreClient;
 use futures::{executor::block_on, Stream};
 use googapis::google::firestore::v1 as fs;
 use log::{error, info, trace, warn};
-use protobuf::pictophone::dolt as dpb;
+use proto::dolt as dpb;
 use std::{pin::Pin, sync::Arc};
 use tonic::{
     metadata::MetadataValue,
@@ -16,7 +16,7 @@ mod auth;
 mod binaries;
 mod config;
 mod datastore;
-mod protobuf;
+mod proto;
 mod runner;
 mod util;
 
@@ -312,7 +312,7 @@ async fn main() -> Result<(), anyhow::Error> {
     info!("Boom, running on: {}", addr);
 
     tonic::transport::Server::builder()
-        .add_service(protobuf::pictophone::v0_1::pictophone_server::PictophoneServer::new(server))
+        .add_service(proto::pictophone::v0_1::pictophone_server::PictophoneServer::new(server))
         .serve(addr)
         .await?;
 

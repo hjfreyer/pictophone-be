@@ -5,7 +5,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .compile(
             &[
                 "../proto/pictophone/versioned.proto",
-                "../proto/pictophone/dolt.proto",
+                "../proto/dolt.proto",
             ],
             &["../proto"],
         )?;
