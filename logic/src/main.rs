@@ -1,5 +1,4 @@
 use anyhow::bail;
-
 use {
     proto::dolt as dpb,
     proto::v0_1 as api,
@@ -31,6 +30,9 @@ struct GameId(String);
 #[derive(Debug, Hash, Clone, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
 struct PlayerId(String);
 
+#[derive(Debug, Hash, Clone, Copy, Eq, PartialEq, Ord, PartialOrd, Serialize, Deserialize)]
+struct Card(u32);
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct State {
     games: BTreeMap<GameId, Game>,
@@ -39,7 +41,17 @@ struct State {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum Game {
     Unstarted { players: Vec<PlayerId> },
-    Started { players: Vec<StartedGamePlayer> },
+    Started(StartedGame),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StartedGame {
+    random_seed: u64,
+    etag: u64,
+    round_num: usize,
+    num_mistakes: u32,
+    cards_played: Vec<Card>,
+    players: Vec<StartedGamePlayer>,
 }
 
 impl Default for Game {
@@ -51,13 +63,103 @@ impl Default for Game {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct StartedGamePlayer {
     id: PlayerId,
-    submissions: Vec<Submission>,
+    hand: Vec<Card>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-enum Submission {
-    Word(String),
-    DrawingId(String),
+impl Game {
+    fn make_move(
+        self,
+        request: api::MakeMoveRequest,
+    ) -> Result<Self, api::make_move_response::Error> {
+        let game = match self {
+            Game::Unstarted { .. } => return Err(api::GameNotStartedError {}.into()),
+            Game::Started(game) => game,
+        };
+
+        let mut players = game.players;
+        let active_player = players
+            .iter_mut()
+            .find(|p| p.id == PlayerId(request.player_id.clone()))
+            .ok_or_else(|| api::PlayerNotInGameError {})?;
+
+        if request.etag != game.etag {
+            return Err(api::MoveAbortedError {}.into());
+        };
+
+        let played_card = active_player
+            .hand
+            .pop()
+            .ok_or_else(|| api::EmptyHandError {})?;
+
+        let mistakes_were_made = players
+            .iter()
+            .any(|p| p.hand.iter().any(|card| *card < played_card));
+
+        let new_game = StartedGame {
+            random_seed: game.random_seed,
+            etag: game.etag,
+            round_num: game.round_num,
+            num_mistakes: game.num_mistakes + if mistakes_were_made { 1 } else { 0 },
+            cards_played: {
+                let mut played = game.cards_played;
+                played.push(played_card);
+                played
+            },
+            players,
+        };
+
+        Ok(Game::Started(
+            if new_game.players.iter().all(|p| p.hand.is_empty()) {
+                new_game.advance_round()
+            } else {
+                new_game
+            },
+        ))
+    }
+}
+
+impl StartedGame {
+    fn advance_round(self) -> Self {
+        use rand::seq::SliceRandom;
+        use rand::Rng;
+        use rand::SeedableRng;
+
+        let mut rng = rand::rngs::StdRng::seed_from_u64(self.random_seed);
+
+        let round_num = self.round_num + 1;
+
+        let deck: Vec<Card> = (0..100).map(Card).collect();
+        let num_players = self.players.len();
+
+        let drawn: Vec<Card> = deck
+            .choose_multiple(&mut rng, round_num * num_players)
+            .copied()
+            .collect();
+
+        let players = self
+            .players
+            .into_iter()
+            .zip(drawn.chunks(round_num))
+            .map(|(player, hand)| StartedGamePlayer {
+                id: player.id,
+                hand: {
+                    let mut hand = hand.to_vec();
+                    hand.sort();
+                    hand.reverse();
+                    hand
+                },
+            })
+            .collect();
+
+        StartedGame {
+            random_seed: rng.gen(),
+            etag: self.etag,
+            round_num,
+            num_mistakes: self.num_mistakes,
+            cards_played: vec![],
+            players,
+        }
+    }
 }
 
 fn handle_join_game(
@@ -72,10 +174,7 @@ fn handle_join_game(
         .or_default();
 
     match game {
-        Game::Started { .. } => Err(api::GameAlreadyStartedError {
-            game_id: request.game_id,
-        }
-        .into()),
+        Game::Started { .. } => Err(api::GameAlreadyStartedError {}.into()),
         Game::Unstarted { players } if players.contains(&player_id) => Ok(None),
         Game::Unstarted { players } => {
             players.push(player_id);
@@ -100,22 +199,25 @@ fn handle_start_game(
     };
 
     if !players.contains(&PlayerId(request.player_id.to_owned())) {
-        return Err(api::PlayerNotInGameError {
-            game_id: request.game_id,
-            player_id: request.player_id,
-        }
-        .into());
+        return Err(api::PlayerNotInGameError {}.into());
     }
 
-    *game = Game::Started {
+    let started_game = StartedGame {
+        random_seed: request.random_seed,
+        etag: 0,
+        round_num: 0,
+        num_mistakes: 0,
+        cards_played: vec![],
         players: players
             .into_iter()
             .map(|player_id| StartedGamePlayer {
                 id: player_id.clone(),
-                submissions: vec![],
+                hand: vec![],
             })
             .collect(),
     };
+
+    *game = Game::Started(started_game.advance_round());
 
     Ok(Some(state))
 }
@@ -130,104 +232,9 @@ fn handle_make_move(
         .entry(GameId(request.game_id.clone()))
         .or_default();
 
-    let players = match game {
-        Game::Unstarted { .. } => {
-            return Err(api::NotYourTurnError {
-                game_id: request.game_id,
-                player_id: request.player_id,
-            }
-            .into())
-        }
-        Game::Started { players } => players,
-    };
+    *game = game.clone().make_move(request)?;
 
-    let num_players = players.len();
-    let round_num = players
-        .iter()
-        .map(|p| p.submissions.len())
-        .min()
-        .unwrap_or(0);
-
-    let player = players
-        .iter_mut()
-        .find(|p| p.id == PlayerId(request.player_id.clone()));
-    let player = match player {
-        Some(player) => player,
-        None => {
-            return Err(api::NotYourTurnError {
-                game_id: request.game_id,
-                player_id: request.player_id,
-            }
-            .into())
-        }
-    };
-
-    if round_num == num_players || player.submissions.len() != round_num {
-        return Err(api::NotYourTurnError {
-            game_id: request.game_id,
-            player_id: request.player_id,
-        }
-        .into());
-    }
-
-    let wanted = if round_num % 2 == 0 {
-        api::SubmissionKind::Word
-    } else {
-        api::SubmissionKind::Drawing
-    };
-
-    let submission_or_got = match request.submission {
-        Some(api::make_move_request::Submission::Word(word))
-            if wanted == api::SubmissionKind::Word =>
-        {
-            Ok(Submission::Word(word))
-        }
-        Some(api::make_move_request::Submission::Word(..)) => Err(api::SubmissionKind::Word),
-        Some(api::make_move_request::Submission::DrawingId(drawing_id))
-            if wanted == api::SubmissionKind::Drawing =>
-        {
-            Ok(Submission::DrawingId(drawing_id))
-        }
-        Some(api::make_move_request::Submission::DrawingId(..)) => {
-            Err(api::SubmissionKind::Drawing)
-        }
-        None => Err(api::SubmissionKind::Unspecified),
-    };
-
-    let submission = submission_or_got.map_err(|got| api::IncorrectSubmissionKindError {
-        wanted: wanted as i32,
-        got: got as i32,
-    })?;
-
-    player.submissions.push(submission);
     Ok(Some(state))
-}
-
-impl From<Submission> for api::sequence::entry::Submission {
-    fn from(s: Submission) -> Self {
-        match s {
-            Submission::Word(word) => Self::Word(word),
-            Submission::DrawingId(drawing) => Self::DrawingId(drawing),
-        }
-    }
-}
-
-impl From<Submission> for api::game::ready_for_response::Prompt {
-    fn from(s: Submission) -> Self {
-        match s {
-            Submission::Word(word) => Self::Word(word),
-            Submission::DrawingId(drawing) => Self::DrawingId(drawing),
-        }
-    }
-}
-
-impl From<api::sequence::entry::Submission> for Submission {
-    fn from(s: api::sequence::entry::Submission) -> Self {
-        match s {
-            api::sequence::entry::Submission::Word(word) => Self::Word(word),
-            api::sequence::entry::Submission::DrawingId(drawing) => Self::DrawingId(drawing),
-        }
-    }
 }
 
 fn handle_get_game(
@@ -241,90 +248,40 @@ fn handle_get_game(
         .cloned()
         .unwrap_or_default();
 
-    match game {
+    let game = match game {
         Game::Unstarted { players } => {
-            if players.contains(&PlayerId(request.player_id.clone())) {
+            return if players.contains(&PlayerId(request.player_id.clone())) {
                 Ok(api::Game {
                     player_ids: players.into_iter().map(|p| p.0).collect(),
                     state: Some(api::game::State::Unstarted(api::game::Unstarted {})),
                 })
             } else {
-                Err(api::get_game_response::Error::PlayerNotInGameError(
-                    api::PlayerNotInGameError {
-                        game_id: request.game_id,
-                        player_id: request.player_id,
-                    },
-                ))
+                Err(api::PlayerNotInGameError {}.into())
             }
         }
-        Game::Started { players } => {
-            let num_players = players.len();
-            let round_num = players
-                .iter()
-                .map(|p| p.submissions.len())
-                .min()
-                .unwrap_or(0);
-            let player_ids = players.iter().map(|p| p.id.0.to_owned()).collect();
-            let (active_player_idx, active_player) = players
-                .iter()
-                .enumerate()
-                .find(|(_, p)| p.id == PlayerId(request.player_id.clone()))
-                .ok_or_else(|| {
-                    api::get_game_response::Error::PlayerNotInGameError(api::PlayerNotInGameError {
-                        game_id: request.game_id,
-                        player_id: request.player_id,
-                    })
-                })?;
+        Game::Started(game) => game,
+    };
+    let active_player = game
+        .players
+        .iter()
+        .find(|p| p.id == PlayerId(request.player_id.clone()))
+        .ok_or_else(|| api::PlayerNotInGameError {})?;
+    eprintln!("active: {:?}", active_player);
+    eprintln!(
+        "processed: {:?}",
+        active_player.hand.iter().map(|c| c.0).collect::<Vec<u32>>()
+    );
 
-            if num_players == round_num {
-                // Game is over.
-                let mut sequences = vec![api::Sequence { entries: vec![] }; num_players];
-                for round_idx in 0..round_num {
-                    for (player_idx, player) in players.iter().enumerate() {
-                        sequences[(round_idx + player_idx) % num_players]
-                            .entries
-                            .push(api::sequence::Entry {
-                                player_id: player.id.0.clone(),
-                                submission: Some(player.submissions[round_idx].to_owned().into()),
-                            })
-                    }
-                }
-
-                Ok(api::Game {
-                    player_ids,
-                    state: Some(api::game::State::Complete(api::game::Complete {
-                        sequences,
-                    })),
-                })
-            } else if active_player.submissions.len() == 0 {
-                // First round.
-                Ok(api::Game {
-                    player_ids,
-                    state: Some(api::game::State::ReadyForInitialPrompt(
-                        api::game::ReadyForInitialPrompt {},
-                    )),
-                })
-            } else if active_player.submissions.len() == round_num {
-                // Non-first round, waiting for response.
-                let next_player_idx = (active_player_idx + 1) % num_players;
-                let prompt = &players[next_player_idx].submissions[round_num - 1];
-                Ok(api::Game {
-                    player_ids,
-                    state: Some(api::game::State::ReadyForResponse(
-                        api::game::ReadyForResponse {
-                            prompt: Some(prompt.to_owned().into()),
-                        },
-                    )),
-                })
-            } else {
-                // Blocked on other players.
-                Ok(api::Game {
-                    player_ids,
-                    state: Some(api::game::State::Blocked(api::game::Blocked {})),
-                })
-            }
-        }
-    }
+    Ok(api::Game {
+        player_ids: game.players.iter().map(|p| p.id.0.to_owned()).collect(),
+        state: Some(api::game::State::Started(api::game::Started {
+            num_mistakes: game.num_mistakes,
+            round_num: game.round_num as u32,
+            numbers_played: game.cards_played.iter().map(|c| c.0).collect(),
+            hand: active_player.hand.iter().map(|c| c.0).collect(),
+            etag: game.etag,
+        })),
+    })
 }
 
 fn handle_parsed_action(

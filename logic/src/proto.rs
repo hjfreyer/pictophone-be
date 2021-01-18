@@ -35,8 +35,8 @@ macro_rules! oneof_convert {
 }
 
 macro_rules! oneof_enum_convert {
-    ($enum_type:ty, $($elem_type:ident, )*) => {
-        oneof_enum_convert!($enum_type, $(($elem_type, $elem_type), )*);
+    ($enum_type:ty, $($elem_type:ident, )+) => {
+        oneof_enum_convert!($enum_type, $(($elem_type, $elem_type), )+);
     };
     ($enum_type:ty, $(($elem_type:ty, $elem_field_name:ident), )*) => {
         paste::paste!{
@@ -107,9 +107,13 @@ pub mod v0_1 {
         MakeMoveResponse,
         error,
         UnknownError,
-        NotYourTurnError,
-        IncorrectSubmissionKindError,
+        MoveAbortedError,
+        PlayerNotInGameError,
+        GameNotStartedError,
+        EmptyHandError,
     );
+
+    oneof_enum_convert!(get_game_response::Error, UnknownError, PlayerNotInGameError,);
 }
 
 pub mod dolt {

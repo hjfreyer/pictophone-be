@@ -14,6 +14,7 @@
 //! Copyright (c) 2016 Google Inc (lewinb@google.com).
 //!
 
+use log::{error, info, trace, warn};
 use std::{io, time};
 
 use anyhow::bail;
@@ -286,9 +287,11 @@ impl<S: Source> CachedTokenSource<S> {
         // If we've made it here, the token isn't suitable for some reason. Get a new one.
         // TODO: potential thundering herd issue here. Shrug.
         {
+            info!("Refreshing auth token.");
             let mut lock = self.cache.write().await;
             let token = self.source.token().await?;
             *lock = Some(token.clone());
+            info!("Refreshed auth token. Expires: {:?}", token.expiration);
             Ok(token)
         }
     }

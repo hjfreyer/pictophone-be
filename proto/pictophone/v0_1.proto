@@ -53,6 +53,7 @@ message JoinGameResponse {
 message StartGameRequest {
     string game_id = 1;
     string player_id = 2;
+    uint64 random_seed = 3;
 }
 
 message StartGameResponse {
@@ -65,18 +66,16 @@ message StartGameResponse {
 message MakeMoveRequest {
     string game_id = 1;
     string player_id = 2;
-    
-    oneof submission {
-        string word = 3;
-        string drawing_id = 4;
-    }
+    uint64 etag = 3;
 }
 
 message MakeMoveResponse {
     oneof error {
         UnknownError unknown_error = 1;
-        NotYourTurnError not_your_turn_error = 2;
-        IncorrectSubmissionKindError incorrect_submission_kind_error = 3;
+        MoveAbortedError move_aborted_error = 2;
+        PlayerNotInGameError player_not_in_game_error = 3;
+        GameNotStartedError game_not_started_error = 4;
+        EmptyHandError empty_hand_error = 5;
     }
 }
 
@@ -98,38 +97,19 @@ message Game {
     repeated string player_ids = 1;
 
     message Unstarted {}
-    message ReadyForInitialPrompt {}
-    message Blocked {}
-    message ReadyForResponse {
-        oneof prompt {
-            string word = 1;
-            string drawing_id = 2;
-        }
-    }
-    message Complete {
-        repeated Sequence sequences = 1;
+    message Started {
+        uint64 etag = 1;
+        uint32 num_mistakes = 2;
+
+        uint32 round_num = 3;
+        repeated uint32 numbers_played = 4;
+        repeated uint32 hand = 5;
     }
 
     oneof state {
         Unstarted unstarted = 2;
-        ReadyForInitialPrompt ready_for_initial_prompt = 3; 
-        Blocked blocked = 4;
-        ReadyForResponse ready_for_response = 5;
-        Complete complete = 6;
+        Started started = 3;
     }
-}
-
-message Sequence {
-    message Entry {
-        string player_id = 1;
-
-        oneof submission {
-            string word = 2;
-            string drawing_id = 3;
-        }
-    }
-
-    repeated Entry entries = 1;
 }
 
 // Errors
@@ -138,27 +118,13 @@ message UnknownError {
     string error = 1;
 }
 
-message GameAlreadyStartedError {
-    string game_id = 1;
-}
+message GameAlreadyStartedError {}
 
-message PlayerNotInGameError {
-    string game_id = 1;
-    string player_id = 2;
-}
+message GameNotStartedError {}
 
-message NotYourTurnError {
-    string game_id = 1;
-    string player_id = 2;
-}
+message PlayerNotInGameError {}
 
-message IncorrectSubmissionKindError {
-    SubmissionKind wanted = 1;
-    SubmissionKind got = 2;
-}
+message MoveAbortedError {}
 
-enum SubmissionKind {
-    SUBMISSION_KIND_UNSPECIFIED = 0;
-    WORD = 1;
-    DRAWING = 2;
-}
+message EmptyHandError {}
+
