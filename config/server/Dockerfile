@@ -43,5 +43,5 @@ COPY --from=builder /usr/src/server/target/release/server /usr/local/bin/app_ser
 
 COPY binaries/ /data/wasm/
 COPY config/server/prod.toml /data/config.toml
-COPY config/envoy/envoy.yaml /etc/envoy/envoy.yaml
+COPY config/server/envoy.yaml /etc/envoy/envoy.yaml
 CMD ["/usr/local/bin/start.sh"]
