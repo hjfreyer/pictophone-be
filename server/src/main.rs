@@ -3,7 +3,7 @@ use datastore::Datastore;
 use fs::firestore_client::FirestoreClient;
 use futures::{executor::block_on, Stream};
 use googapis::google::firestore::v1 as fs;
-use log::{error, info, trace, warn};
+use log::{error, info, trace};
 use proto::dolt as dpb;
 use std::{pin::Pin, sync::Arc};
 use tonic::{
@@ -109,6 +109,7 @@ where
             ),
             |(this, version, state_bytes, log_stream)| async move {
                 trace!(
+                    target: "state_stream",
                     "State: {:?}",
                     state_bytes
                         .as_ref()
@@ -152,28 +153,31 @@ where
     ) -> Result<dpb::VersionedActionResponseBytes, anyhow::Error> {
         use futures::StreamExt;
         use futures::TryStreamExt;
-        trace!("Received Action: {:?}", action);
+        use std::convert::TryInto;
+        trace!(target: "action", "Received Action: {:?}", action);
         let action_count = self.datastore.push_action(action).await?;
-        trace!("Action committed");
+        trace!(target: "action", "Action committed");
 
         let version = get_binary_version(&metadata);
         let mut states: Vec<(Option<StateBytes>, dpb::VersionedActionResponseBytes)> =
             util::end_after_error(self.clone().state_stream(version).await?)
-                .inspect_err(|e| error!("swallowing error in handle_action: {:?}", e))
+                .inspect_err(
+                    |e| error!(target: "action", "swallowing error in handle_action: {:?}", e),
+                )
                 .filter_map(|s| {
                     futures::future::ready(match s {
                         Ok(s) => Some(s),
                         Err(e) => {
-                            error!("swallowing error in handle_action: {:?}", e);
+                            error!(target: "action", "swallowing error in handle_action: {:?}", e);
                             None
                         }
                     })
                 })
-                .skip(action_count - 1)
+                .skip((action_count - 1).try_into().unwrap())
                 .take(1)
                 .collect()
                 .await;
-        trace!("State integration completed");
+        trace!(target: "action", "State integration completed");
         let (last_state, last_resp) = if let Some((state, resp)) = states.pop() {
             (state, resp)
         } else {
@@ -181,7 +185,7 @@ where
         };
 
         if let Some(state) = last_state {
-            trace!("POST-STATE: {:?}", std::str::from_utf8(state.as_ref()));
+            trace!(target: "action", "POST-STATE: {:?}", std::str::from_utf8(state.as_ref()));
         }
 
         Ok(last_resp)
@@ -204,9 +208,9 @@ where
         let version = get_binary_version(&metadata);
         let this = self.clone();
 
-        trace!("Query START");
+        trace!(target: "query", "Query START");
         let _guard = scopeguard::guard((), |_| {
-            trace!("Query END");
+            trace!(target: "query", "Query END");
         });
         let result = self
             .clone()

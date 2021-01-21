@@ -34,7 +34,7 @@ RUN cargo build --release --manifest-path server/Cargo.toml
 FROM env_setup
 
 COPY config/server/start.sh /usr/local/bin/start.sh
-ENV RUST_LOG=info,server=trace
+ENV RUST_LOG=info,wasmtime::linker=error
 ENV ENVOY_UID=0
 
 WORKDIR /usr/src/app

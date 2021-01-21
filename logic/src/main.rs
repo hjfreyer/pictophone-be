@@ -266,11 +266,6 @@ fn handle_get_game(
         .iter()
         .find(|p| p.id == PlayerId(request.player_id.clone()))
         .ok_or_else(|| api::PlayerNotInGameError {})?;
-    eprintln!("active: {:?}", active_player);
-    eprintln!(
-        "processed: {:?}",
-        active_player.hand.iter().map(|c| c.0).collect::<Vec<u32>>()
-    );
 
     Ok(api::Game {
         player_ids: game.players.iter().map(|p| p.id.0.to_owned()).collect(),
