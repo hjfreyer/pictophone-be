@@ -1,7 +1,7 @@
 version: "3.9"  # optional since v1.27.0
 services:
-  grpc:
-    image: gcr.io/pictophone-test/pictophone-be
+  server:
+    image: gcr.io/pictophone-test/server
     build: 
       context: .
       dockerfile: ./config/server/Dockerfile
@@ -10,3 +10,10 @@ services:
     ports:
       - "8080:8080"
       - "9090:9090"
+    depends_on:
+      - server-deps
+  server-deps:
+    image: gcr.io/pictophone-test/server-deps
+    build: 
+      context: .
+      dockerfile: ./config/server-deps/Dockerfile
