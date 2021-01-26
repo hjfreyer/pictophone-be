@@ -239,7 +239,7 @@ const URL: &str =
 #[derive(Deserialize, Debug)]
 struct TokenResponse {
     access_token: String,
-    expires_in: u32,
+    expires_in: u64,
     token_type: String,
 }
 
@@ -257,7 +257,7 @@ impl Source for InstanceTokenSource {
         let response: TokenResponse = serde_json::from_str(&response.into_string()?)?;
         Ok(Token {
             token: response.access_token,
-            expiration: time::SystemTime::now() + time::Duration::from_secs(45 * 60),
+            expiration: time::SystemTime::now() + time::Duration::from_secs(response.expires_in),
         })
     }
 }
