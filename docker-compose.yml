@@ -9,9 +9,13 @@ services:
       - RUST_LOG=info,server=trace
     ports:
       - "8080:8080"
-      - "9090:9090"
-    depends_on:
-      - server-deps
+  envoy:
+    image: gcr.io/pictophone-test/envoy
+    build: 
+      context: .
+      dockerfile: ./config/envoy/Dockerfile
+    ports:
+      - "8080:8080"
   server-deps:
     image: gcr.io/pictophone-test/server-deps
     build: 

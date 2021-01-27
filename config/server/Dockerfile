@@ -1,6 +1,6 @@
-# Install OS packages.
-FROM envoyproxy/envoy:v1.16.1 as env_setup
+FROM debian:buster-slim as env_setup
 
+# Install OS packages.
 RUN apt-get update && \
   apt-get install -y ca-certificates
 
@@ -20,9 +20,7 @@ RUN cargo build --release --manifest-path server/Cargo.toml
 # Copy the binary in.
 FROM env_setup
 
-COPY config/server/start.sh /usr/local/bin/start.sh
 ENV RUST_LOG=info,wasmtime::linker=error
-ENV ENVOY_UID=0
 
 WORKDIR /usr/src/app
 
@@ -30,5 +28,4 @@ COPY --from=builder /target/release/server /usr/local/bin/app_server
 
 COPY binaries/ /data/wasm/
 COPY config/server/prod.toml /data/config.toml
-COPY config/server/envoy.yaml /etc/envoy/envoy.yaml
-CMD ["/usr/local/bin/start.sh"]
+CMD ["/usr/local/bin/app_server"]
