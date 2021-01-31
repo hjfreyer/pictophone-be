@@ -1,10 +1,13 @@
 use crate::{proto::dolt::VersionedActionRequestBytes, util::aovec};
 use fs::firestore_client::FirestoreClient;
-use futures::Stream;
+use futures::{Future, Stream};
 use googapis::google::firestore::v1 as fs;
-use log::warn;
+use log::{trace, warn};
 use maplit::hashmap;
-use std::pin::Pin;
+use std::{
+    pin::Pin,
+    sync::{Arc, RwLock},
+};
 
 #[tonic::async_trait]
 pub trait Datastore {
@@ -42,15 +45,29 @@ impl Datastore for Local {
 pub fn firestore(
     client: FirestoreClient<tonic::transport::Channel>,
     database_name: String,
-) -> Firestore {
-    Firestore {
-        client,
-        database_name,
-    }
+) -> Arc<Firestore> {
+    Arc::new(Firestore {
+        handle: FirestoreHandle {
+            client,
+            database_name,
+        },
+        cache: Default::default(),
+    })
+}
+
+pub struct Firestore {
+    handle: FirestoreHandle,
+    cache: RwLock<
+        Vec<
+            futures::future::Shared<
+                futures::future::BoxFuture<'static, VersionedActionRequestBytes>,
+            >,
+        >,
+    >,
 }
 
 #[derive(Clone)]
-pub struct Firestore {
+struct FirestoreHandle {
     client: FirestoreClient<tonic::transport::Channel>,
     database_name: String,
 }
@@ -67,7 +84,7 @@ struct ActionRecord {
     serialized: serde_bytes::ByteBuf,
 }
 
-impl Firestore {
+impl FirestoreHandle {
     fn metadata_doc_name(&self) -> String {
         format!("{}/documents/metadata/actions", self.database_name)
     }
@@ -76,12 +93,11 @@ impl Firestore {
     }
 
     async fn fetch_action_metadata(
-        &self,
+        self,
         consistency_selector: Option<fs::get_document_request::ConsistencySelector>,
     ) -> anyhow::Result<ActionMetadata> {
-        let resp = self
-            .client
-            .clone()
+        let mut client = self.client.to_owned();
+        let resp = client
             .get_document(fs::GetDocumentRequest {
                 name: self.metadata_doc_name(),
                 mask: None,
@@ -100,18 +116,14 @@ impl Firestore {
     }
 
     // Not found => error
-    async fn fetch_action(
-        self,
-        index: u64,
-        consistency_selector: Option<fs::get_document_request::ConsistencySelector>,
-    ) -> anyhow::Result<VersionedActionRequestBytes> {
+    async fn fetch_action(self, index: u64) -> anyhow::Result<VersionedActionRequestBytes> {
         let doc = self
             .client
             .clone()
             .get_document(fs::GetDocumentRequest {
                 name: self.action_doc_name(index),
                 mask: None,
-                consistency_selector,
+                consistency_selector: None,
             })
             .await?
             .into_inner();
@@ -121,9 +133,7 @@ impl Firestore {
         Ok(VersionedActionRequestBytes::new(action.serialized.to_vec()))
     }
 
-    async fn watch_log_impl(
-        self,
-    ) -> anyhow::Result<impl Stream<Item = anyhow::Result<VersionedActionRequestBytes>>> {
+    async fn watch_log_len(self) -> anyhow::Result<impl Stream<Item = anyhow::Result<u64>>> {
         use futures::StreamExt;
         use futures::TryStreamExt;
 
@@ -149,39 +159,75 @@ impl Firestore {
             tonic::metadata::MetadataValue::from_str(&self.database_name)?,
         );
         let stream = self.client.clone().listen(req).await?.into_inner();
-        let doc_changes =
-            stream
-                .map_err(anyhow::Error::new)
-                .try_filter_map(|resp: fs::ListenResponse| {
-                    futures::future::ready(match resp.response_type {
-                        Some(fs::listen_response::ResponseType::DocumentChange(
-                            fs::DocumentChange {
-                                document: Some(doc),
-                                ..
-                            },
-                        )) => Ok(Some(doc)),
-                        _ => Ok(None),
-                    })
-                });
+        let doc_changes = stream
+            .map_err(anyhow::Error::new)
+            .try_filter_map(|resp: fs::ListenResponse| {
+                futures::future::ready(match resp.response_type {
+                    Some(fs::listen_response::ResponseType::DocumentChange(
+                        fs::DocumentChange {
+                            document: Some(doc),
+                            ..
+                        },
+                    )) => Ok(Some(doc)),
+                    _ => Ok(None),
+                })
+            })
+            .inspect(|change| trace!("Doc change: {:?}", change));
         let action_counts = doc_changes.map(|doc: anyhow::Result<fs::Document>| {
             let meta: ActionMetadata = serde_firestore::from_doc(&doc?)?;
             Ok(meta.count)
         });
         let filled_in = fill_in_gaps(action_counts);
 
-        Ok(filled_in.and_then(move |index| self.clone().fetch_action(index, None)))
+        Ok(filled_in)
+    }
+}
+
+impl Firestore {
+    // Not found => error
+    async fn fetch_action(
+        self: Arc<Self>,
+        index: u64,
+    ) -> anyhow::Result<VersionedActionRequestBytes> {
+        trace!("Fetching action with index {}", index);
+        use futures::FutureExt;
+        // let x = self.cache.read();
+        let already_there = {
+            let cache = self.cache.read().unwrap();
+            cache.get(index as usize).cloned()
+        };
+        let fut = if let Some(fut) = already_there {
+            trace!("Cache hit");
+            fut
+        } else {
+            trace!("Cache miss");
+            let mut cache = self.cache.write().unwrap();
+            while cache.len() <= (index as usize) {
+                let handle = self.handle.clone();
+                let new_idx = cache.len();
+                cache.push(
+                    async move { handle.fetch_action(new_idx as u64).await.unwrap() }
+                        .boxed()
+                        .shared(),
+                )
+            }
+
+            cache.get(index as usize).unwrap().clone()
+        };
+        Ok(fut.await)
     }
 }
 
 #[tonic::async_trait]
-impl Datastore for Firestore {
+impl Datastore for Arc<Firestore> {
     async fn push_action(&self, action: VersionedActionRequestBytes) -> anyhow::Result<u64> {
         use std::convert::TryInto;
-        let mut client = self.client.to_owned();
+        let handle = self.handle.to_owned();
+        let mut client = handle.client.to_owned();
         loop {
             let txid = client
                 .begin_transaction(fs::BeginTransactionRequest {
-                    database: self.database_name.clone(),
+                    database: handle.database_name.clone(),
                     options: None,
                 })
                 .await?
@@ -192,7 +238,8 @@ impl Datastore for Firestore {
                 fs::get_document_request::ConsistencySelector::Transaction(txid.to_owned()),
             );
 
-            let ActionMetadata { count } = self
+            let ActionMetadata { count } = handle
+                .to_owned()
                 .fetch_action_metadata(consistency_selector.clone())
                 .await?;
 
@@ -202,7 +249,7 @@ impl Datastore for Firestore {
                 )),
             };
             let new_metadata_doc = fs::Document {
-                name: self.metadata_doc_name(),
+                name: handle.metadata_doc_name(),
                 create_time: None,
                 update_time: None,
                 fields: hashmap! {"count".to_owned() => new_count_value},
@@ -213,17 +260,17 @@ impl Datastore for Firestore {
                 )),
             };
             let new_action_doc = fs::Document {
-                name: self.action_doc_name(count),
+                name: handle.action_doc_name(count),
                 create_time: None,
                 update_time: None,
                 fields: hashmap! {"serialized".to_owned() => serialized_value},
             };
 
-            let () = match self
+            let () = match handle
                 .client
                 .clone()
                 .commit(fs::CommitRequest {
-                    database: self.database_name.to_owned(),
+                    database: self.handle.database_name.to_owned(),
                     transaction: txid.to_owned(),
                     writes: vec![
                         fs::Write {
@@ -255,8 +302,14 @@ impl Datastore for Firestore {
         Pin<Box<dyn Stream<Item = anyhow::Result<VersionedActionRequestBytes>> + Send + Sync>>;
 
     async fn watch_log(&self) -> anyhow::Result<Self::LogStream> {
+        use futures::TryStreamExt;
+        let this = self.clone();
         Ok(Box::pin(sync_wrapper::ext::SyncStream::new(
-            self.clone().watch_log_impl().await?,
+            self.handle
+                .clone()
+                .watch_log_len()
+                .await?
+                .and_then(move |index| this.clone().fetch_action(index)),
         )))
     }
 }
