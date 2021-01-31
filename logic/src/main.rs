@@ -97,7 +97,7 @@ impl Game {
 
         let new_game = StartedGame {
             random_seed: game.random_seed,
-            etag: game.etag,
+            etag: game.etag + 1,
             round_num: game.round_num,
             num_mistakes: game.num_mistakes + if mistakes_were_made { 1 } else { 0 },
             cards_played: {
