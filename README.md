@@ -1,3 +1,3 @@
-# Pictophone
+# Old Pictophone Backend Repo
 
-The backend. Frontend is available at https://github.com/hjfreyer/pictophone.
+Defunct repo. Go to: https://github.com/hjfreyer/pictophone.
